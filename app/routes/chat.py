@@ -47,12 +47,6 @@ async def _chat_stream(req: ChatRequest):
         yield _sse("error", {"detail": "Vector store (Qdrant) is unreachable"})
         return
 
-    sources = [
-        {"filename": h["filename"], "page": h["page"], "score": h["score"]}
-        for h in hits
-    ]
-    yield _sse("sources", {"sources": sources})
-
     prompt = build_prompt(req.message, hits)
     try:
         async for token in stream_generate(prompt):

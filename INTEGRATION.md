@@ -39,9 +39,6 @@ Request body: `message` (required, 1-4000 chars), `top_k` (optional, 1-20, defau
 
 Response: `text/event-stream`, in order:
 ```
-event: sources
-data: {"sources": [{"filename": "handbook.pdf", "page": 3, "score": 0.81}, ...]}
-
 event: token
 data: {"token": "The"}
 
@@ -54,10 +51,9 @@ event: done
 data: {}
 ```
 
-- `sources` fires once, first — can be `[]` if nothing relevant was found. This is the only place
-  citations appear — the answer text itself is plain prose and never contains `[filename]`-style
-  citations, so don't parse/strip citations out of the concatenated `token` text.
-- `token` repeats — concatenate `.token` in order to build the reply.
+- `token` repeats — concatenate `.token` in order to build the reply. Answer text is plain prose,
+  no markdown, no `[filename]`-style citations or page numbers — there is no separate sources/
+  citations event either, the API returns the answer only.
 - Stream ends with either `event: done` or `event: error` (`{"detail": "..."}`) — always handle
   `error`, don't assume every stream reaches `done`.
 
@@ -81,7 +77,7 @@ while (true) {
     buf = buf.slice(i + 2);
     const event = chunk.match(/^event: (.+)$/m)?.[1];
     const data = JSON.parse(chunk.match(/^data: (.+)$/m)?.[1] ?? "{}");
-    // handle event === "sources" | "token" | "done" | "error"
+    // handle event === "token" | "done" | "error"
   }
 }
 ```
