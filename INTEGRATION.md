@@ -54,7 +54,9 @@ event: done
 data: {}
 ```
 
-- `sources` fires once, first — can be `[]` if nothing relevant was found.
+- `sources` fires once, first — can be `[]` if nothing relevant was found. This is the only place
+  citations appear — the answer text itself is plain prose and never contains `[filename]`-style
+  citations, so don't parse/strip citations out of the concatenated `token` text.
 - `token` repeats — concatenate `.token` in order to build the reply.
 - Stream ends with either `event: done` or `event: error` (`{"detail": "..."}`) — always handle
   `error`, don't assume every stream reaches `done`.

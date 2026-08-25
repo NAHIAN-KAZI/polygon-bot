@@ -6,22 +6,24 @@ import httpx
 from app.config import settings
 
 SYSTEM_PROMPT_WITH_CONTEXT = (
-    "You are a helpful assistant. Answer the user's question using ONLY the "
-    "context below. If the context doesn't contain the answer, say you don't know. "
-    "Cite sources inline using each source's actual bracketed tag shown in the context "
-    "(e.g. if you see a section tagged [handbook.md], cite it as [handbook.md]) when you use them."
+    "You are a helpful assistant. Answer the user's question using ONLY the context below. "
+    "If the context doesn't contain the answer, say you don't know. "
+    "Each context section is labeled with an internal reference tag (e.g. [source: ...]) — "
+    "that label is metadata for your own reference only. Never repeat, quote, or mention it "
+    "in your answer. Do not include any bracketed tags, filenames, or page numbers in your "
+    "answer text. Respond with plain prose only, in complete sentences, no markdown formatting."
 )
 
 SYSTEM_PROMPT_NO_CONTEXT = (
     "You are a helpful assistant. No relevant documents were found for this question. "
     "Say you don't know, based on the available documents. Do not invent a citation or "
-    "reference any filename — none was retrieved."
+    "reference any filename — none was retrieved. Respond with plain prose only, no markdown."
 )
 
 
 def _format_chunk(c: dict) -> str:
-    page_suffix = f" p.{c['page']}" if c.get("page") else ""
-    return f"[{c['filename']}{page_suffix}]\n{c['text']}"
+    page_suffix = f", page {c['page']}" if c.get("page") else ""
+    return f"[source: {c['filename']}{page_suffix}]\n{c['text']}"
 
 
 def build_prompt(question: str, context_chunks: list[dict]) -> str:
