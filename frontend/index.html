@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Polygon Bot</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="aurora" aria-hidden="true"></div>
+
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-glyph">&#10022;</span>
+        <span class="brand-text">Polygon <b>Bot</b></span>
+      </div>
+      <div class="actions">
+        <button id="healthChip" class="pill" type="button" disabled>
+          <i class="dot"></i><span id="healthLabel">…</span>
+        </button>
+        <button id="keyBtn" class="pill" type="button">
+          <i class="dot"></i>Key
+        </button>
+        <button id="drawerBtn" class="pill pill-icon" type="button" title="Knowledge base">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M4 6.5A2.5 2.5 0 0 1 6.5 4H15l5 5v8.5a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17.5v-11Z" stroke="currentColor" stroke-width="1.6"/><path d="M14 4v4.5a1 1 0 0 0 1 1H19" stroke="currentColor" stroke-width="1.6"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <main class="chat-area">
+      <div id="messages" class="messages">
+        <div class="intro">
+          <div class="intro-glyph">&#10022;</div>
+          <h1>Ask Polygon Bot anything</h1>
+          <p>Answers are grounded in whatever's been added to the knowledge base.</p>
+          <button id="introKeyBtn" class="intro-key-link" type="button" hidden>Set your API key to get started &rarr;</button>
+        </div>
+      </div>
+
+      <form id="chatForm" class="composer">
+        <input id="chatInput" type="text" placeholder="Message Polygon Bot..." autocomplete="off" required />
+        <button type="submit" class="send-btn" aria-label="Send">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 12h15M13 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </form>
+    </main>
+  </div>
+
+  <div id="drawerOverlay" class="drawer-overlay"></div>
+  <aside id="drawer" class="drawer">
+    <div class="drawer-head">
+      <h2>Knowledge base</h2>
+      <button id="drawerClose" class="icon-btn" aria-label="Close">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+
+    <form id="uploadForm" class="upload-form">
+      <label class="dropzone" for="fileInput">
+        <span class="dz-icon">+</span>
+        <span class="dz-text" id="dzText">Add document</span>
+      </label>
+      <input id="fileInput" type="file" accept=".pdf,.docx,.txt,.md" required hidden />
+      <button type="submit" class="upload-btn">Upload</button>
+    </form>
+    <div id="uploadStatus" class="upload-status"></div>
+
+    <ul id="docList" class="doc-list"></ul>
+  </aside>
+
+  <script src="/app.js"></script>
+</body>
+</html>
