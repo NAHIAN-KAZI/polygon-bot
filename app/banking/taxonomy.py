@@ -10,6 +10,24 @@ logger = logging.getLogger(__name__)
 _cache: dict | None = None
 _index: dict | None = None
 
+# ADR-0011 Amendment 2026-09-01 (T-19): these 4 are always-available account
+# features the mobile app calls directly, never surfaced via the navigation
+# grid, so they can never appear in a live fetch. Closed, named exception —
+# see banking-service-catalog agent file before adding another id here.
+_SYNTHETIC_CATEGORIES = [
+    {
+        "id": "account_info",
+        "name": "Account Information",
+        "isActive": True,
+        "services": [
+            {"id": "balance", "name": "Balance", "isActive": True},
+            {"id": "accounts", "name": "My Accounts", "isActive": True},
+            {"id": "device_history", "name": "Device History", "isActive": True},
+            {"id": "login_history", "name": "Login History", "isActive": True},
+        ],
+    }
+]
+
 
 async def _fetch_json(client: httpx.AsyncClient, path: str) -> dict:
     resp = await client.get(f"{settings.PLATFORM_API_BASE_URL}{path}")
@@ -61,7 +79,7 @@ def _build_index(categories: list[dict]) -> dict:
 
 async def _fetch_and_build() -> tuple[dict, dict]:
     raw_categories = await _fetch_merged_categories()
-    active_categories = _filter_active(raw_categories)
+    active_categories = _filter_active(raw_categories) + _SYNTHETIC_CATEGORIES
     taxonomy = {"categories": active_categories}
     index = _build_index(active_categories)
     return taxonomy, index

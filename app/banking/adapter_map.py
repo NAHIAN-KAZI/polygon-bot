@@ -1,4 +1,10 @@
-REAL_ADAPTER_SUBSERVICE_IDS = {"transaction_history"}
+REAL_ADAPTER_SUBSERVICE_IDS = {
+    "transaction_history",
+    "balance",
+    "accounts",
+    "device_history",
+    "login_history",
+}
 
 
 def get_adapter_name(category_id: str, service_id: str, subservice_id: str | None = None) -> str:

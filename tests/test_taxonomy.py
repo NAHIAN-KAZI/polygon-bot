@@ -91,7 +91,10 @@ def test_refresh_merges_both_endpoints_preserving_ids(monkeypatch):
 
     result = taxonomy.get_taxonomy()
     category_ids = {c["id"] for c in result["categories"]}
-    assert category_ids == {"banking", "transfers"}
+    # account_info is a synthetic category unconditionally appended by
+    # _fetch_and_build() on every build, in addition to whatever the fetch
+    # returns (T-19), so both fetched ids and the synthetic id must appear.
+    assert category_ids == {"banking", "transfers", "account_info"}
 
     banking = next(c for c in result["categories"] if c["id"] == "banking")
     assert banking["services"][0]["id"] == "accounts"
@@ -227,3 +230,57 @@ def test_malformed_response_on_first_fetch_raises_not_unhandled_crash(monkeypatc
     with pytest.raises(ValueError):
         asyncio.run(taxonomy.initialize_taxonomy())
     assert taxonomy._cache is None
+
+
+def test_synthetic_account_info_category_has_expected_services(monkeypatch):
+    services_categories = [_category("banking", "accounts", ("checking",))]
+    _install_responses(monkeypatch, {
+        SERVICES_PATH: _ok(services_categories),
+        PAY_TRANSFER_PATH: _ok([]),
+    })
+
+    asyncio.run(taxonomy.refresh_taxonomy())
+
+    result = taxonomy.get_taxonomy()
+    account_info = next(c for c in result["categories"] if c["id"] == "account_info")
+    service_ids = {s["id"] for s in account_info["services"]}
+    assert service_ids == {"balance", "accounts", "device_history", "login_history"}
+    assert len(account_info["services"]) == 4
+
+
+def test_synthetic_account_info_paths_are_valid(monkeypatch):
+    _install_responses(monkeypatch, {
+        SERVICES_PATH: _ok([]),
+        PAY_TRANSFER_PATH: _ok([]),
+    })
+
+    asyncio.run(taxonomy.refresh_taxonomy())
+
+    assert taxonomy.is_valid_path("account_info", "balance") is True
+    assert taxonomy.is_valid_path("account_info", "accounts") is True
+    assert taxonomy.is_valid_path("account_info", "device_history") is True
+    assert taxonomy.is_valid_path("account_info", "login_history") is True
+
+
+def test_synthetic_account_info_rejects_unknown_service(monkeypatch):
+    _install_responses(monkeypatch, {
+        SERVICES_PATH: _ok([]),
+        PAY_TRANSFER_PATH: _ok([]),
+    })
+
+    asyncio.run(taxonomy.refresh_taxonomy())
+
+    assert taxonomy.is_valid_path("account_info", "nonexistent") is False
+
+
+def test_synthetic_account_info_present_even_when_live_fetch_is_empty(monkeypatch):
+    _install_responses(monkeypatch, {
+        SERVICES_PATH: _ok([]),
+        PAY_TRANSFER_PATH: _ok([]),
+    })
+
+    asyncio.run(taxonomy.refresh_taxonomy())
+
+    result = taxonomy.get_taxonomy()
+    category_ids = {c["id"] for c in result["categories"]}
+    assert category_ids == {"account_info"}

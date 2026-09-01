@@ -31,5 +31,24 @@ Polygon-Bot-specific config, not the full taxonomy.
 requires someone to notice and manually transcribe every taxonomy change on the main platform;
 rejected now that a live, authoritative source is confirmed to exist.
 
+## Amendment 2026-09-01 (T-19): a narrow, deliberate exception for non-navigable account features
+
+T-09 found that only `transaction_history` of the 5 planned real-adapter subservices (BRD/SRS
+"balance, transaction history, accounts, device history, login history") actually exists in the
+live-fetched catalog — the other 4 are direct account features the mobile app calls without ever
+navigating through the services/pay-transfer grid, so they will never appear in
+`support/v1/services` or `support/v1/pay-transfer` no matter how the platform's catalog evolves.
+
+This ADR's "never invent or hardcode a taxonomy entry" principle is about not second-guessing or
+duplicating the platform's own navigable catalog — it was never meant to make these 4 real,
+existing, always-available account features permanently unclassifiable just because they aren't
+navigation-grid items. Decision: append a small, fixed set of synthetic entries (`account_info`
+category: `balance`, `accounts`, `device_history`, `login_history`) to the taxonomy after each
+live fetch, alongside — never replacing or shadowing — the fetched data. This is a narrow,
+named exception, not a reopening of the static-YAML approach ADR-0009 rejected: the fetched
+catalog remains the sole source for every navigable service; only these 4 fixed, non-navigable
+account features are ever added synthetically, and they're documented here precisely so this
+doesn't grow into an uncontrolled parallel taxonomy later.
+
 ## Related
 FR-CATALOG-01, FR-CATALOG-03, FR-CATALOG-05, FR-CATALOG-06, FR-CATALOG-07, NFR-MAINT-01, NFR-REL-02, F-02

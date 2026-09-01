@@ -36,6 +36,13 @@ def test_get_adapter_name_returns_mock_when_service_and_subservice_are_none_or_u
     assert get_adapter_name("payments", "mobile_recharge", "beneficiary") == "mock"
 
 
+def test_get_adapter_name_returns_real_for_each_synthetic_account_info_service():
+    assert get_adapter_name("account_info", "balance") == "real:balance"
+    assert get_adapter_name("account_info", "accounts") == "real:accounts"
+    assert get_adapter_name("account_info", "device_history") == "real:device_history"
+    assert get_adapter_name("account_info", "login_history") == "real:login_history"
+
+
 def test_requires_identity_always_true():
     assert requires_identity("accounts", "transaction_history") is True
     assert requires_identity("payments", "mobile_recharge", "beneficiary") is True

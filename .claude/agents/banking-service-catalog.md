@@ -19,7 +19,13 @@ See `planning/ENGINEERING_STANDARDS.md` for defaults, plus (from `planning/BRD.m
 - Taxonomy is fetched live from the platform's own `support/v1/services` and
   `support/v1/pay-transfer` endpoints — there is no local `banking_services.yaml` to hand-edit.
   Never invent or hardcode a taxonomy entry; if a subservice is missing from the real catalog, it
-  doesn't exist for classification purposes.
+  doesn't exist for classification purposes. **One named, deliberate exception (ADR-0011
+  Amendment 2026-09-01):** a small fixed set of synthetic entries — `account_info` category with
+  `balance`/`accounts`/`device_history`/`login_history` — is appended after each live fetch,
+  because those 4 are real, always-available account features the mobile app calls directly and
+  will never appear in the navigation-grid catalog no matter how it evolves. This exception is
+  closed — don't extend it to any other id without going back through architect and amending the
+  ADR again; the fetched catalog stays the sole source for every navigable service.
 - Retain the platform's own `id` string for every category/service/subservice exactly as
   returned — never re-slugged or renamed. This is what makes routing responses work without a
   translation layer (ADR-0013) — do not "clean up" or reformat these ids.
