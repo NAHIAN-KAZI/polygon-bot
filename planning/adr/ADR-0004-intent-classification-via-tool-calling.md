@@ -24,6 +24,22 @@ unverified assumption (SRS §2.6) and should be spiked early in implementation (
 risk note); if it proves unreliable, this ADR should be revisited before F-06 is built on top of
 it.
 
+**Confirmed 2026-09-01 (T-11 spike, then reconfirmed during T-12 implementation):** the mechanism
+works reliably, but only under two conditions found through live testing against `qwen3:8b`, not
+assumed up front:
+1. The system prompt must be an explicit, numbered, rule-based prompt with concrete examples,
+   plus the actual current taxonomy (real ids/names) embedded directly in the prompt text — a
+   minimal prompt or a bare tool-schema-only approach reliably misclassifies both KB questions
+   and ambiguous requests, defaulting to guessing a banking-service route every time.
+2. The Ollama request must set `"think": true` for this call specifically (independent of
+   `OLLAMA_THINK`, which governs the unrelated RAG-answer generation path and stays `false`
+   there for latency) — with `think: false`, the model frequently returned no tool call at all
+   for clear banking-service requests, or hallucinated duplicate/garbage field values. With
+   `think: true`, 4/4 required test cases were reproducibly correct across repeated passes.
+
+Neither of these was anticipated when this ADR was written; both are implementation constraints
+on the same decision, not a reason to revisit it.
+
 ## Alternatives considered
 **Separate lightweight pre-classifier** (e.g. embedding similarity against taxonomy label text) —
 faster and cheaper for obvious cases, but adds a second mechanism to build, tune, and keep in
