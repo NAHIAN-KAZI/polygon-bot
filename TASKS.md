@@ -33,7 +33,7 @@ scope to the active sprint when this column is in use.
 |---|---|---|---|---|---|---|---|---|---|
 | 1 | Write regression test suite for existing /chat and /documents behavior vs INTEGRATION.md [E-02/F-08], T-01 | Preserve existing KB chat behavior | Planning 2026-08-31 | 🔴 | — | ✅ DONE | kb-chat-preserved | 2026-09-01 | 2026-09-01 |
 | 2 | Re-run regression suite after each subsequent epic lands [E-02/F-08], T-02 | Preserve existing KB chat behavior | Planning 2026-08-31 | 🔴 | — | ⏳ TODO | kb-chat-preserved | — | — |
-| 3 | Implement live taxonomy fetcher: merge support/v1/services + support/v1/pay-transfer, retain platform ids [E-03/F-02], T-03 (revised 2026-09-01) | Establish foundation for future change | Planning 2026-09-01 | 🔴 | — | ⏳ TODO | banking-service-catalog | — | — |
+| 3 | Implement live taxonomy fetcher: merge support/v1/services + support/v1/pay-transfer, retain platform ids [E-03/F-02], T-03 (revised 2026-09-01) | Establish foundation for future change | Planning 2026-09-01 | 🔴 | — | ✅ DONE | banking-service-catalog | 2026-09-01 | 2026-09-01 |
 | 4 | Implement periodic taxonomy refresh + cache-fallback on failure [E-03/F-02], T-04 (revised 2026-09-01) | Establish foundation for future change | Planning 2026-09-01 | 🔴 | — | ⏳ TODO | banking-service-catalog | — | — |
 | 5 | Implement pluggable JWT verification interface + fail-closed stub [E-03/F-03], T-05 | Establish foundation for future change | Planning 2026-08-31 | 🔴 | — | ⏳ TODO | customer-identity-session | — | — |
 | 6 | Implement AUTH_REQUIRED handling for missing/invalid JWT [E-03/F-03], T-06 | Establish foundation for future change | Planning 2026-08-31 | 🔴 | — | ⏳ TODO | customer-identity-session | — | — |

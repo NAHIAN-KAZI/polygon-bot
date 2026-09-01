@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from app.banking.taxonomy import initialize_taxonomy
 from app.config import settings
 from app.llm import check_ollama
 from app.vectorstore import check_qdrant, ensure_collection
@@ -21,6 +22,7 @@ app.add_middleware(
 @app.on_event("startup")
 async def on_startup() -> None:
     ensure_collection()
+    await initialize_taxonomy()
 
 
 @app.get("/health")

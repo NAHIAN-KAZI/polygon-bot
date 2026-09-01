@@ -31,5 +31,8 @@ class Settings:
         o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "*").split(",") if o.strip()
     ]
 
+    PLATFORM_API_BASE_URL: str = os.environ.get("PLATFORM_API_BASE_URL", "")
+    TAXONOMY_REFRESH_SECONDS: int = int(os.environ.get("TAXONOMY_REFRESH_SECONDS", "900"))
+
 
 settings = Settings()
