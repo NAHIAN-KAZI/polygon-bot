@@ -31,7 +31,7 @@ scope to the active sprint when this column is in use.
 
 | # | Task | Goal | Source | Priority | Sprint | Status | Agent | Started | Completed |
 |---|---|---|---|---|---|---|---|---|---|
-| 1 | Write regression test suite for existing /chat and /documents behavior vs INTEGRATION.md [E-02/F-08], T-01 | Preserve existing KB chat behavior | Planning 2026-08-31 | 🔴 | — | ⏳ TODO | kb-chat-preserved | — | — |
+| 1 | Write regression test suite for existing /chat and /documents behavior vs INTEGRATION.md [E-02/F-08], T-01 | Preserve existing KB chat behavior | Planning 2026-08-31 | 🔴 | — | ✅ DONE | kb-chat-preserved | 2026-09-01 | 2026-09-01 |
 | 2 | Re-run regression suite after each subsequent epic lands [E-02/F-08], T-02 | Preserve existing KB chat behavior | Planning 2026-08-31 | 🔴 | — | ⏳ TODO | kb-chat-preserved | — | — |
 | 3 | Implement live taxonomy fetcher: merge support/v1/services + support/v1/pay-transfer, retain platform ids [E-03/F-02], T-03 (revised 2026-09-01) | Establish foundation for future change | Planning 2026-09-01 | 🔴 | — | ⏳ TODO | banking-service-catalog | — | — |
 | 4 | Implement periodic taxonomy refresh + cache-fallback on failure [E-03/F-02], T-04 (revised 2026-09-01) | Establish foundation for future change | Planning 2026-09-01 | 🔴 | — | ⏳ TODO | banking-service-catalog | — | — |
