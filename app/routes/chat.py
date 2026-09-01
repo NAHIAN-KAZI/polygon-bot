@@ -18,6 +18,10 @@ class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=4000)
     session_id: str | None = None
     top_k: int | None = Field(default=None, ge=1, le=settings.MAX_TOP_K)
+    category: str | None = None
+    service: str | None = None
+    subservice: str | None = None
+    payload: dict | None = None
 
     @field_validator("message")
     @classmethod
