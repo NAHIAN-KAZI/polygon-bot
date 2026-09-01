@@ -26,3 +26,19 @@ def verify_jwt(token: str) -> CustomerIdentity | None:
     can replace this body without changing the signature or any call site.
     """
     return None
+
+
+class AuthRequiredError(Exception):
+    """Raised when a banking-service-eligible request has no valid customer identity."""
+
+
+def require_customer_identity(authorization_header: str | None) -> CustomerIdentity:
+    token = extract_jwt(authorization_header)
+    if token is None:
+        raise AuthRequiredError
+
+    identity = verify_jwt(token)
+    if identity is None:
+        raise AuthRequiredError
+
+    return identity
