@@ -154,11 +154,7 @@ architecture:
   # still bounded to its own owns_paths (a swarm coordinates, it never
   # merges boundaries). Architect adds an entry when it forms a swarm and
   # removes it once the task closes; this list should be empty between runs.
-  swarms:
-    - name: "adapter-taxonomy-wiring"
-      members: ["banking-service-catalog", "banking-service-integration"]
-      task: "TASKS.md row #9"
-      formed_on: "2026-09-01"
+  swarms: []
   # - name: "checkout-redesign"
   #   members: ["solver-core", "api-layer"]
   #   task: "TASKS.md row #14"
