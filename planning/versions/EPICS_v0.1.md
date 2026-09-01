@@ -5,9 +5,9 @@
 | | |
 |---|---|
 | **Document title** | Polygon Bot — Epics |
-| **Version** | 0.2 |
-| **Date** | 2026-09-01 |
-| **Based on** | FEATURES v0.2, ADRs 0001–0014 |
+| **Version** | 0.1 |
+| **Date** | 2026-08-31 |
+| **Based on** | FEATURES v0.1, ADRs 0001–0010 |
 | **Status** | Approved |
 
 ---
@@ -57,11 +57,7 @@ knowledge-base question or landing nowhere.
   it via the existing, unmodified RAG flow (FR-ROUTE-02).
 - **EARS-ROUTE-2**: WHEN a `/chat` message is a banking-service request with a resolvable
   category/service/subservice, the system SHALL emit a `result` event with `type:
-  BANKING_SERVICE` and routing information using the platform's real service id (FR-ROUTE-01,
-  FR-CONTRACT-03/05/06).
-- **EARS-ROUTE-2A**: *(Added 2026-09-01)* WHEN a banking-service request resolves to one of the 5
-  real-adapter subservices (§E-03), the system SHALL incorporate the real fetched data into both
-  the streamed reply and the `result` event's `payload` field (FR-CONTRACT-08).
+  BANKING_SERVICE` and routing information (FR-ROUTE-01, FR-CONTRACT-03/05).
 - **EARS-ROUTE-3**: WHEN a `/chat` message is genuinely ambiguous, the system SHALL stream a
   clarifying question and emit `type: CLARIFICATION_REQUIRED`, never guessing a subservice
   (FR-ROUTE-03).
@@ -84,7 +80,7 @@ knowledge-base question or landing nowhere.
 | T-12 | Implement classification call + branching (KB / banking-service / clarification paths) | L | Must | T-11, T-07 | FR-ROUTE-01..04, NFR-PERF-01, F-01 |
 | T-13 | Implement `UNKNOWN_SERVICE` handling for an out-of-taxonomy classification | XS | Must | T-04, T-12 | FR-ROUTE-05, F-01 |
 | T-14 | Extend `ChatRequest` with optional `category`/`service`/`subservice`/`payload`; `message` unchanged, `session_id` accepted-but-ignored | XS | Must | — | FR-CONTRACT-01, F-06 |
-| T-15 | Implement `result` SSE event (all non-KB outcome types) after `token` events, before `done`, incorporating real adapter data into the reply/payload where applicable | M | Must | T-12, T-06, T-10, T-13, T-19 | FR-CONTRACT-02..08, F-06 |
+| T-15 | Implement `result` SSE event (all non-KB outcome types) after `token` events, before `done` | M | Must | T-12, T-06, T-10, T-13 | FR-CONTRACT-02..06, F-06 |
 | T-16 | Implement structured audit log line per banking-service turn, excluding secrets/PII | S | Must | T-15 | FR-SEC-01..04, NFR-SEC-02, NFR-OBS-01, F-07 |
 | T-17 | Regression-test extended `/chat` contract against `INTEGRATION.md` (text-only requests unaffected) | S | Must | T-15 | FR-CONTRACT-02, F-06 |
 
@@ -139,76 +135,59 @@ throughout and after this entire extension.
 
 ## E-03 — The system can absorb new banking categories, real APIs, and real identity later without a redesign
 
-**When this ships:** the Polygon Bot owner sees the taxonomy always match the main app's real
-service catalog automatically, five banking questions (balance, transaction history, accounts,
-device history, login history) get answered with real data, and everything else has a clean seam
-for real APIs and real identity to drop into later — without any engineer redesigning the
-chatbot's core logic.
+**When this ships:** the Polygon Bot owner can add, remove, or reconfigure banking
+categories/services/subservices, and later swap in the bank's real customer-identity tokens and
+real banking APIs, without any engineer redesigning the chatbot's core logic.
 
 **Goal:** → "Establish a foundation that absorbs future taxonomy/API/identity changes without a redesign"
 
-**WSJF:** (value 8 + time-criticality 5 + risk-reduction 8) / size 9 = **2.3** *(revised
-2026-09-01 — value and risk-reduction both rose since this epic now ships real, working
-integrations rather than only scaffolding; size rose to account for the live-fetch mechanism and
-5 real adapters.)*
+**WSJF:** (value 7 + time-criticality 4 + risk-reduction 7) / size 7 = **2.6**
 
 ### Scope
 
 **In scope**
-- Live taxonomy fetch from `support/v1/services` + `support/v1/pay-transfer`, with periodic
-  refresh and cache-on-failure (ADR-0011).
+- The taxonomy config file and loader.
 - Pluggable, fail-closed JWT verification.
 - In-memory session store behind a swappable interface.
-- Common banking-service adapter interface, with **real** adapters for the 5 subservices with a
-  known live endpoint (balance, transaction history, accounts, device history, login history —
-  ADR-0012), forwarding the customer's JWT (ADR-0014), and **mock** adapters for every other
-  subservice.
+- Common banking-service adapter interface with mock implementations.
 
 **Out of scope**
-- Real JWT signing/validation details, and real banking APIs for anything beyond the 5 read-only
-  queries above — still pending external inputs (BRD Open Items 1, 3).
+- The official taxonomy, real JWT signing details, and real banking APIs themselves — all
+  explicitly pending external inputs (BRD Open Items 1–3), not built here.
 
 ### Acceptance criteria (EARS)
 
-- **EARS-FOUND-1**: WHEN the service starts, the system SHALL fetch and merge the taxonomy from
-  `support/v1/services` and `support/v1/pay-transfer`, failing startup only if neither is
-  reachable and no prior cache exists (FR-CATALOG-01, FR-CATALOG-05).
-- **EARS-FOUND-2**: WHEN a periodic taxonomy refresh fails, the system SHALL keep serving the
-  last successfully cached taxonomy rather than treating classification as unavailable
-  (FR-CATALOG-06, NFR-REL-02).
+- **EARS-FOUND-1**: WHEN the service starts, the system SHALL load and validate
+  `banking_services.yaml`, failing startup loudly if it's missing or invalid (FR-CATALOG-05).
+- **EARS-FOUND-2**: WHERE a category/service/subservice is added, removed, or renamed in
+  `banking_services.yaml`, the system SHALL reflect that after a restart with no code change
+  elsewhere (FR-CATALOG-03).
 - **EARS-FOUND-3**: WHEN a JWT is presented, the system SHALL verify it via a pluggable function
   and SHALL treat any unverifiable token as unauthenticated (fail closed) (FR-IDENT-01,
   NFR-SEC-01).
 - **EARS-FOUND-4**: WHEN 30 minutes pass with no activity for a customer's session, the system
   SHALL treat the next message as starting a fresh session with no prior context (FR-IDENT-05).
-- **EARS-FOUND-5**: WHEN a banking-service adapter (real or mock) is invoked and fails or times
-  out, the system SHALL surface `SERVICE_UNAVAILABLE` without exposing internal error detail
-  (FR-INTEG-04) — EXCEPT when a real adapter's downstream call fails specifically with a 401/403,
-  in which case the system SHALL surface `AUTH_REQUIRED` instead (FR-INTEG-06).
-- **EARS-FOUND-6**: WHEN a real adapter (one of the 5) succeeds, the system SHALL return the
-  actual fetched data as the fulfillment result, never mock data (FR-INTEG-05).
+- **EARS-FOUND-5**: WHEN a banking-service adapter is invoked and fails or times out, the system
+  SHALL surface `SERVICE_UNAVAILABLE` without exposing internal error detail (FR-INTEG-04).
 
 ### Tasks
 
 | Task | Description | Size | MoSCoW | Depends on | Traces to |
 |---|---|---|---|---|---|
-| T-03 | Implement live taxonomy fetcher: call and merge `support/v1/services` + `support/v1/pay-transfer`, retaining platform `id` values as-is | M | Must | — | FR-CATALOG-01, FR-CATALOG-07, F-02 |
-| T-04 | Implement periodic refresh + cache-fallback-on-failure; fail startup only if unreachable with no prior cache | S | Must | T-03 | FR-CATALOG-03/05/06, NFR-REL-02, F-02 |
+| T-03 | Define `banking_services.yaml` schema; write the provisional placeholder taxonomy | S | Must | — | FR-CATALOG-02, F-02 |
+| T-04 | Implement taxonomy loader/validator (startup load, fail loudly) | S | Must | T-03 | FR-CATALOG-01/03/05, F-02 |
 | T-05 | Implement pluggable JWT verification interface + fail-closed stub | M | Must | — | FR-IDENT-01/02/04, NFR-SEC-01, F-03 |
 | T-06 | Implement `AUTH_REQUIRED` handling for missing/invalid JWT on a banking-eligible request | S | Must | T-05 | FR-IDENT-04, F-03 |
 | T-07 | Implement in-memory session store (get/set/expire, 30-min TTL, capped turns) keyed by JWT subject | M | Must | T-05 | FR-IDENT-05..07, F-04 |
-| T-08 | Define common banking-service adapter interface (including JWT pass-through parameter) | S | Must | — | FR-INTEG-01/03, F-05 |
-| T-09 | Implement mock adapters for all non-real subservices; wire taxonomy-to-adapter mapping | M | Must | T-03, T-08 | FR-INTEG-02, FR-CATALOG-04, F-02, F-05 |
-| T-10 | Implement `SERVICE_UNAVAILABLE`/`AUTH_REQUIRED` branching for adapter failure/timeout (real and mock) | S | Must | T-09, T-19 | FR-INTEG-04/06, NFR-REL-01, F-05 |
-| T-19 | *(Added 2026-09-01)* Implement 5 real adapters (balance, transaction history, accounts, device history, login history), forwarding the customer's JWT to each platform endpoint | L | Must | T-05, T-08 | FR-INTEG-05, F-05 |
+| T-08 | Define common banking-service adapter interface | S | Must | — | FR-INTEG-01/03, F-05 |
+| T-09 | Implement mock adapters per subservice; wire taxonomy-to-adapter mapping | M | Must | T-03, T-08 | FR-INTEG-02, FR-CATALOG-04, F-02, F-05 |
+| T-10 | Implement `SERVICE_UNAVAILABLE` handling for adapter failure/timeout | S | Must | T-09 | FR-INTEG-04, NFR-REL-01, F-05 |
 
 ### Risks
 
 | Risk | Mitigation |
 |---|---|
 | Real JWT signing details may arrive with a shape that doesn't fit the assumed interface | T-05's interface is deliberately minimal (`verify(token) -> identity | None`) to absorb surprises |
-| JWT pass-through to the 5 real endpoints may not work as assumed (ADR-0014, unconfirmed) | T-19 should be validated against a real token early — if it fails, only T-19/T-10's real-adapter branch needs rework, not the rest of the epic |
-| `support/v1/services`/`support/v1/pay-transfer` may require their own auth not yet documented | T-03 should confirm reachability/auth against a real environment before building the rest of E-01 on top of it |
 
 ## E-04 — The Polygon Bot owner can verify routing behavior directly in the demo frontend
 
@@ -251,25 +230,19 @@ frontend, without inspecting raw API responses.
 Every Feature/FR from `planning/FEATURES.md` lands in exactly one epic:
 
 - F-01 (FR-ROUTE-01..05) → E-01
-- F-02 (FR-CATALOG-01, 03, 04, 05, 06, 07) → E-03
+- F-02 (FR-CATALOG-01..05) → E-03
 - F-03 (FR-IDENT-01..04) → E-03
 - F-04 (FR-IDENT-05..07) → E-03
-- F-05 (FR-INTEG-01..06) → E-03
-- F-06 (FR-CONTRACT-01..08) → E-01
+- F-05 (FR-INTEG-01..04) → E-03
+- F-06 (FR-CONTRACT-01..06) → E-01
 - F-07 (FR-SEC-01..04) → E-01
 - F-08 (FR-KB-01 → E-02; FR-KB-02 → E-04 — the one Feature split across two epics at the FR level, both of its FRs each landing in exactly one epic, per its own dual concern of "preserve existing behavior" + "add test-visibility tooling")
-
-*(Updated 2026-09-01: FR-CATALOG-02 was retired — see SRS v0.2 — its coverage note moved into
-FR-CATALOG-01's live-fetch elaboration; FR-INTEG-05/06 and FR-CONTRACT-07/08 added, both land in
-E-03/E-01 respectively alongside their modules' existing coverage.)*
 
 No orphans, no duplicates.
 
 ## Open Items (TBD)
 
 1. Exact audit log destination/format (carried from SRS/Features) — doesn't block T-16, assumed stdout structured JSON for now. (§E-01)
-2. *(Added 2026-09-01)* Auth requirement for `support/v1/services`/`support/v1/pay-transfer` for a non-mobile-app caller — needed before T-03 can be built against production. (§E-03)
-3. *(Added 2026-09-01)* JWT pass-through compatibility with the 5 real downstream endpoints (ADR-0014) — T-19 should validate this early. (§E-03)
 
 ---
-*End of document — v0.2, Approved 2026-09-01 (amended from v0.1 following `user-app-api-map.md`). Open items: 3, non-blocking. New task: T-19 (5 real adapters). Revised tasks: T-03, T-04, T-08, T-09, T-10, T-15.*
+*End of document — v0.1, Approved 2026-08-31. Open items: 1, non-blocking.*

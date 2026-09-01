@@ -27,6 +27,15 @@ subservice, payload, routing, version}`, `version` starting at `"1.0"` (FR-CONTR
 segment orchestrates calls into `conversation-routing`, `customer-identity-session`, and
 `banking-service-integration` — it does not reimplement their logic.
 
+Two things added 2026-09-01 (ADR-0013, ADR-0012):
+- `routing.service`/`routing.subservice` must be the exact platform `id` string
+  `banking-service-catalog` resolved — never reformat, re-slug, or translate it. This is what
+  lets the main app route with zero translation logic on its side.
+- When the resolved subservice was fulfilled by a **real** adapter (`banking-service-integration`),
+  the streamed `token` reply must actually state the real fetched data (e.g. the real balance
+  number), and the `result` event's `payload` field must carry that same data — a real-adapter
+  outcome answers the question, it doesn't only hand back a routing pointer.
+
 After this segment's changes, always update `INTEGRATION.md` to match (it's the contract the
 external integration team relies on) and note the update in the PR/task summary.
 

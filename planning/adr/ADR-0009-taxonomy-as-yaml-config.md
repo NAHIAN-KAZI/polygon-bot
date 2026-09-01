@@ -1,7 +1,9 @@
 # ADR-0009: Banking service taxonomy as a YAML config file
 
 ## Status
-Accepted
+Superseded by ADR-0011 (2026-09-01) — the "official taxonomy" this ADR anticipated turned out to
+already exist as a live API (`support/v1/services`, `support/v1/pay-transfer`) rather than a
+document to transcribe into a hand-maintained file.
 
 ## Context
 FR-CATALOG-01/03 and NFR-MAINT-01 require the category/service/subservice taxonomy to be

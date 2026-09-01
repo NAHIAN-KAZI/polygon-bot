@@ -10,5 +10,9 @@
 | [0006](ADR-0006-in-memory-session-store.md) | In-memory session store behind a swappable interface | Accepted |
 | [0007](ADR-0007-result-sse-event.md) | Extend SSE with a `result` event | Accepted |
 | [0008](ADR-0008-pluggable-fail-closed-jwt.md) | Pluggable, fail-closed JWT verification | Accepted |
-| [0009](ADR-0009-taxonomy-as-yaml-config.md) | Banking service taxonomy as a YAML config file | Accepted |
+| [0009](ADR-0009-taxonomy-as-yaml-config.md) | Banking service taxonomy as a YAML config file | Superseded by 0011 |
 | [0010](ADR-0010-mock-adapter-interface.md) | Common adapter interface with mock implementations | Accepted |
+| [0011](ADR-0011-live-taxonomy-fetch.md) | Fetch the banking taxonomy live from the platform's own catalog endpoints | Accepted |
+| [0012](ADR-0012-real-adapters-for-read-only-queries.md) | Real adapters for the 5 subservices with a known live endpoint | Accepted |
+| [0013](ADR-0013-routing-uses-real-service-id.md) | Routing responses use the mobile app's real service.id | Accepted |
+| [0014](ADR-0014-jwt-passthrough-to-downstream-services.md) | Forward the customer's JWT as-is to downstream banking services | Accepted |

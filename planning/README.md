@@ -10,7 +10,7 @@ commands it drives (`:brd`, `:srs`, `:design`, `:features`, `:adr`,
 nothing is ever silently overwritten (see `planning-protocol.md`'s
 Versioning section).
 
-_Last updated: 2026-08-31_
+_Last updated: 2026-09-01_
 
 ## Calibration
 
@@ -32,12 +32,12 @@ respecting dependencies — see `EPICS.md`'s Delivery plan section).
 
 | Stage | Artifact | Version | Status | Approved |
 |---|---|---|---|---|
-| BRD | [BRD.md](BRD.md) | 0.1 | approved | 2026-08-31 |
-| SRS | [SRS.md](SRS.md) | 0.1 | approved | 2026-08-31 |
+| BRD | [BRD.md](BRD.md) | 0.2 | approved | 2026-09-01 |
+| SRS | [SRS.md](SRS.md) | 0.2 | approved | 2026-09-01 |
 | Design | [DESIGN.md](DESIGN.md) | — | skipped | — |
-| Features | [FEATURES.md](FEATURES.md) | 0.1 | approved | 2026-08-31 |
-| ADRs | [adr/](adr/README.md) | 10 | approved | 2026-08-31 |
-| Epics | [EPICS.md](EPICS.md) | 0.1 | approved | 2026-08-31 |
+| Features | [FEATURES.md](FEATURES.md) | 0.2 | approved | 2026-09-01 |
+| ADRs | [adr/](adr/README.md) | 14 (1 superseded) | approved | 2026-09-01 |
+| Epics | [EPICS.md](EPICS.md) | 0.2 | approved | 2026-09-01 |
 
 Status values: `pending` (not started) · `draft` (written, not yet
 reviewed) · `in-review` · `approved` · `skipped` (e.g. Design, for a
@@ -51,6 +51,9 @@ is the cross-artifact rollup)_
 
 ## Assumptions & Constraints
 
-_(none yet — confirmed background conditions land here once a stage
-command gets a real answer, distinct from Open Items above which are still
-unresolved)_
+- 2026-09-01: BRD/SRS/Features/Epics amended to v0.2 following `user-app-api-map.md`, provided by
+  the main Polygon Bank application's frontend/backend team. Confirmed: taxonomy is fetched live
+  from `support/v1/services`/`support/v1/pay-transfer` (not a static file); routing responses use
+  the platform's own service `id` values; 5 subservices (balance, transaction history, accounts,
+  device history, login history) get real adapters forwarding the customer's JWT, everything else
+  stays mocked. See ADRs 0011–0014.

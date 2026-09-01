@@ -5,8 +5,8 @@
 | | |
 |---|---|
 | **Document title** | Polygon Bot — Banking Intent & Service Routing — Business Requirements |
-| **Version** | 0.2 |
-| **Date** | 2026-09-01 |
+| **Version** | 0.1 |
+| **Date** | 2026-08-31 |
 | **Author** | Nahian Kazi |
 | **Status** | Approved |
 
@@ -86,11 +86,10 @@ identifies intent and hands off structured routing information.
 - Building the destination banking pages/screens the customer is routed to.
 - Owning or operating customer login, identity issuance, or the main application's authentication
   infrastructure — Polygon Bot only consumes an identity token issued elsewhere.
-- Providing production banking API integrations, URLs, or credentials for anything beyond the
-  read-only queries the main platform has already exposed and documented (see Assumptions) —
-  everything else is supplied by the main Polygon Bank backend team when available.
-- The bank's official category/service/subservice taxonomy — sourced live from the main
-  platform's own catalog rather than invented or hand-maintained here (see Assumptions).
+- Providing real production banking API integrations, URLs, or credentials — those are supplied
+  by the main Polygon Bank backend team when available.
+- The bank's official category/service/subservice taxonomy — a provisional one is used until the
+  official version is supplied.
 
 ## 5. Stakeholders & User Roles
 
@@ -157,7 +156,6 @@ Requirements are grouped by module. Priority uses **M** (Must-have), **S** (Shou
 | FR-CONTRACT-03 | A banking-service response must include enough structured information (category, service, subservice, and routing/next-step information) for the main application to navigate the customer, without Polygon Bot assuming or hard-coding knowledge of the main application's actual page structure. | M |
 | FR-CONTRACT-04 | The structured response format must carry a version marker so the receiving team can detect and deliberately handle future changes to its shape. | M |
 | FR-CONTRACT-05 | Responses must be clearly typed (e.g. knowledge-base answer, banking-service routing, clarification needed, authentication required, unrecognized service, service unavailable) so the receiving application can branch its handling reliably. | M |
-| FR-CONTRACT-06 | *(Added 2026-09-01)* The routing information returned for a banking-service response must use the identifier the main mobile application's own navigation already recognizes for that service, so the main application can route the customer without needing a separate translation step. | M |
 
 ### 6.6 Security & Compliance
 *Keeping authorization, sensitive data handling, and auditability where they belong.*
@@ -193,22 +191,12 @@ Requirements are grouped by module. Priority uses **M** (Must-have), **S** (Shou
   project.
 - The initial banking category/service/subservice catalog is a provisional placeholder, based on
   a typical retail-banking structure; the bank's official structure will be supplied later and is
-  expected to replace it without requiring a redesign. **Updated 2026-09-01:** the official
-  structure turns out to already exist as a live catalog the main mobile application consumes
-  today (`GET support/v1/services`, `GET support/v1/pay-transfer`) — this system fetches its
-  taxonomy from those same endpoints rather than maintaining a separately hand-edited copy, so
-  the two never drift apart.
+  expected to replace it without requiring a redesign.
 - The specific technical details of the main application's authentication token (issuer, signing
   method, claim contents) are not yet available; validation of that token is treated as a
   pending, pluggable piece of the design (see Open Items).
-- Real external banking-service APIs are not available for most banking-service requests during
-  this phase; realistic mock data is used in their place. **Updated 2026-09-01:** the main
-  application's frontend/backend team has since provided the real platform's API map
-  (`user-app-api-map.md`), which shows five read-only banking queries already have live,
-  callable endpoints (balance, transaction history, account list/detail, device history, login
-  history). Where a real endpoint exists, this system calls it directly rather than mocking it;
-  mock data remains the fallback wherever no real endpoint yet exists (money transfer, bill
-  payment, card actions, and everything else in the taxonomy).
+- Real external banking-service APIs are not available during this phase; realistic mock data is
+  used in their place.
 - The existing chat API contract, as relied upon by the current external integration team, must
   remain fully backward compatible — this extension is additive only.
 - For this phase, conversation/session context may live only in the running service's memory
@@ -238,11 +226,6 @@ Requirements are grouped by module. Priority uses **M** (Must-have), **S** (Shou
    data. (§6.4)
 4. Whether/when conversation session context needs to move from in-memory to a durable or shared
    store — explicitly deferred past this phase, but noted as expected future work. (§6.3)
-5. *(Added 2026-09-01, resolved)* Official taxonomy and 5 real banking-service endpoints
-   (balance, transaction history, accounts, device history, login history) turned out to already
-   exist — see Assumptions. JWT signing/validation specifics (Open Item 1) remain outstanding;
-   the main application team has confirmed they will supply the token, but exact
-   issuer/algorithm/key details are still pending.
 
 ---
-*End of document — v0.2, Approved 2026-09-01 (amended from v0.1 following `user-app-api-map.md`, provided by the main application's frontend/backend team). Open items: 3 remaining (JWT specifics, real banking API details for actions beyond the 5 read-only queries, future session storage).*
+*End of document — v0.1, Approved 2026-08-31. Open items: 4 (JWT specifics, official taxonomy, real banking API details, future session storage — all explicitly deferred by design, not blockers to drafting the SRS).*

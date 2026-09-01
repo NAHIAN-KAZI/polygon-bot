@@ -5,9 +5,9 @@
 | | |
 |---|---|
 | **Document title** | Polygon Bot — Features |
-| **Version** | 0.2 |
-| **Date** | 2026-09-01 |
-| **Based on** | SRS v0.2 |
+| **Version** | 0.1 |
+| **Date** | 2026-08-31 |
+| **Based on** | SRS v0.1 |
 | **Status** | Approved |
 
 ---
@@ -29,24 +29,20 @@
 - **Open questions:** none beyond the SRS's flagged assumption above.
 - **Proposed owning area:** conversation-routing
 
-## F-02: Live Banking Service Taxonomy
+## F-02: Banking Service Taxonomy Config
 
-- **Description:** *(Revised 2026-09-01, was "Banking Service Taxonomy Config")* Fetches the
-  category → service → subservice tree from the main platform's own `support/v1/services` and
-  `support/v1/pay-transfer` endpoints at startup, refreshes it periodically, and caches the last
-  good result so a refresh failure doesn't take classification down. Maintains, separately, which
-  adapter and identity requirement each platform `id` maps to.
-- **User value:** The taxonomy is always exactly what the mobile app itself sees — no separate
-  file to hand-maintain, no drift between what Polygon Bot can route to and what the app can
-  actually navigate to.
-- **Requirements:** FR-CATALOG-01, FR-CATALOG-03, FR-CATALOG-04, FR-CATALOG-05, FR-CATALOG-06, FR-CATALOG-07, NFR-MAINT-01, NFR-REL-02
+- **Description:** Loads and validates the category → service → subservice tree from
+  `banking_services.yaml` at startup, including which adapter and identity requirement each
+  subservice maps to. Fails startup loudly if the file is missing or invalid.
+- **User value:** Lets the category/service/subservice structure be edited (added, removed,
+  renamed) without touching any routing or classification code — the explicit requirement given
+  since the official taxonomy will replace this provisional one later.
+- **Requirements:** FR-CATALOG-01, FR-CATALOG-02, FR-CATALOG-03, FR-CATALOG-04, FR-CATALOG-05, NFR-MAINT-01
 - **Dependencies:** none — foundational, other features depend on this.
-- **Complexity:** M *(was S — live fetch + cache + periodic refresh is more than a static file load)*
+- **Complexity:** S
 - **Priority:** Must
-- **Risk:** Whether `support/v1/services`/`support/v1/pay-transfer` need their own auth for a
-  non-mobile-app caller isn't documented — needs confirming before this can be built against
-  production (SRS Appendix B item 6).
-- **Open questions:** auth requirement for the two catalog endpoints (see Risk).
+- **Risk:** Low — a config-loading concern with a well-defined shape.
+- **Open questions:** none.
 - **Proposed owning area:** banking-service-catalog
 
 ## F-03: Customer Identity via JWT
@@ -83,27 +79,20 @@
 - **Open questions:** none.
 - **Proposed owning area:** customer-identity-session
 
-## F-05: Banking Service Adapter Layer (Real + Mock)
+## F-05: Banking Service Adapter Layer (Mock)
 
-- **Description:** *(Revised 2026-09-01, was "Banking Service Adapter Layer (Mock)")* A common
-  `fulfill(customer_identity, jwt, subservice, payload) -> result` interface. Five subservices
-  with a known live endpoint (balance, transaction history, accounts, device history, login
-  history) get real adapters that forward the customer's JWT to the actual platform endpoint;
-  every other subservice uses a mock adapter returning clearly-fake realistic data. Surfaces
-  `SERVICE_UNAVAILABLE` (or `AUTH_REQUIRED`, if the downstream call itself rejects the JWT) on
-  failure without leaking internal error detail.
-- **User value:** Five real, working banking answers ("what's my balance" gets the actual
-  number) ship now instead of only mock data — a genuine capability upgrade — while the seam for
-  dropping in more real adapters later stays exactly as clean as before.
-- **Requirements:** FR-INTEG-01, FR-INTEG-02, FR-INTEG-03, FR-INTEG-04, FR-INTEG-05, FR-INTEG-06, NFR-REL-01
-- **Dependencies:** F-02 (taxonomy + adapter mapping), F-03 (identity + JWT passed to the adapter)
-- **Complexity:** L *(was M — now includes 5 real HTTP integrations, not just mocks)*
+- **Description:** A common `fulfill(customer_identity, subservice, payload) -> result` interface
+  with mock adapter implementations per subservice, returning clearly-fake realistic data;
+  surfaces `SERVICE_UNAVAILABLE` on adapter failure without leaking internal error detail.
+- **User value:** Lets the main Polygon Bank team test the full round-trip flow today, and gives
+  a clean seam to drop in real banking APIs later without touching routing/classification.
+- **Requirements:** FR-INTEG-01, FR-INTEG-02, FR-INTEG-03, FR-INTEG-04, NFR-REL-01
+- **Dependencies:** F-02 (taxonomy declares the adapter mapping), F-03 (identity passed to the adapter)
+- **Complexity:** M
 - **Priority:** Must
-- **Risk:** Depends on the JWT-forwarding assumption (SRS §2.6, Open Item 1) — if the customer's
-  JWT isn't accepted as-is by these downstream services, the 5 real adapters need rework, not
-  just the identity layer.
-- **Open questions:** JWT pass-through compatibility with the downstream banking services —
-  tracked as SRS Open Item 1, not yet confirmed.
+- **Risk:** Low technically (mocks); main risk is designing the interface generically enough that
+  real adapters (with genuinely different per-service parameters) fit without a redesign.
+- **Open questions:** none.
 - **Proposed owning area:** banking-service-integration
 
 ## F-06: Extended Chat API Contract
@@ -115,7 +104,7 @@
 - **User value:** This is the actual integration surface the main Polygon Bank application
   builds against — the point where classification, identity, and adapter results become one
   coherent API response.
-- **Requirements:** FR-CONTRACT-01, FR-CONTRACT-02, FR-CONTRACT-03, FR-CONTRACT-04, FR-CONTRACT-05, FR-CONTRACT-06, FR-CONTRACT-07, FR-CONTRACT-08
+- **Requirements:** FR-CONTRACT-01, FR-CONTRACT-02, FR-CONTRACT-03, FR-CONTRACT-04, FR-CONTRACT-05, FR-CONTRACT-06
 - **Dependencies:** F-01, F-02, F-03, F-05
 - **Complexity:** M
 - **Priority:** Must
@@ -161,8 +150,8 @@
 
 ```mermaid
 graph TD
-  F-02[F-02: Live Taxonomy] --> F-01[F-01: Intent Classification]
-  F-02 --> F-05[F-05: Real+Mock Adapter Layer]
+  F-02[F-02: Taxonomy Config] --> F-01[F-01: Intent Classification]
+  F-02 --> F-05[F-05: Mock Adapter Layer]
   F-03[F-03: JWT Identity] --> F-04[F-04: Session Store]
   F-03 --> F-01
   F-03 --> F-05
@@ -191,26 +180,19 @@ None — everything above is Phase 1.
 
 ## Orphan check
 
-- FRs with no feature: none (all 26 BRD-inherited + SRS-added requirements, per SRS v0.2 Appendix A, map to a feature above).
+- FRs with no feature: none (all 25 BRD-inherited + 7 SRS-added requirements map to a feature above).
 - Features with no FR/NFR: none.
 
 ## Assumptions & Constraints
 
-- Carried forward from the BRD/SRS: pluggable JWT verification pending real signing details,
-  in-memory-only session store for this phase.
-- *(Updated 2026-09-01)* Taxonomy is no longer a static placeholder — it's fetched live from the
-  main platform (F-02). Adapters are no longer all-mock — 5 subservices use real endpoints (F-05).
-  Both changes came from `user-app-api-map.md`, provided by the main app's frontend/backend team.
+- Carried forward from the BRD/SRS: provisional taxonomy, mock banking adapters, pluggable JWT
+  verification pending real details, in-memory-only session store for this phase.
 - Build order in Phase 1 follows the dependency graph; F-01's technical risk (tool-calling
-  reliability) should be spiked early since several other features assume it works. F-02 and
-  F-05's real-integration pieces should also be validated early, since F-01/F-06 build on top of
-  their output shape.
+  reliability) should be spiked early since several other features assume it works.
 
 ## Open Items (TBD)
 
 1. Exact audit log destination/format — carried from SRS Appendix B, doesn't block building F-07. (§F-07)
-2. *(Added 2026-09-01)* Auth requirement for `support/v1/services`/`support/v1/pay-transfer` — undocumented for a non-mobile-app caller; needed before F-02 can be built against production. (§F-02)
-3. *(Added 2026-09-01)* JWT pass-through compatibility with the 5 real downstream endpoints — not yet confirmed. (§F-05)
 
 ---
-*End of document — v0.2, Approved 2026-09-01 (amended from v0.1 following `user-app-api-map.md`). Open items: 3, non-blocking.*
+*End of document — v0.1, Approved 2026-08-31. Open items: 1, non-blocking.*

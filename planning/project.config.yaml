@@ -50,12 +50,12 @@ planning:
   # version: mirrors the artifact's own header-table Version field — kept
   # here too so /agentic-harness:plan status doesn't have to open every file.
   stages:
-    brd:      { status: approved, artifact: planning/BRD.md,      version: "0.1", approved_on: "2026-08-31" }
-    srs:      { status: approved, artifact: planning/SRS.md,      version: "0.1", approved_on: "2026-08-31" }
+    brd:      { status: approved, artifact: planning/BRD.md,      version: "0.2", approved_on: "2026-09-01" }
+    srs:      { status: approved, artifact: planning/SRS.md,      version: "0.2", approved_on: "2026-09-01" }
     design:   { status: skipped, artifact: planning/DESIGN.md,   version: "", approved_on: "" }
-    features: { status: approved, artifact: planning/FEATURES.md, version: "0.1", approved_on: "2026-08-31" }
-    adr:      { status: approved, artifact: planning/adr/,        version: "10", approved_on: "2026-08-31" }
-    epics:    { status: approved, artifact: planning/EPICS.md,    version: "0.1", approved_on: "2026-08-31" }
+    features: { status: approved, artifact: planning/FEATURES.md, version: "0.2", approved_on: "2026-09-01" }
+    adr:      { status: approved, artifact: planning/adr/,        version: "14", approved_on: "2026-09-01" }
+    epics:    { status: approved, artifact: planning/EPICS.md,    version: "0.2", approved_on: "2026-09-01" }
 
 # Path to the generated business goals doc (goals, priority order, success
 # criteria — human-readable, derived from the BRD). This is the rubric both
@@ -96,7 +96,7 @@ architecture:
       test_command: "docker compose exec -T backend python -m pytest -q -k routing"
     - name: "banking-service-catalog"
       description: "Reconfigurable category/service/subservice taxonomy for banking requests."
-      owns_paths: ["app/banking/taxonomy.py", "app/banking/banking_services.yaml"]
+      owns_paths: ["app/banking/taxonomy.py", "app/banking/adapter_map.py"]
       agent: banking-service-catalog
       trigger: "taxonomy config, category/service/subservice add-remove-rename"
       test_command: "docker compose exec -T backend python -m pytest -q -k taxonomy"

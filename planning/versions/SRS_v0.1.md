@@ -5,10 +5,10 @@
 | | |
 |---|---|
 | **Document title** | Polygon Bot — Software Requirements Specification |
-| **Version** | 0.2 |
-| **Date** | 2026-09-01 |
+| **Version** | 0.1 |
+| **Date** | 2026-08-31 |
 | **Author** | Nahian Kazi |
-| **Based on** | Polygon Bot BRD v0.2 |
+| **Based on** | Polygon Bot BRD v0.1 |
 | **Status** | Approved |
 
 ## 1. Introduction
@@ -54,11 +54,8 @@ destination pages.
 
 ### 1.6 References
 
-- `planning/BRD.md` v0.2 (approved 2026-09-01)
+- `planning/BRD.md` v0.1 (approved 2026-08-31)
 - `INTEGRATION.md` (existing `/chat`/`/documents` contract documentation, current consuming team)
-- `user-app-api-map.md` (the main mobile application's real endpoint/navigation reference,
-  provided 2026-09-01 by the frontend/backend team — source for §3.2's live taxonomy fetch,
-  §3.4's real-adapter subset, and §3.5's routing identifier format)
 
 ## 2. Overall Description
 
@@ -117,18 +114,6 @@ store to later.
 - The existing `X-API-Key` check remains the outer gate for every `/chat`/`/documents` call
   exactly as today; JWT is an additional, independent identity layer checked only for
   banking-service requests, not a replacement for the API key.
-- *(Added 2026-09-01)* The main platform's `support/v1/services` and `support/v1/pay-transfer`
-  endpoints (per `user-app-api-map.md`) are reachable from Polygon Bot's deployment environment,
-  and returning the same catalog shape the mobile app already consumes (categories → services →
-  optional subServices, each with an `id`, `isActive`, and — for pay-transfer — an `action`
-  object). If these endpoints require their own auth Polygon Bot doesn't yet hold, that's a
-  blocker for §3.2 and needs resolving before implementation, not silently worked around.
-- *(Added 2026-09-01)* The customer's JWT, once the main application team supplies it, is
-  forwardable as-is (`Authorization: Bearer <JWT>`) to the five real banking-service endpoints
-  named in §3.4 — i.e. it is accepted by those same downstream services via Kong, not a
-  Polygon-Bot-specific token requiring translation. This is not yet confirmed (BRD Open Item 1
-  still covers the exact JWT specifics) — §3.4's real adapters are built against this assumption
-  and must be revisited if it proves false.
 
 ## 3. System Features (Functional Requirements)
 
@@ -165,34 +150,15 @@ schema constraint), treat it as `UNKNOWN_SERVICE` (§3.5), never pass it through
 
 ### 3.2 Banking Service Catalog
 
-Priority: M · Actors: system-internal (fetched at startup, refreshed periodically) ·
-Precondition: `support/v1/services` and `support/v1/pay-transfer` reachable.
-
-**Primary flow:**
-1. On startup, fetch `GET support/v1/services` and `GET support/v1/pay-transfer` and merge them
-   into one internal taxonomy: services-grid items become categories/services with no
-   sub-service level; pay-transfer items become categories/services, and a service's
-   `subServices` array (if present) becomes the subservice level.
-2. Each merged entry retains the real platform's own `id` string (e.g. `transaction_history`,
-   `beneficiary`, `frezz_unfrezz`) as this system's `service`/`subservice` identifier — never a
-   locally-invented slug — so it can be handed straight back as routing information (§3.5).
-3. An item with `isActive: false` is excluded from what classification (§3.1) can select — the
-   real platform already means "not selectable" by that flag.
-4. Refresh on a periodic interval (e.g. every 15 minutes) and on-demand if a classification
-   attempt resolves to an id no longer present, so a catalog change on the main platform reaches
-   Polygon Bot without a redeploy.
-5. Cache the last successfully fetched catalog in memory; if a refresh fetch fails, keep serving
-   the last good cache rather than failing every classification (see NFR-REL-02).
+Priority: M · Actors: system-internal (loaded at startup) · Precondition: none.
 
 | ID | Requirement | Priority |
 |---|---|---|
-| FR-CATALOG-01 | The system shall fetch its category/service/subservice taxonomy from `support/v1/services` and `support/v1/pay-transfer` at startup, rather than from a locally maintained file. | M |
-| FR-CATALOG-02 | *(Superseded by FR-CATALOG-01 — the provisional placeholder taxonomy from BRD v0.1 §6.2 is retired in favor of the real, live catalog now that it's available.)* | — |
-| FR-CATALOG-03 | Adding, removing, or renaming a category/service/subservice on the main platform shall be reflected in Polygon Bot's classification/routing after the next periodic refresh — no code change or redeploy of Polygon Bot required. | M |
-| FR-CATALOG-04 | Each subservice entry shall declare which mock (and, where a real endpoint exists per §3.4, real) integration adapter handles it, and whether a customer identity is required to fulfill it — this mapping is maintained by Polygon Bot itself (the real catalog doesn't carry it), keyed by the platform's own `id` values. | M |
-| FR-CATALOG-05 | If both catalog endpoints are unreachable at startup with no prior cache available, the system shall fail startup with a clear error — it shall not silently start with an empty taxonomy. | M |
-| FR-CATALOG-06 | *(Added 2026-09-01)* If a periodic refresh fails but a previously successful fetch is cached, the system shall keep serving the cached taxonomy and log the refresh failure, rather than treating classification as unavailable. | M |
-| FR-CATALOG-07 | *(Added 2026-09-01)* An entry with `isActive: false` in either source endpoint shall not be offered to the classification tool schema (§3.1) as a selectable value. | M |
+| FR-CATALOG-01 | The system shall load the category/service/subservice taxonomy from one YAML configuration file (`banking_services.yaml`) at startup. | M |
+| FR-CATALOG-02 | The taxonomy file shall ship with the provisional placeholder structure from BRD §6.2, covering: Accounts, Payments, Cards, Transactions, Loans, Deposits, Customer Support. | M |
+| FR-CATALOG-03 | Adding, removing, or renaming a category/service/subservice shall require only editing `banking_services.yaml` and restarting the service — no code change anywhere else in the system. | M |
+| FR-CATALOG-04 | Each subservice entry in the taxonomy shall declare which mock (and, later, real) integration adapter handles it (§3.4), and whether a customer identity is required to fulfill it (nearly all are; a small number of purely informational ones, e.g. branch info, may not be). | M |
+| FR-CATALOG-05 | If `banking_services.yaml` is missing or fails to parse at startup, the system shall fail startup with a clear error — it shall not silently start with an empty or partial taxonomy. | M |
 
 ### 3.3 Customer Identity & Session
 
@@ -229,33 +195,12 @@ Priority: M · Actors: system-internal, invoked after successful routing · Prec
 service/subservice resolved and (if required by that subservice) a verified customer identity
 present.
 
-**Real adapters (added 2026-09-01)** — per `user-app-api-map.md`, these five subservices have a
-live, documented endpoint and are fulfilled with real data, forwarding the customer's JWT
-as-is (`Authorization: Bearer <JWT>`) to the same downstream service the mobile app itself calls:
-
-| Subservice (platform `id`) | Real endpoint |
-|---|---|
-| Balance | `POST transfer/v1/accounting/balance` |
-| Transaction history | `GET transfer/v1/accounting/transaction-list` |
-| My accounts / account detail | `GET polygon-bank/v1/accounts{/id}` |
-| Device history | `GET auth/v1/devices` |
-| Login history | `GET auth/v1/devices/{id}/login-history` |
-
-Every other subservice in the taxonomy continues to use a mock adapter (FR-INTEG-02) until a
-real endpoint for it is supplied.
-
 | ID | Requirement | Priority |
 |---|---|---|
-| FR-INTEG-01 | Each subservice shall map (via FR-CATALOG-04's mapping) to one integration adapter behind a common interface: `fulfill(customer_identity, jwt, subservice, payload) -> result`. | M |
-| FR-INTEG-02 | Subservices with no real endpoint available shall use a mock adapter returning realistic, clearly-fake canned data (e.g. a fixed sample balance, a fixed sample transaction list) — configuration-flagged as mock, never presented in a way indistinguishable from a real response in logs/response metadata. | M |
-| FR-INTEG-03 | Replacing a mock adapter with a real one shall require only adding a new adapter implementation and updating that subservice's adapter mapping — no change to the routing or classification layers. | M |
+| FR-INTEG-01 | Each subservice shall map (via `banking_services.yaml`, FR-CATALOG-04) to one integration adapter behind a common interface: `fulfill(customer_identity, subservice, payload) -> result`. | M |
+| FR-INTEG-02 | The shipped adapters for this phase shall be mock adapters returning realistic, clearly-fake canned data per subservice (e.g. a fixed sample balance, a fixed sample transaction list) — configuration-flagged as mock, never presented in a way indistinguishable from a real response in logs/response metadata. | M |
+| FR-INTEG-03 | Replacing a mock adapter with a real one shall require only adding a new adapter implementation and updating that subservice's taxonomy entry — no change to the routing or classification layers. | M |
 | FR-INTEG-04 | If an adapter raises or times out, the system shall return `type: SERVICE_UNAVAILABLE` with no internal exception detail exposed in the response body (full detail still goes to the audit log, §3.6). | M |
-| FR-INTEG-05 | *(Added 2026-09-01)* The five subservices listed above shall use a real adapter that calls the named live endpoint, forwarding the customer's verified JWT as the request's bearer token, and returns the actual response data (e.g. the real balance) as the fulfillment result. | M |
-| FR-INTEG-06 | *(Added 2026-09-01)* If a real adapter's downstream call is rejected specifically for an auth reason (401/403 from the downstream service), the system shall return `type: AUTH_REQUIRED` rather than `SERVICE_UNAVAILABLE` — the customer's own JWT was the problem, not the service being down. | M |
-
-*Business rules / errors:* a real adapter never falls back to mock data on failure — a failed
-real call is `SERVICE_UNAVAILABLE` (or `AUTH_REQUIRED` per FR-INTEG-06), never a silently
-substituted fake value that could be mistaken for the customer's actual data.
 
 ### 3.5 Chat API Contract
 
@@ -307,9 +252,7 @@ data: {"detail": "..."}
 | FR-CONTRACT-03 | Every non-KB response type (`BANKING_SERVICE`, `CLARIFICATION_REQUIRED`, `AUTH_REQUIRED`, `UNKNOWN_SERVICE`, `SERVICE_UNAVAILABLE`) shall emit exactly one `result` event, after the `token` events (if any) and before `done`. | M |
 | FR-CONTRACT-04 | The `result` event's payload shall include a `version` field (starting at `"1.0"`) so the receiving team can detect future shape changes deliberately. | M |
 | FR-CONTRACT-05 | For `type: BANKING_SERVICE`, the `result` payload's `routing` object shall carry `category`, `service`, `subservice`, and `action: "redirect"` — enough for the main application to navigate, with no assumption about its actual page/route structure. | M |
-| FR-CONTRACT-06 | *(BRD FR-CONTRACT-06, added in BRD v0.2, elaborated here)* The `routing` object's `service` (and `subservice`, if present) values shall be the exact `id` string the main mobile application's own local navigation catalog already recognizes (per `user-app-api-map.md`) — not a Polygon-Bot-invented slug — so the main application can route without a translation step. | M |
-| FR-CONTRACT-07 | *(SRS-only, from v0.1)* An SSE client that only recognizes `token`/`done`/`error` (the existing contract) shall be unaffected by the new `result` event — it is simply an event name that client doesn't parse. | M |
-| FR-CONTRACT-08 | *(SRS-only, added 2026-09-01)* For a `BANKING_SERVICE` outcome fulfilled by a real adapter (FR-INTEG-05), the streamed natural-language reply (`token` events) shall incorporate the real fetched data (e.g. state the actual balance), and the `result` payload's `payload` field shall carry that same data in structured form — a real-adapter outcome answers the question directly, it does not only route. | M |
+| FR-CONTRACT-06 | An SSE client that only recognizes `token`/`done`/`error` (the existing contract) shall be unaffected by the new `result` event — it is simply an event name that client doesn't parse. | M |
 
 *Business rules / errors:* `event: error` (existing, unchanged) is reserved for actual failures
 (Ollama/Qdrant unreachable, embedding rejection) — it is distinct from the new structured
@@ -344,7 +287,7 @@ Priority: M · Actors: existing integration team, Polygon Bot owner · Precondit
 |---|---|
 | Session | In-memory context for one customer's ongoing conversation (§3.3). |
 | ChatTurn | One message/response pair within a session — used to resolve follow-ups like "what about yesterday." |
-| TaxonomyEntry | One category/service/subservice node, fetched from the platform's live catalog (§3.2). |
+| TaxonomyEntry | One category/service/subservice node, loaded from `banking_services.yaml`. |
 | AuditLogEntry | One structured log line per banking-service turn (§3.6). |
 
 ### 4.2 Key Attributes — Session, ChatTurn, TaxonomyEntry
@@ -353,7 +296,7 @@ Priority: M · Actors: existing integration team, Polygon Bot owner · Precondit
 |---|---|
 | Session | customer identity (JWT subject claim), created_at, last_active_at, recent turns (capped list) |
 | ChatTurn | timestamp, original text, classified type, category, service, subservice |
-| TaxonomyEntry | platform category id/name, platform service id/name, platform subservice id/name (if any), is_active, adapter name (real or mock), requires_identity (bool) |
+| TaxonomyEntry | category, service, subservice, adapter name, requires_identity (bool) |
 
 ### 4.3 Entity Relationships (summary)
 
@@ -382,27 +325,16 @@ display, FR-KB-02). No production UI is built here.
 
 ### 5.2 Software Interfaces (API — functional)
 
-**Inbound (Polygon Bot's own API, consumed by others):**
-
 | Operation | Purpose | Auth |
 |---|---|---|
 | `POST /chat` | Send a message; classify and either answer (KB) or route (banking-service) | `X-API-Key` (unchanged) + optional `Authorization: Bearer <JWT>` (new, required only for banking-service fulfillment) |
 | `POST /documents`, `GET /documents`, `DELETE /documents/{id}` | Unchanged | `X-API-Key` (unchanged) |
 | `GET /health` | Unchanged | none |
 
-**Outbound (added 2026-09-01 — Polygon Bot calling the main platform):**
-
-| Operation | Purpose | Auth |
-|---|---|---|
-| `GET support/v1/services`, `GET support/v1/pay-transfer` | Fetch the live taxonomy (§3.2) | none documented in `user-app-api-map.md` for these two — verify at implementation time whether Polygon Bot needs its own service credential here |
-| `POST transfer/v1/accounting/balance`, `GET transfer/v1/accounting/transaction-list`, `GET polygon-bank/v1/accounts{/id}`, `GET auth/v1/devices`, `GET auth/v1/devices/{id}/login-history` | Real adapter fulfillment (§3.4) | Customer's forwarded `Authorization: Bearer <JWT>` |
-
 ### 5.3 Communication Interfaces
 
 `/chat` remains `text/event-stream` (SSE) for every response type, per §3.5's decision to extend
-rather than replace the streaming contract. Outbound calls to the main platform (above) are
-plain synchronous HTTP, matching the pattern the mobile app itself uses against the same
-endpoints.
+rather than replace the streaming contract.
 
 ### 5.4 Hardware Interfaces
 
@@ -417,7 +349,6 @@ Unchanged (Ollama on host GPU, external to this service).
 | NFR-SEC-02 | Security | No raw JWT, API key, or full sensitive adapter response body appears in any log line (BRD FR-SEC-04). |
 | NFR-MAINT-01 | Maintainability | The taxonomy is the single source of truth for valid category/service/subservice values — no hardcoded per-category branching elsewhere in the codebase (BRD NFR-02). |
 | NFR-REL-01 | Reliability | An adapter failure for one subservice shall not affect KB chat or any other subservice's availability. |
-| NFR-REL-02 | Reliability | *(Added 2026-09-01)* A taxonomy refresh failure (§3.2) shall not interrupt classification — the last successfully cached catalog continues serving until the next successful refresh. |
 | NFR-OBS-01 | Observability | Every banking-service turn is auditable via one structured log line (FR-SEC-03) sufficient to reconstruct what was requested, by whom (customer identity reference), and the outcome, without a database lookup. |
 
 ## 7. Other Requirements
@@ -435,24 +366,22 @@ Unchanged (Ollama on host GPU, external to this service).
 | BRD requirement | Covered by SRS |
 |---|---|
 | FR-ROUTE-01..04 | §3.1 (FR-ROUTE-01..04, elaborated) + FR-ROUTE-05 (new) |
-| FR-CATALOG-01..03 | §3.2 (FR-CATALOG-01/03 re-elaborated for live fetch, FR-CATALOG-02 superseded) + FR-CATALOG-04..07 (new) |
+| FR-CATALOG-01..03 | §3.2 (FR-CATALOG-01..03, elaborated) + FR-CATALOG-04/05 (new) |
 | FR-IDENT-01..06 | §3.3 (FR-IDENT-01..06, elaborated) + FR-IDENT-07 (new) |
-| FR-INTEG-01..04 | §3.4 (FR-INTEG-01..04, elaborated for real+mock split) + FR-INTEG-05/06 (new) |
-| FR-CONTRACT-01..06 | §3.5 (FR-CONTRACT-01..06, all elaborated with matching IDs) + FR-CONTRACT-07/08 (SRS-only additions) |
+| FR-INTEG-01..04 | §3.4 (FR-INTEG-01..04, elaborated) |
+| FR-CONTRACT-01..05 | §3.5 (FR-CONTRACT-01..05, elaborated) + FR-CONTRACT-06 (new) |
 | FR-SEC-01..04 | §3.6 (FR-SEC-01..04, elaborated) |
 | FR-KB-01..02 | §3.7 (FR-KB-01..02, elaborated) |
 
-All 26 BRD functional requirements (25 from v0.1 + FR-CONTRACT-06 added in BRD v0.2) are covered.
-No orphans.
+All 25 BRD functional requirements are covered. No orphans.
 
 ## Appendix B — Open Items (TBD)
 
-1. JWT issuer, signing algorithm, and key source — pending from the main bank's auth team; FR-IDENT-01's verification function is a fixed interface awaiting a real implementation. Also now the gating question for §3.4's real adapters (FR-INTEG-05) — they assume the same JWT is forwardable as-is to the downstream banking services, which isn't yet confirmed. (§3.3, §2.5, §3.4)
-2. ~~Official banking taxonomy~~ — **resolved 2026-09-01**: sourced live from `support/v1/services` + `support/v1/pay-transfer` (§3.2), no longer a placeholder.
-3. Real banking-service adapters — **partially resolved 2026-09-01**: 5 subservices (balance, transaction history, accounts, device history, login history) now have real adapters (§3.4, FR-INTEG-05); every other subservice remains mocked until a real endpoint is supplied for it.
+1. JWT issuer, signing algorithm, and key source — pending from the main bank's auth team; FR-IDENT-01's verification function is a fixed interface awaiting a real implementation. (§3.3, §2.5)
+2. Official banking taxonomy — the provisional `banking_services.yaml` (§3.2) will be replaced wholesale once supplied; no code change expected beyond the file itself. (§3.2)
+3. Real banking-service adapters — mock adapters (§3.4) are placeholders per subservice until real API specs/credentials arrive. (§3.4)
 4. Long-term durable/shared session storage — explicitly deferred past this phase (BRD FR-IDENT-06), no design commitment here beyond the swappable interface. (§3.3)
 5. Audit log destination/format (structured JSON to stdout vs. a dedicated log sink) — assumed stdout/structured JSON consistent with current deployment (no logging infra exists yet); flagging since the BRD didn't specify a destination. (§3.6, §6)
-6. *(Added 2026-09-01)* Whether `support/v1/services`/`support/v1/pay-transfer` require their own service-level auth for a non-mobile-app caller like Polygon Bot — `user-app-api-map.md` doesn't document auth for these two specifically; needs confirming with the platform team before FR-CATALOG-01 can be implemented against production. (§3.2, §2.6)
 
 ---
-*End of document — v0.2, Approved 2026-09-01 (amended from v0.1 following `user-app-api-map.md`). Open items: 6 — 1 resolved this revision (taxonomy source), 1 partially resolved (5 of many adapters now real), 4 remain pending external confirmation, none block moving forward.*
+*End of document — v0.1, Approved 2026-08-31. Open items: 5, all pending external inputs already flagged in the BRD — none block moving forward.*
