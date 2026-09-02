@@ -1,4 +1,5 @@
 import json
+import time
 from datetime import datetime, timezone
 
 import httpx
@@ -7,6 +8,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
 from app.auth import require_api_key
+from app.banking import audit
 from app.banking.adapters import fulfill_banking_service
 from app.banking.adapters.base import AdapterAuthError, AdapterUnavailableError
 from app.banking.identity import extract_jwt, verify_jwt
@@ -103,6 +105,7 @@ async def _kb_stream(req: ChatRequest):
 
 
 async def _chat_stream(req: ChatRequest, authorization: str | None):
+    turn_started_at = time.monotonic()
     token = extract_jwt(authorization)
     customer_identity = verify_jwt(token) if token else None
 
@@ -146,6 +149,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
         yield _sse("token", {"token": result.question})
         yield _result_event("CLARIFICATION_REQUIRED", None, None, None)
         turn_classification = {"type": "CLARIFICATION_REQUIRED", "category": None, "service": None, "subservice": None}
+        audit.log_banking_turn(customer_identity, turn_classification, latency_ms=(time.monotonic() - turn_started_at) * 1000)
 
     elif isinstance(result, UnknownService):
         yield _sse("token", {"token": "I'm not able to help with that specific request right now."})
@@ -156,6 +160,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
             "service": result.service,
             "subservice": result.subservice,
         }
+        audit.log_banking_turn(customer_identity, turn_classification, latency_ms=(time.monotonic() - turn_started_at) * 1000)
 
     elif isinstance(result, BankingService):
         category, service, subservice, payload = (
@@ -174,6 +179,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                 "service": service,
                 "subservice": subservice,
             }
+            audit.log_banking_turn(customer_identity, turn_classification, latency_ms=(time.monotonic() - turn_started_at) * 1000)
         else:
             try:
                 adapter_result = await fulfill_banking_service(
@@ -188,6 +194,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                     "service": service,
                     "subservice": subservice,
                 }
+                audit.log_banking_turn(customer_identity, turn_classification, latency_ms=(time.monotonic() - turn_started_at) * 1000)
             except AdapterUnavailableError:
                 yield _sse("token", {"token": "That service isn't available right now. Please try again shortly."})
                 yield _result_event("SERVICE_UNAVAILABLE", category, service, subservice)
@@ -197,6 +204,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                     "service": service,
                     "subservice": subservice,
                 }
+                audit.log_banking_turn(customer_identity, turn_classification, latency_ms=(time.monotonic() - turn_started_at) * 1000)
             else:
                 data = adapter_result.data
                 if data.get("mock") is True:
@@ -217,6 +225,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                     "service": service,
                     "subservice": subservice,
                 }
+                audit.log_banking_turn(customer_identity, turn_classification, latency_ms=(time.monotonic() - turn_started_at) * 1000)
 
     yield _sse("done", {})
 

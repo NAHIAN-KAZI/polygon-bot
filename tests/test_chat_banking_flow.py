@@ -60,6 +60,15 @@ def _install_session_fakes(monkeypatch):
     return record_turn_spy
 
 
+def _install_audit_spy(monkeypatch):
+    """Patch app.banking.audit.log_banking_turn at its call site in
+    chat_module (T-16), so tests can assert it fires on every non-KB branch
+    and never on a pure KB question, without emitting a real log line."""
+    audit_spy = _spy()
+    monkeypatch.setattr(chat_module.audit, "log_banking_turn", audit_spy)
+    return audit_spy
+
+
 def _parse_sse(body: str) -> list[tuple[str, dict]]:
     events = []
     for block in body.strip("\n").split("\n\n"):
@@ -411,3 +420,159 @@ def test_kb_path_matches_pre_t15_contract(client, monkeypatch):
     assert "result" not in event_names
     assert event_names.count("token") == 2
     assert event_names[-1] == "done"
+
+
+# --- audit logging (TASKS.md T-16): audit.log_banking_turn must fire on ------
+# --- every non-KB branch and never for a pure KB question -------------------
+
+
+def test_audit_not_called_for_pure_kb_question(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return KbQuestion()
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    _install_kb_fakes(monkeypatch)
+    _install_session_fakes(monkeypatch)
+    audit_spy = _install_audit_spy(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "what is the refund policy?"}, headers=AUTH_HEADERS)
+
+    assert resp.status_code == 200
+    assert audit_spy.calls == []
+
+
+def test_audit_called_once_for_clarification(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return Clarification(question="Which account would you like to check?")
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    _install_session_fakes(monkeypatch)
+    audit_spy = _install_audit_spy(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "check my thing"}, headers=AUTH_HEADERS)
+
+    assert resp.status_code == 200
+    assert len(audit_spy.calls) == 1
+    args, kwargs = audit_spy.calls[0]
+    identity, turn_classification = args
+    assert identity is None
+    assert turn_classification["type"] == "CLARIFICATION_REQUIRED"
+
+
+def test_audit_called_once_for_unknown_service(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return UnknownService(category="x", service="y", subservice=None)
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    _install_session_fakes(monkeypatch)
+    audit_spy = _install_audit_spy(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "do the thing"}, headers=AUTH_HEADERS)
+
+    assert resp.status_code == 200
+    assert len(audit_spy.calls) == 1
+    args, kwargs = audit_spy.calls[0]
+    identity, turn_classification = args
+    assert turn_classification["type"] == "UNKNOWN_SERVICE"
+    assert turn_classification["category"] == "x"
+    assert turn_classification["service"] == "y"
+
+
+def test_audit_called_once_for_banking_service_without_identity(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return BankingService(category="account_info", service="balance", subservice=None)
+
+    async def fake_fulfill(*args, **kwargs):
+        return AdapterResult(data={})
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", fake_fulfill)
+    _install_session_fakes(monkeypatch)
+    audit_spy = _install_audit_spy(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "what's my balance"}, headers=AUTH_HEADERS)
+
+    assert resp.status_code == 200
+    assert len(audit_spy.calls) == 1
+    args, kwargs = audit_spy.calls[0]
+    identity, turn_classification = args
+    assert identity is None
+    assert turn_classification["type"] == "AUTH_REQUIRED"
+
+
+def test_audit_called_once_for_adapter_auth_error(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return BankingService(category="account_info", service="balance", subservice=None)
+
+    def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    async def fake_fulfill(customer_identity, jwt, category, service, subservice, payload):
+        raise AdapterAuthError
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", fake_fulfill)
+    _install_session_fakes(monkeypatch)
+    audit_spy = _install_audit_spy(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "what's my balance"}, headers=JWT_HEADERS)
+
+    assert resp.status_code == 200
+    assert len(audit_spy.calls) == 1
+    args, kwargs = audit_spy.calls[0]
+    identity, turn_classification = args
+    assert identity == CustomerIdentity(customer_id=CUSTOMER_ID)
+    assert turn_classification["type"] == "AUTH_REQUIRED"
+
+
+def test_audit_called_once_for_service_unavailable(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return BankingService(category="account_info", service="balance", subservice=None)
+
+    def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    async def fake_fulfill(customer_identity, jwt, category, service, subservice, payload):
+        raise AdapterUnavailableError
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", fake_fulfill)
+    _install_session_fakes(monkeypatch)
+    audit_spy = _install_audit_spy(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "what's my balance"}, headers=JWT_HEADERS)
+
+    assert resp.status_code == 200
+    assert len(audit_spy.calls) == 1
+    args, kwargs = audit_spy.calls[0]
+    _, turn_classification = args
+    assert turn_classification["type"] == "SERVICE_UNAVAILABLE"
+
+
+def test_audit_called_once_for_banking_service_success(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return BankingService(category="account_info", service="balance", subservice="balance")
+
+    def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    async def fake_fulfill(customer_identity, jwt, category, service, subservice, payload):
+        return AdapterResult(data={"balance": "500.00"})
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", fake_fulfill)
+    _install_session_fakes(monkeypatch)
+    audit_spy = _install_audit_spy(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "what's my balance"}, headers=JWT_HEADERS)
+
+    assert resp.status_code == 200
+    assert len(audit_spy.calls) == 1
+    args, kwargs = audit_spy.calls[0]
+    identity, turn_classification = args
+    assert identity == CustomerIdentity(customer_id=CUSTOMER_ID)
+    assert turn_classification["type"] == "BANKING_SERVICE"
+    assert kwargs["latency_ms"] >= 0
