@@ -8,6 +8,7 @@ consume these fields yet -- this is schema-only coverage. Ollama (embedding
 import json
 
 import app.routes.chat as chat_module
+from app.banking.routing import KbQuestion
 
 from tests.conftest import AUTH_HEADERS
 
@@ -25,10 +26,15 @@ async def _fake_stream_generate(prompt):
         yield token
 
 
+async def _fake_classify(message, recent_turns=None):
+    return KbQuestion()
+
+
 def _install_fakes(monkeypatch):
     monkeypatch.setattr(chat_module, "embed_text", _fake_embed_text)
     monkeypatch.setattr(chat_module, "search", _fake_search)
     monkeypatch.setattr(chat_module, "stream_generate", _fake_stream_generate)
+    monkeypatch.setattr(chat_module, "classify", _fake_classify)
 
 
 def _parse_sse(body: str) -> list[tuple[str, dict]]:
@@ -80,8 +86,22 @@ def test_all_new_fields_populated_is_accepted_and_streams(client, monkeypatch):
 
     events = _parse_sse(resp.text)
     event_names = [name for name, _ in events]
-    assert event_names.count("token") == 2
+
+    # category+service are both present, so chat.py routes directly via
+    # is_valid_path instead of calling classify(). is_valid_path always
+    # returns False here since the taxonomy cache is never populated outside
+    # the app's real startup lifespan, so this is UnknownService.
+    assert event_names.count("token") == 1
     assert event_names[-1] == "done"
+
+    token_event = next(data for name, data in events if name == "token")
+    assert token_event["token"] == "I'm not able to help with that specific request right now."
+
+    result_event = next(data for name, data in events if name == "result")
+    assert result_event["type"] == "UNKNOWN_SERVICE"
+    assert result_event["category"] == "billing"
+    assert result_event["service"] == "payments"
+    assert result_event["subservice"] == "refunds"
 
 
 def test_payload_accepts_arbitrary_nested_structure(client, monkeypatch):
@@ -120,8 +140,20 @@ def test_taxonomy_fields_without_payload_is_accepted(client, monkeypatch):
     assert resp.status_code == 200
     events = _parse_sse(resp.text)
     event_names = [name for name, _ in events]
-    assert event_names.count("token") == 2
+
+    # Same direct-routing branch as above: category+service present ->
+    # is_valid_path (always False in tests) -> UnknownService.
+    assert event_names.count("token") == 1
     assert event_names[-1] == "done"
+
+    token_event = next(data for name, data in events if name == "token")
+    assert token_event["token"] == "I'm not able to help with that specific request right now."
+
+    result_event = next(data for name, data in events if name == "result")
+    assert result_event["type"] == "UNKNOWN_SERVICE"
+    assert result_event["category"] == "billing"
+    assert result_event["service"] == "payments"
+    assert result_event["subservice"] == "refunds"
 
 
 def test_invalid_type_for_category_returns_422(client, monkeypatch):

@@ -9,6 +9,7 @@ GPU/vector-store stack.
 import json
 
 import app.routes.chat as chat_module
+from app.banking.routing import KbQuestion
 
 from tests.conftest import AUTH_HEADERS
 
@@ -26,10 +27,15 @@ async def _fake_stream_generate(prompt):
         yield token
 
 
+async def _fake_classify(message, recent_turns=None):
+    return KbQuestion()
+
+
 def _install_fakes(monkeypatch):
     monkeypatch.setattr(chat_module, "embed_text", _fake_embed_text)
     monkeypatch.setattr(chat_module, "search", _fake_search)
     monkeypatch.setattr(chat_module, "stream_generate", _fake_stream_generate)
+    monkeypatch.setattr(chat_module, "classify", _fake_classify)
 
 
 def _parse_sse(body: str) -> list[tuple[str, dict]]:
