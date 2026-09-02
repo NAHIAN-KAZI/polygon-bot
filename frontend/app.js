@@ -14,6 +14,11 @@ const docList = document.getElementById("docList");
 const chatForm = document.getElementById("chatForm");
 const chatInput = document.getElementById("chatInput");
 const messages = document.getElementById("messages");
+const fldCategory = document.getElementById("fldCategory");
+const fldService = document.getElementById("fldService");
+const fldSubservice = document.getElementById("fldSubservice");
+const fldPayload = document.getElementById("fldPayload");
+const fldAuthToken = document.getElementById("fldAuthToken");
 
 const KEY_STORAGE = "chatbot_api_key";
 
@@ -174,6 +179,77 @@ function addMessage(role, text) {
   return div;
 }
 
+// Reads the optional "banking-service test fields" panel and builds the
+// extra /chat request body fields + Authorization header, if any are set.
+// Returns { body: {...}, headers: {...}, error: string|null }.
+function readRoutingExtras() {
+  const body = {};
+  const category = fldCategory.value.trim();
+  const service = fldService.value.trim();
+  const subservice = fldSubservice.value.trim();
+  const payloadRaw = fldPayload.value.trim();
+  const token = fldAuthToken.value.trim();
+
+  if (category) body.category = category;
+  if (service) body.service = service;
+  if (subservice) body.subservice = subservice;
+
+  let payload = null;
+  if (payloadRaw) {
+    try {
+      payload = JSON.parse(payloadRaw);
+    } catch (e) {
+      return { body: null, headers: null, error: `payload is not valid JSON: ${e.message}` };
+    }
+    body.payload = payload;
+  }
+
+  const extraHeaders = {};
+  if (token) extraHeaders["Authorization"] = `Bearer ${token}`;
+
+  return { body, headers: extraHeaders, error: null };
+}
+
+function prettyOrDash(value) {
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "object") return JSON.stringify(value, null, 2);
+  return String(value);
+}
+
+// Renders the structured `result` SSE event (type/category/service/
+// subservice/payload/routing) as a small panel under the bot reply, for
+// demo/verification purposes — not shown for plain KB answers.
+function addResultPanel(result) {
+  const panel = document.createElement("div");
+  panel.className = "result-panel";
+
+  const badge = document.createElement("span");
+  badge.className = "result-type" + (result.type === "BANKING_SERVICE" ? "" : " warn");
+  badge.textContent = result.type;
+  panel.appendChild(badge);
+
+  const dl = document.createElement("dl");
+  const rows = [
+    ["category", result.category],
+    ["service", result.service],
+    ["subservice", result.subservice],
+    ["payload", result.payload],
+    ["routing", result.routing],
+  ];
+  for (const [label, value] of rows) {
+    const dt = document.createElement("dt");
+    dt.textContent = label;
+    const dd = document.createElement("dd");
+    dd.textContent = prettyOrDash(value);
+    dl.append(dt, dd);
+  }
+  panel.appendChild(dl);
+
+  messages.appendChild(panel);
+  messages.scrollTop = messages.scrollHeight;
+  return panel;
+}
+
 function addTypingBubble() {
   const intro = messages.querySelector(".intro");
   if (intro) intro.remove();
@@ -200,18 +276,27 @@ chatForm.addEventListener("submit", async (e) => {
   const question = chatInput.value.trim();
   if (!question) return;
 
+  const extras = readRoutingExtras();
+  if (extras.error) {
+    addMessage("user", question);
+    chatInput.value = "";
+    addMessage("bot error", `Error: ${extras.error}`);
+    return;
+  }
+
   addMessage("user", question);
   chatInput.value = "";
 
   const botDiv = addTypingBubble();
   let botText = "";
   let gotFirstToken = false;
+  let result = null;
 
   try {
     const res = await fetch("/chat", {
       method: "POST",
-      headers: headers({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ message: question }),
+      headers: headers({ "Content-Type": "application/json", ...extras.headers }),
+      body: JSON.stringify({ message: question, ...extras.body }),
     });
 
     if (!res.ok || !res.body) {
@@ -255,6 +340,8 @@ chatForm.addEventListener("submit", async (e) => {
           botText += payload.token;
           botDiv.textContent = botText;
           messages.scrollTop = messages.scrollHeight;
+        } else if (eventName === "result") {
+          result = payload;
         } else if (eventName === "error") {
           botDiv.className = "msg bot error";
           botDiv.textContent = `Error: ${payload.detail}`;
@@ -264,6 +351,12 @@ chatForm.addEventListener("submit", async (e) => {
 
     if (gotFirstToken) {
       botDiv.textContent = stripCitations(botText) || botDiv.textContent;
+    }
+
+    // Only banking-service outcomes send a `result` event — a plain KB
+    // answer never does, so this leaves that path completely unchanged.
+    if (result) {
+      addResultPanel(result);
     }
   } catch (err) {
     botDiv.className = "msg bot error";

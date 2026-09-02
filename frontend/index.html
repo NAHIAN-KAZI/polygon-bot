@@ -41,6 +41,32 @@
         </div>
       </div>
 
+      <details id="routingExtras" class="routing-extras">
+        <summary>Banking-service test fields (optional)</summary>
+        <div class="routing-extras-grid">
+          <label>
+            <span>category</span>
+            <input id="fldCategory" type="text" placeholder="e.g. account_info" autocomplete="off" />
+          </label>
+          <label>
+            <span>service</span>
+            <input id="fldService" type="text" placeholder="e.g. balance" autocomplete="off" />
+          </label>
+          <label>
+            <span>subservice</span>
+            <input id="fldSubservice" type="text" placeholder="optional" autocomplete="off" />
+          </label>
+          <label class="full">
+            <span>payload (JSON)</span>
+            <textarea id="fldPayload" rows="2" placeholder='e.g. {"amount": 42.5}'></textarea>
+          </label>
+          <label class="full">
+            <span>Authorization bearer token</span>
+            <input id="fldAuthToken" type="text" placeholder="JWT (sent as Authorization: Bearer &lt;token&gt;)" autocomplete="off" />
+          </label>
+        </div>
+      </details>
+
       <form id="chatForm" class="composer">
         <input id="chatInput" type="text" placeholder="Message Polygon Bot..." autocomplete="off" required />
         <button type="submit" class="send-btn" aria-label="Send">
