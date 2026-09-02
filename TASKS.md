@@ -9,7 +9,7 @@
 > every write to the external tracker, scoped to rows dated `tools.<name>.mirror_from_date`
 > onward — no backfill.
 
-_Last updated: 2026-09-01_
+_Last updated: 2026-09-02_
 
 ## Status legend
 ⏳ TODO · 🔄 IN_PROGRESS · ✅ DONE (tests passing) · ⚠ BLOCKED · ❌ FAILED
@@ -32,7 +32,7 @@ scope to the active sprint when this column is in use.
 | # | Task | Goal | Source | Priority | Sprint | Status | Agent | Started | Completed |
 |---|---|---|---|---|---|---|---|---|---|
 | 1 | Write regression test suite for existing /chat and /documents behavior vs INTEGRATION.md [E-02/F-08], T-01 | Preserve existing KB chat behavior | Planning 2026-08-31 | 🔴 | — | ✅ DONE | kb-chat-preserved | 2026-09-01 | 2026-09-01 |
-| 2 | Re-run regression suite after each subsequent epic lands [E-02/F-08], T-02 | Preserve existing KB chat behavior | Planning 2026-08-31 | 🔴 | — | ⏳ TODO | kb-chat-preserved | — | — |
+| 2 | Re-run regression suite after each subsequent epic lands [E-02/F-08], T-02 — done continuously: full suite (172→187 tests) + live /health rerun independently at every task gate T-03 through T-18; final full run after last epic (T-18) landed: 187 passed, health ok | Preserve existing KB chat behavior | Planning 2026-08-31 | 🔴 | — | ✅ DONE | kb-chat-preserved | 2026-09-01 | 2026-09-02 |
 | 3 | Implement live taxonomy fetcher: merge support/v1/services + support/v1/pay-transfer, retain platform ids [E-03/F-02], T-03 (revised 2026-09-01) | Establish foundation for future change | Planning 2026-09-01 | 🔴 | — | ✅ DONE | banking-service-catalog | 2026-09-01 | 2026-09-01 |
 | 4 | Implement periodic taxonomy refresh + cache-fallback on failure [E-03/F-02], T-04 (revised 2026-09-01) — folded into T-03's implementation, verified covered by test_taxonomy.py (no separate work needed) | Establish foundation for future change | Planning 2026-09-01 | 🔴 | — | ✅ DONE | banking-service-catalog | 2026-09-01 | 2026-09-01 |
 | 5 | Implement pluggable JWT verification interface + fail-closed stub [E-03/F-03], T-05 | Establish foundation for future change | Planning 2026-08-31 | 🔴 | — | ✅ DONE | customer-identity-session | 2026-09-01 | 2026-09-01 |
