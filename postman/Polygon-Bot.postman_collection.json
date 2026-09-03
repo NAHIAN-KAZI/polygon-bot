@@ -1,0 +1,327 @@
+{
+  "info": {
+    "name": "Polygon Bot API",
+    "description": "Health, document, and chat (KB + banking-service) requests for Polygon Bot. See ../POSTMAN_TESTING.md for setup and usage instructions.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": { "raw": "{{base_url}}/health", "host": ["{{base_url}}"], "path": ["health"] }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', () => pm.response.to.have.status(200));",
+              "const body = pm.response.json();",
+              "pm.test('status field is ok or degraded', () => pm.expect(['ok','degraded']).to.include(body.status));",
+              "pm.test('ollama and qdrant are booleans', () => {",
+              "  pm.expect(typeof body.ollama).to.eql('boolean');",
+              "  pm.expect(typeof body.qdrant).to.eql('boolean');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Upload Document",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "X-API-Key", "value": "{{api_key}}" }],
+        "body": {
+          "mode": "formdata",
+          "formdata": [{ "key": "file", "type": "file", "src": "" }]
+        },
+        "url": { "raw": "{{base_url}}/documents", "host": ["{{base_url}}"], "path": ["documents"] },
+        "description": "Attach a .pdf/.docx/.txt/.md file (max 25MB) in the 'file' form field before sending."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', () => pm.response.to.have.status(200));",
+              "const body = pm.response.json();",
+              "pm.test('response has doc_id, filename, chunk_count > 0', () => {",
+              "  pm.expect(body.doc_id).to.be.a('string');",
+              "  pm.expect(body.filename).to.be.a('string');",
+              "  pm.expect(body.chunk_count).to.be.above(0);",
+              "});",
+              "if (body.doc_id) pm.collectionVariables.set('doc_id', body.doc_id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "List Documents",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "X-API-Key", "value": "{{api_key}}" }],
+        "url": { "raw": "{{base_url}}/documents", "host": ["{{base_url}}"], "path": ["documents"] }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', () => pm.response.to.have.status(200));",
+              "pm.test('response is an array', () => pm.expect(pm.response.json()).to.be.an('array'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Delete Document",
+      "request": {
+        "method": "DELETE",
+        "header": [{ "key": "X-API-Key", "value": "{{api_key}}" }],
+        "url": {
+          "raw": "{{base_url}}/documents/{{doc_id}}",
+          "host": ["{{base_url}}"],
+          "path": ["documents", "{{doc_id}}"]
+        },
+        "description": "Uses the doc_id captured by 'Upload Document'. Set collection variable doc_id manually if running standalone."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('status is 200', () => pm.response.to.have.status(200));"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Chat - KB Question",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-API-Key", "value": "{{api_key}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message\": \"What is the refund policy?\"\n}"
+        },
+        "url": { "raw": "{{base_url}}/chat", "host": ["{{base_url}}"], "path": ["chat"] },
+        "description": "Plain knowledge-base question. Expect token...done events, no result event. See POSTMAN_TESTING.md for how to read the SSE stream in Postman."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', () => pm.response.to.have.status(200));",
+              "pm.test('content-type is text/event-stream', () => {",
+              "  pm.expect(pm.response.headers.get('Content-Type')).to.include('text/event-stream');",
+              "});",
+              "pm.test('stream contains a done event, no result event', () => {",
+              "  const text = pm.response.text();",
+              "  pm.expect(text).to.include('event: done');",
+              "  pm.expect(text).to.not.include('event: result');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Chat - Banking Direct Route (account_info/balance, synthetic + real adapter)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-API-Key", "value": "{{api_key}}" },
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message\": \"What's my balance?\",\n  \"category\": \"account_info\",\n  \"service\": \"balance\",\n  \"payload\": {\"accountNumber\": \"123456\"}\n}"
+        },
+        "url": { "raw": "{{base_url}}/chat", "host": ["{{base_url}}"], "path": ["chat"] },
+        "description": "account_info/balance is a synthetic taxonomy entry (ADR-0011) backed by a real adapter (POST /transfer/v1/accounting/balance on the bank platform). Without a valid jwt this returns AUTH_REQUIRED — expected until real JWT verification is wired in (see HANDOFF.md)."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', () => pm.response.to.have.status(200));",
+              "pm.test('stream contains a result event', () => {",
+              "  pm.expect(pm.response.text()).to.include('event: result');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Chat - Banking Direct Route (polygon_services/transaction_history, live + real adapter)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-API-Key", "value": "{{api_key}}" },
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message\": \"show my transactions\",\n  \"category\": \"polygon_services\",\n  \"service\": \"transaction_history\",\n  \"payload\": {\"accountNumber\": \"123456\"}\n}"
+        },
+        "url": { "raw": "{{base_url}}/chat", "host": ["{{base_url}}"], "path": ["chat"] },
+        "description": "polygon_services/transaction_history is a real, live category/service id fetched from the bank platform's support/v1/services (as of 2026-09-01) and is one of the 5 subservices with a real adapter. Without a valid jwt this returns AUTH_REQUIRED."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', () => pm.response.to.have.status(200));",
+              "pm.test('stream contains a result event', () => {",
+              "  pm.expect(pm.response.text()).to.include('event: result');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Chat - Banking Direct Route (payments/mobile_recharge, live + mock adapter)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-API-Key", "value": "{{api_key}}" },
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message\": \"recharge my mobile\",\n  \"category\": \"payments\",\n  \"service\": \"mobile_recharge\"\n}"
+        },
+        "url": { "raw": "{{base_url}}/chat", "host": ["{{base_url}}"], "path": ["chat"] },
+        "description": "payments/mobile_recharge is a real, live, and currently ACTIVE category/service id from the bank platform's support/v1/pay-transfer (checked 2026-09-02), fulfilled by the generic mock adapter (not one of the 5 real-adapter subservices). Note: many ids in that catalog (e.g. utility/*, payments/card_payment) are present but isActive:false — the taxonomy correctly excludes those, so they'd return UNKNOWN_SERVICE, not AUTH_REQUIRED; pick only active ones for a 'real path' test. Without a valid jwt this returns AUTH_REQUIRED."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', () => pm.response.to.have.status(200));",
+              "pm.test('stream contains a result event', () => {",
+              "  pm.expect(pm.response.text()).to.include('event: result');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Chat - Banking Direct Route (transfer/wallet_transfer/bkash, live subservice)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-API-Key", "value": "{{api_key}}" },
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message\": \"send money to bkash\",\n  \"category\": \"transfer\",\n  \"service\": \"wallet_transfer\",\n  \"subservice\": \"bkash\"\n}"
+        },
+        "url": { "raw": "{{base_url}}/chat", "host": ["{{base_url}}"], "path": ["chat"] },
+        "description": "Exercises a real, currently-active subservice path (category/service/subservice all set), from support/v1/pay-transfer's recursive shape (checked 2026-09-02). Without a valid jwt this returns AUTH_REQUIRED."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', () => pm.response.to.have.status(200));",
+              "pm.test('stream contains a result event', () => {",
+              "  pm.expect(pm.response.text()).to.include('event: result');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Chat - Ambiguous Request",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-API-Key", "value": "{{api_key}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message\": \"I need help with my card\"\n}"
+        },
+        "url": { "raw": "{{base_url}}/chat", "host": ["{{base_url}}"], "path": ["chat"] },
+        "description": "Deliberately vague — expect a CLARIFICATION_REQUIRED result."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', () => pm.response.to.have.status(200));",
+              "pm.test('stream contains a result event', () => {",
+              "  pm.expect(pm.response.text()).to.include('event: result');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Chat - Unknown Service",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-API-Key", "value": "{{api_key}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message\": \"test\",\n  \"category\": \"not_a_real_category\",\n  \"service\": \"not_a_real_service\"\n}"
+        },
+        "url": { "raw": "{{base_url}}/chat", "host": ["{{base_url}}"], "path": ["chat"] },
+        "description": "Not a valid taxonomy path — expect an UNKNOWN_SERVICE result, never AUTH_REQUIRED or BANKING_SERVICE."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', () => pm.response.to.have.status(200));",
+              "pm.test('stream contains UNKNOWN_SERVICE result type', () => {",
+              "  pm.expect(pm.response.text()).to.include('\"type\": \"UNKNOWN_SERVICE\"');",
+              "});"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [{ "key": "doc_id", "value": "" }]
+}

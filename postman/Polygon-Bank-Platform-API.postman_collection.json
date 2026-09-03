@@ -1,0 +1,224 @@
+{
+  "info": {
+    "name": "Polygon Bank Platform API",
+    "description": "Direct requests against Polygon Bank's own dev platform (internet-banking.dev-polygontech.xyz) — the 7 endpoints documented in user-app-api-map.md. Separate from the Polygon Bot collection: this hits the bank's real backend directly, bypassing the chatbot entirely. Useful for confirming what the bank platform actually returns before debugging the chatbot's adapters against it.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Services Grid",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": { "raw": "{{platform_base_url}}/support/v1/services", "host": ["{{platform_base_url}}"], "path": ["support", "v1", "services"] },
+        "description": "No auth required per user_app source (no authorizedGet call for this one — confirm; add Authorization header if the platform actually requires it). Returns categories -> services, no route info (routing is app-local)."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', () => pm.response.to.have.status(200));",
+              "pm.test('has data.categories array', () => {",
+              "  const body = pm.response.json();",
+              "  pm.expect(body.data.categories).to.be.an('array');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Pay & Transfer Grid",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": { "raw": "{{platform_base_url}}/support/v1/pay-transfer", "host": ["{{platform_base_url}}"], "path": ["support", "v1", "pay-transfer"] },
+        "description": "Same category/service shape as Services Grid, but recursive (services can have subServices)."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', () => pm.response.to.have.status(200));",
+              "pm.test('has data.categories array', () => {",
+              "  const body = pm.response.json();",
+              "  pm.expect(body.data.categories).to.be.an('array');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Transaction History",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": {
+          "raw": "{{platform_base_url}}/transfer/v1/accounting/transaction-list?accountNumber={{account_number}}&page=0&size=10",
+          "host": ["{{platform_base_url}}"],
+          "path": ["transfer", "v1", "accounting", "transaction-list"],
+          "query": [
+            { "key": "accountNumber", "value": "{{account_number}}" },
+            { "key": "page", "value": "0" },
+            { "key": "size", "value": "10" }
+          ]
+        },
+        "description": "Requires a real customer JWT — without one this returns 401/403."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 with valid jwt, else 401/403', () => {",
+              "  pm.expect([200, 401, 403]).to.include(pm.response.code);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "4a. My Accounts (list)",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": { "raw": "{{platform_base_url}}/polygon-bank/v1/accounts", "host": ["{{platform_base_url}}"], "path": ["polygon-bank", "v1", "accounts"] }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 with valid jwt, else 401/403', () => {",
+              "  pm.expect([200, 401, 403]).to.include(pm.response.code);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "4b. My Accounts (by id)",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": {
+          "raw": "{{platform_base_url}}/polygon-bank/v1/accounts/{{account_id}}",
+          "host": ["{{platform_base_url}}"],
+          "path": ["polygon-bank", "v1", "accounts", "{{account_id}}"]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 with valid jwt, else 401/403', () => {",
+              "  pm.expect([200, 401, 403]).to.include(pm.response.code);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Balance",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"accountNumber\": \"{{account_number}}\"\n}"
+        },
+        "url": { "raw": "{{platform_base_url}}/transfer/v1/accounting/balance", "host": ["{{platform_base_url}}"], "path": ["transfer", "v1", "accounting", "balance"] },
+        "description": "POST, not GET — a card number is resolved to its linked bank account number client-side before this call in the real app."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 with valid jwt, else 401/403', () => {",
+              "  pm.expect([200, 401, 403]).to.include(pm.response.code);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Device History",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": { "raw": "{{platform_base_url}}/auth/v1/devices", "host": ["{{platform_base_url}}"], "path": ["auth", "v1", "devices"] }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 with valid jwt, else 401/403', () => {",
+              "  pm.expect([200, 401, 403]).to.include(pm.response.code);",
+              "});",
+              "if (pm.response.code === 200) {",
+              "  const body = pm.response.json();",
+              "  const list = body.data || body;",
+              "  if (Array.isArray(list) && list.length && list[0].deviceId) {",
+              "    pm.collectionVariables.set('device_id', list[0].deviceId);",
+              "  }",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Login History (per device)",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{jwt}}" }],
+        "url": {
+          "raw": "{{platform_base_url}}/auth/v1/devices/{{device_id}}/login-history?page=0&size=20",
+          "host": ["{{platform_base_url}}"],
+          "path": ["auth", "v1", "devices", "{{device_id}}", "login-history"],
+          "query": [
+            { "key": "page", "value": "0" },
+            { "key": "size", "value": "20" }
+          ]
+        },
+        "description": "Uses device_id captured by Device History. No user-wide login-history endpoint exists on the platform — it's always scoped to one device."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 with valid jwt, else 401/403', () => {",
+              "  pm.expect([200, 401, 403]).to.include(pm.response.code);",
+              "});"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    { "key": "device_id", "value": "" }
+  ]
+}
