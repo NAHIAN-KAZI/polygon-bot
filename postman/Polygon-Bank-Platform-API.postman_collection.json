@@ -6,6 +6,40 @@
   },
   "item": [
     {
+      "name": "0. Login (get test JWT)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"{{test_username}}\",\n  \"password\": \"{{test_password}}\"\n}"
+        },
+        "url": { "raw": "{{platform_base_url}}/auth/v1/auth/login", "host": ["{{platform_base_url}}"], "path": ["auth", "v1", "auth", "login"] },
+        "description": "Confirmed live 2026-09-03. Set test_username/test_password in the environment (not committed — real dev-account credentials, keep them local). Returns {token: {accessToken, refreshToken}, user: {...}}. accessToken is HS256, ~15-minute lifetime — this endpoint is run by the SCRIPT, so re-run it whenever your token expires. On success, both this collection's `jwt` variable AND a reminder to copy it into the Polygon Bot environment are set automatically."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', () => pm.response.to.have.status(200));",
+              "const body = pm.response.json();",
+              "pm.test('response has token.accessToken and token.refreshToken', () => {",
+              "  pm.expect(body.token.accessToken).to.be.a('string');",
+              "  pm.expect(body.token.refreshToken).to.be.a('string');",
+              "});",
+              "if (body.token && body.token.accessToken) {",
+              "  pm.environment.set('jwt', body.token.accessToken);",
+              "  pm.environment.set('refresh_token', body.token.refreshToken);",
+              "  console.log('Got a fresh accessToken (15-min lifetime), saved to this environment\\'s jwt variable. To test banking-service routes through the chatbot, copy it into the Polygon Bot environment\\'s jwt variable too: ' + body.token.accessToken);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "1. Services Grid",
       "request": {
         "method": "GET",

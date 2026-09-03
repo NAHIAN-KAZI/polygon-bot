@@ -60,7 +60,7 @@ Always handle both `done` and `error` — a stream is not guaranteed to reach `d
 
 ## Known gaps — read before testing
 
-1. **JWT verification is a stub.** It always rejects. Every banking-service request returns `AUTH_REQUIRED` until the bank's auth team supplies real JWT signing details (issuer, algorithm, key). Plain KB questions work today regardless of this.
+1. **JWT verification is implemented but not yet active.** Algorithm/claim shape are confirmed (HS256, `sub`=customer phone number, `iss`="internet-banking", no `aud`, ~15-min token lifetime) — but the actual shared HS256 signing secret hasn't been provided by the bank's auth team yet. Until it is, every banking-service request correctly returns `AUTH_REQUIRED`, even with a real, valid, unexpired token — this was live-verified. Plain KB questions work today regardless of this.
 2. **`X-API-Key` is a placeholder.** Will rotate before go-live. Do not ship `devtestkey123` in any client.
 3. **Base URL is internal-network only.** Confirm it's reachable from wherever your client actually runs.
 

@@ -32,9 +32,27 @@ Two separate collections — they test different things and hit different server
      a different network segment (alt IP: `10.10.10.22:8000`). Never `localhost`.
    - `api_key` — defaults to the placeholder `devtestkey123`. Update once the real
      key is issued (see `HANDOFF.md` — it will rotate before go-live).
-   - `jwt` — leave blank for now. Banking-service requests will return `AUTH_REQUIRED`
-     until real JWT verification is wired in (this is expected, not a bug — see
-     `HANDOFF.md`'s Known Gaps section). Fill it in once a real token is available.
+   - `jwt` — leave blank for now, or fill in a real token from the **Polygon Bank
+     Platform API** collection's Login request (see §2a below). Note: banking-service
+     requests will return `AUTH_REQUIRED` even with a real, valid token right now —
+     the bank hasn't provided the actual JWT signing secret yet, so verification is
+     implemented but still fail-closed (expected, not a bug — see `HANDOFF.md`'s
+     Known Gaps section).
+
+## 2a. Getting a real test JWT (Polygon Bank Platform API collection)
+
+The **Polygon Bank Platform API** environment needs `test_username`/`test_password`
+filled in with real dev-account credentials (get these from the bank's team —
+never commit them; the environment file ships with both blank).
+
+1. Select the **Polygon Bank Platform - Dev** environment, fill in `test_username`/
+   `test_password`.
+2. Run **0. Login (get test JWT)** — on success it saves `jwt`/`refresh_token` into
+   that same environment automatically.
+3. Copy the `jwt` value from there into the **Polygon Bot** environment's `jwt`
+   field to test banking-service routes through the chatbot (Postman doesn't share
+   variables across environments automatically — this copy step is manual).
+4. The access token is short-lived (~15 minutes) — re-run Login when it expires.
 
 ## 2. Run requests
 
@@ -115,5 +133,8 @@ script.
 - Don't commit a real `api_key` or `jwt` into `postman/Polygon-Bot.postman_environment.json`
   — it's checked into this repo with only the placeholder values. Keep real secrets in
   a personal, un-committed Postman environment override, or Postman's vault.
+- Same for `postman/Polygon-Bank-Platform-API.postman_environment.json`'s `test_username`/
+  `test_password`/`jwt`/`refresh_token` — all ship blank. Test-account credentials are
+  real, live dev-environment access; treat them like any other secret.
 - The `Delete Document` request is destructive — confirm `doc_id` before running it
   against anything other than a test upload.
