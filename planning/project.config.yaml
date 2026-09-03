@@ -50,8 +50,8 @@ planning:
   # version: mirrors the artifact's own header-table Version field — kept
   # here too so /agentic-harness:plan status doesn't have to open every file.
   stages:
-    brd:      { status: approved, artifact: planning/BRD.md,      version: "0.2", approved_on: "2026-09-01" }
-    srs:      { status: approved, artifact: planning/SRS.md,      version: "0.2", approved_on: "2026-09-01" }
+    brd:      { status: approved, artifact: planning/BRD.md,      version: "0.3", approved_on: "2026-09-03" }
+    srs:      { status: approved, artifact: planning/SRS.md,      version: "0.3", approved_on: "2026-09-03" }
     design:   { status: skipped, artifact: planning/DESIGN.md,   version: "", approved_on: "" }
     features: { status: approved, artifact: planning/FEATURES.md, version: "0.2", approved_on: "2026-09-01" }
     adr:      { status: approved, artifact: planning/adr/,        version: "14", approved_on: "2026-09-01" }

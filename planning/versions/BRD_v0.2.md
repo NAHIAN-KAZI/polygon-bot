@@ -5,8 +5,8 @@
 | | |
 |---|---|
 | **Document title** | Polygon Bot — Banking Intent & Service Routing — Business Requirements |
-| **Version** | 0.3 |
-| **Date** | 2026-09-03 |
+| **Version** | 0.2 |
+| **Date** | 2026-09-01 |
 | **Author** | Nahian Kazi |
 | **Status** | Approved |
 
@@ -200,12 +200,7 @@ Requirements are grouped by module. Priority uses **M** (Must-have), **S** (Shou
   the two never drift apart.
 - The specific technical details of the main application's authentication token (issuer, signing
   method, claim contents) are not yet available; validation of that token is treated as a
-  pending, pluggable piece of the design (see Open Items). **Updated 2026-09-03:** a live login
-  against the bank's dev environment (test credentials) confirmed the token is HS256
-  (symmetric shared secret, not asymmetric) — `sub` is the customer's phone number, `iss` is the
-  literal string `"internet-banking"`, no `aud` claim, ~15-minute lifetime. Verification logic is
-  implemented against this confirmed shape; only the actual shared secret value remains pending
-  from the bank (see Open Items).
+  pending, pluggable piece of the design (see Open Items).
 - Real external banking-service APIs are not available for most banking-service requests during
   this phase; realistic mock data is used in their place. **Updated 2026-09-01:** the main
   application's frontend/backend team has since provided the real platform's API map
@@ -234,12 +229,9 @@ Requirements are grouped by module. Priority uses **M** (Must-have), **S** (Shou
 
 ## Open Items (TBD)
 
-1. *(Updated 2026-09-03, partially resolved)* Customer identity token format is now confirmed:
-   HS256, `sub`=phone number, `iss`="internet-banking", no `aud`, ~15-min lifetime — verified via
-   a live login against the bank's dev environment. Verification logic is implemented against
-   this shape (fail-closed by default). **Still outstanding: the actual shared HS256 signing
-   secret value**, which the bank's auth team must provide before verification can succeed against
-   a real token — until then every banking-service request correctly returns `AUTH_REQUIRED`. (§6.3)
+1. Exact customer identity token format — issuer, signing method, and claim contents — to be
+   provided by the main Polygon Bank application's authentication team before this can be fully
+   implemented. (§6.3)
 2. Official banking category/service/subservice taxonomy — to be provided later, replacing the
    provisional catalog. (§6.2)
 3. Real banking-service API specifications and credentials — to be provided later, replacing mock
@@ -253,4 +245,4 @@ Requirements are grouped by module. Priority uses **M** (Must-have), **S** (Shou
    issuer/algorithm/key details are still pending.
 
 ---
-*End of document — v0.3, Approved 2026-09-03 (amended from v0.2 following a live login against the bank's dev environment confirming the JWT's HS256 shape). Open items: 3 remaining (the actual HS256 shared secret value, real banking API details for actions beyond the 5 read-only queries, future session storage).*
+*End of document — v0.2, Approved 2026-09-01 (amended from v0.1 following `user-app-api-map.md`, provided by the main application's frontend/backend team). Open items: 3 remaining (JWT specifics, real banking API details for actions beyond the 5 read-only queries, future session storage).*

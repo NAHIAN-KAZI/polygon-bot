@@ -5,10 +5,10 @@
 | | |
 |---|---|
 | **Document title** | Polygon Bot — Software Requirements Specification |
-| **Version** | 0.3 |
-| **Date** | 2026-09-03 |
+| **Version** | 0.2 |
+| **Date** | 2026-09-01 |
 | **Author** | Nahian Kazi |
-| **Based on** | Polygon Bot BRD v0.3 |
+| **Based on** | Polygon Bot BRD v0.2 |
 | **Status** | Approved |
 
 ## 1. Introduction
@@ -211,7 +211,7 @@ Priority: M (S for FR-IDENT-06/07) · Actors: main Polygon Bank application · P
 
 | ID | Requirement | Priority |
 |---|---|---|
-| FR-IDENT-01 | The system shall extract and verify a JWT from the `Authorization: Bearer` header when present, via a pluggable verification function. **Updated 2026-09-03:** algorithm/claims confirmed via a live login against the bank's dev environment — HS256 (symmetric shared secret), `sub` claim = customer's phone number, `iss` = literal string `"internet-banking"`, no `aud` claim, ~15-minute token lifetime. Verification is implemented against this shape and fails closed (returns no identity) whenever the shared secret itself is unconfigured or a token fails signature/expiry/issuer validation — the actual secret value remains the one outstanding item (BRD Open Item 1). | M |
+| FR-IDENT-01 | The system shall extract and verify a JWT from the `Authorization: Bearer` header when present, via a pluggable verification function (issuer/algorithm/key TBD — BRD Open Item 1; the function signature is fixed now, its real implementation lands once those details arrive). | M |
 | FR-IDENT-02 | The verified JWT's subject claim (customer identifier) shall be the sole source of customer identity for a banking-service request — the LLM shall never supply or influence this value. | M |
 | FR-IDENT-03 | KB-classified messages shall continue to work with no JWT present, exactly as today. | M |
 | FR-IDENT-04 | A banking-service-eligible request with a missing or invalid/expired JWT shall receive `type: AUTH_REQUIRED` with no further processing of the banking-service branch. | M |
@@ -447,7 +447,7 @@ No orphans.
 
 ## Appendix B — Open Items (TBD)
 
-1. *(Updated 2026-09-03, partially resolved)* JWT issuer/algorithm/claims confirmed (HS256, `sub`=phone, `iss`="internet-banking", no `aud`, ~15-min lifetime) via a live login against the bank's dev environment; FR-IDENT-01's verification function is implemented against this shape and fails closed. **Still outstanding: the actual shared HS256 signing secret**, needed from the bank's auth team before verification can succeed against a real token. Also still the gating question for §3.4's real adapters (FR-INTEG-05) — they assume the same JWT is forwardable as-is to the downstream banking services, which is untested until a working secret is in place. (§3.3, §2.5, §3.4)
+1. JWT issuer, signing algorithm, and key source — pending from the main bank's auth team; FR-IDENT-01's verification function is a fixed interface awaiting a real implementation. Also now the gating question for §3.4's real adapters (FR-INTEG-05) — they assume the same JWT is forwardable as-is to the downstream banking services, which isn't yet confirmed. (§3.3, §2.5, §3.4)
 2. ~~Official banking taxonomy~~ — **resolved 2026-09-01**: sourced live from `support/v1/services` + `support/v1/pay-transfer` (§3.2), no longer a placeholder.
 3. Real banking-service adapters — **partially resolved 2026-09-01**: 5 subservices (balance, transaction history, accounts, device history, login history) now have real adapters (§3.4, FR-INTEG-05); every other subservice remains mocked until a real endpoint is supplied for it.
 4. Long-term durable/shared session storage — explicitly deferred past this phase (BRD FR-IDENT-06), no design commitment here beyond the swappable interface. (§3.3)
@@ -455,4 +455,4 @@ No orphans.
 6. *(Added 2026-09-01)* Whether `support/v1/services`/`support/v1/pay-transfer` require their own service-level auth for a non-mobile-app caller like Polygon Bot — `user-app-api-map.md` doesn't document auth for these two specifically; needs confirming with the platform team before FR-CATALOG-01 can be implemented against production. (§3.2, §2.6)
 
 ---
-*End of document — v0.3, Approved 2026-09-03 (amended from v0.2 following a live login against the bank's dev environment confirming the JWT's HS256 shape). Open items: 6 — JWT shape now confirmed (secret value still pending), taxonomy source resolved, 5 of many adapters now real, 3 remain pending external confirmation, none block moving forward.*
+*End of document — v0.2, Approved 2026-09-01 (amended from v0.1 following `user-app-api-map.md`). Open items: 6 — 1 resolved this revision (taxonomy source), 1 partially resolved (5 of many adapters now real), 4 remain pending external confirmation, none block moving forward.*

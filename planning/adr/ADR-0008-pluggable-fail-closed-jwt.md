@@ -31,3 +31,22 @@ being accidentally left in place; rejected outright, no exceptions.
 
 ## Related
 FR-IDENT-01..04, NFR-SEC-01, F-03
+
+**Confirmed 2026-09-03 (T-20, live login against the bank's dev environment):** the real
+implementation is now wired in behind this ADR's fixed interface, exactly as anticipated — this
+is not a reversal of the decision. A live login (test credentials from the bank's team) against
+`https://internet-banking.dev-polygontech.xyz/auth/v1/auth/login` returned a real token, decoded
+(unverified) to confirm:
+1. Algorithm is **HS256** (symmetric shared secret), not an asymmetric scheme — matches
+   `api-endpoints-guide.md`'s independent note that Kong Gateway validates JWTs as HS256. There is
+   no public key/JWKS to fetch; verification requires the bank's actual shared secret.
+2. `sub` claim is the customer's phone number (already correct as the session key per ADR-0005 —
+   no change needed there), `iss` is the literal string `"internet-banking"`, no `aud` claim,
+   `exp - iat = 900s` (15-minute token lifetime).
+
+`verify_jwt()` now performs real HS256 signature/issuer/expiry validation via `PyJWT`, but stays
+fail-closed exactly as this ADR requires: with no `JWT_HS256_SECRET` configured (still the case —
+the bank hasn't provided the actual secret value yet), it returns `None` unconditionally before
+attempting to decode anything, verified live against a real, valid, unexpired bank-issued token
+(still correctly rejected as `AUTH_REQUIRED`). The fail-closed guarantee this ADR establishes is
+unchanged; only the "not yet available" signing details it anticipated are now mostly resolved.
