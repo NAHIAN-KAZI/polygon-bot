@@ -179,7 +179,7 @@ def test_result_type_service_unavailable_taxonomy_populated_payload_routing_null
     async def fake_classify(message, recent_turns=None):
         return BankingService(category="account_info", service="balance", subservice="checking")
 
-    def fake_verify_jwt(token):
+    async def fake_verify_jwt(token):
         return CustomerIdentity(customer_id=CUSTOMER_ID)
 
     async def fake_fulfill(customer_identity, jwt, category, service, subservice, payload):
@@ -209,7 +209,7 @@ def test_result_type_banking_service_payload_and_routing_populated(client, monke
     async def fake_classify(message, recent_turns=None):
         return BankingService(category="account_info", service="balance", subservice="checking")
 
-    def fake_verify_jwt(token):
+    async def fake_verify_jwt(token):
         return CustomerIdentity(customer_id=CUSTOMER_ID)
 
     fulfillment_data = {"balance": 1234.56, "currency": "USD"}
@@ -251,7 +251,7 @@ def test_session_id_does_not_affect_behavior(client, monkeypatch):
     async def fake_classify(message, recent_turns=None):
         return BankingService(category="account_info", service="balance", subservice="checking")
 
-    def fake_verify_jwt(token):
+    async def fake_verify_jwt(token):
         return CustomerIdentity(customer_id=CUSTOMER_ID)
 
     fulfillment_data = {"balance": 42.0}

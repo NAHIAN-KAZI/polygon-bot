@@ -1,12 +1,25 @@
-"""Tests for app/banking/identity.py: JWT extraction and real HS256
-verify_jwt verification (ADR-0008, amended 2026-09-03).
-"""
-import time
+"""Tests for app/banking/identity.py: JWT extraction and remote token
+introspection verify_jwt (ADR-0008, amended 2026-09-03: the bank does not
+hand out its JWT signing secret, so verification now asks the bank's own
+/auth/v1/auth/session endpoint who a token belongs to, instead of decoding
+an HS256 JWT locally).
 
-import jwt
+verify_jwt makes a real httpx.AsyncClient.get() call, so httpx.AsyncClient.get
+is monkeypatched directly here -- matching this codebase's existing style of
+monkeypatching the async call site (see tests/test_taxonomy.py,
+tests/test_real_adapters.py) rather than pulling in a new test dependency
+like respx.
+
+verify_jwt/require_customer_identity are both async def now. Following
+tests/test_real_adapters.py's and tests/test_adapter_base.py's pattern, they
+are driven with asyncio.run() inside sync test functions rather than adding
+pytest-asyncio as a dependency (not present anywhere else in this repo).
+"""
+import asyncio
+
+import httpx
 import pytest
 
-from app.banking import identity as identity_module
 from app.banking.identity import (
     AuthRequiredError,
     CustomerIdentity,
@@ -16,31 +29,45 @@ from app.banking.identity import (
 )
 from app.config import settings
 
-TEST_SECRET = "test-secret"
-TEST_ISSUER = "internet-banking"
+TEST_BASE_URL = "https://platform.example.test"
 
 
-def _make_token(secret=TEST_SECRET, sub="cust-123", iss=TEST_ISSUER, exp_delta=900, **extra_claims):
-    """Mint an HS256 JWT for tests. exp_delta is seconds from now; pass a
-    negative value to produce an already-expired token. Pass exp_delta=None
-    to omit the exp claim entirely."""
-    claims = dict(extra_claims)
-    if sub is not None:
-        claims["sub"] = sub
-    if iss is not None:
-        claims["iss"] = iss
-    if exp_delta is not None:
-        claims["exp"] = int(time.time()) + exp_delta
-    return jwt.encode(claims, secret, algorithm="HS256")
+class FakeResponse:
+    def __init__(self, status_code=200, json_data=None, raise_on_json=False):
+        self.status_code = status_code
+        self._json_data = json_data
+        self._raise_on_json = raise_on_json
+
+    def json(self):
+        if self._raise_on_json:
+            raise ValueError("response body is not valid JSON")
+        return self._json_data
+
+
+def _install_get(monkeypatch, response=None, exception=None):
+    """Patches httpx.AsyncClient.get. Returns the list of captured calls
+    (each a dict of url/headers) for later assertions."""
+    calls = []
+
+    async def fake_get(self, url, *, headers=None, **kwargs):
+        calls.append({"url": url, "headers": headers})
+        if exception is not None:
+            raise exception
+        return response
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+    return calls
 
 
 @pytest.fixture
-def configured_secret(monkeypatch):
-    """Configure JWT_HS256_SECRET (and issuer) as the codebase's existing
-    monkeypatch-settings convention (see conftest.py's isolated_catalog)."""
-    monkeypatch.setattr(settings, "JWT_HS256_SECRET", TEST_SECRET)
-    monkeypatch.setattr(settings, "JWT_ISSUER", TEST_ISSUER)
-    return settings
+def platform_base_url(monkeypatch):
+    """Configure settings.PLATFORM_API_BASE_URL to a known value so the
+    outbound request URL can be asserted on deterministically."""
+    monkeypatch.setattr(settings, "PLATFORM_API_BASE_URL", TEST_BASE_URL)
+    return TEST_BASE_URL
+
+
+# --- extract_jwt (unchanged by the introspection pivot) ---------------------
 
 
 def test_extract_jwt_returns_token_from_valid_bearer_header():
@@ -63,40 +90,7 @@ def test_extract_jwt_returns_none_for_malformed_or_missing_input(header):
     assert extract_jwt(header) is None
 
 
-def test_verify_jwt_never_raises_and_always_returns_none_when_secret_unconfigured():
-    # settings.JWT_HS256_SECRET is left at its real default (empty string) in
-    # this test, so verify_jwt fails closed per NFR-SEC-01 before it ever
-    # attempts to decode any of these — well-formed, garbage, or otherwise.
-    candidate_tokens = [
-        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U",
-        "",
-        "not-a-jwt-at-all",
-        "Bearer abc.def.ghi",
-        "....",
-        "a" * 10000,
-    ]
-    for token in candidate_tokens:
-        result = verify_jwt(token)
-        assert result is None
-
-
-def test_verify_jwt_never_raises_on_malformed_tokens_when_secret_configured(configured_secret):
-    # Same malformed/garbage inputs as above, but now with a real secret
-    # configured so verify_jwt actually attempts to decode them. PyJWT's
-    # DecodeError/InvalidTokenError family must all funnel to None, never
-    # propagate as an exception.
-    candidate_tokens = [
-        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U",
-        "",
-        "not-a-jwt-at-all",
-        "Bearer abc.def.ghi",
-        "....",
-        "a" * 10000,
-        _make_token()[:20],  # truncated JWT
-    ]
-    for token in candidate_tokens:
-        result = verify_jwt(token)
-        assert result is None
+# --- CustomerIdentity / AuthRequiredError (unchanged shapes) ----------------
 
 
 def test_customer_identity_construction_and_equality():
@@ -105,38 +99,6 @@ def test_customer_identity_construction_and_equality():
     assert identity == CustomerIdentity(customer_id="cust-123")
     assert identity != CustomerIdentity(customer_id="cust-456")
     assert hash(identity) == hash(CustomerIdentity(customer_id="cust-123"))
-
-
-def test_require_customer_identity_raises_for_missing_header():
-    with pytest.raises(AuthRequiredError):
-        require_customer_identity(None)
-
-
-def test_require_customer_identity_raises_for_empty_header():
-    with pytest.raises(AuthRequiredError):
-        require_customer_identity("")
-
-
-def test_require_customer_identity_raises_for_header_without_bearer_prefix():
-    with pytest.raises(AuthRequiredError):
-        require_customer_identity("garbage")
-
-
-def test_require_customer_identity_raises_for_well_formed_but_unverifiable_token():
-    # Real JWT verification has landed (ADR-0008 amendment 2026-09-03), but
-    # settings.JWT_HS256_SECRET is left at its real default (empty) in this
-    # test, so verify_jwt still fails closed per NFR-SEC-01 and even a
-    # syntactically well-formed Bearer token is rejected.
-    with pytest.raises(AuthRequiredError):
-        require_customer_identity("Bearer some.jwt.token")
-
-
-def test_require_customer_identity_raises_end_to_end_for_wrong_secret_token(configured_secret):
-    # End-to-end (extract -> verify -> raise) check that a token signed with
-    # the wrong secret is rejected even once a real secret is configured.
-    token = _make_token(secret="a-different-secret")
-    with pytest.raises(AuthRequiredError):
-        require_customer_identity(f"Bearer {token}")
 
 
 def test_auth_required_error_is_a_distinguishable_exception_subclass():
@@ -156,93 +118,202 @@ def test_auth_required_error_is_a_distinguishable_exception_subclass():
             raise AssertionError("ValueError handler should not catch AuthRequiredError")
 
 
-def test_require_customer_identity_returns_identity_on_successful_verification(monkeypatch):
-    expected_identity = CustomerIdentity(customer_id="cust-789")
-    monkeypatch.setattr(identity_module, "verify_jwt", lambda token: expected_identity)
-
-    result = require_customer_identity("Bearer some.jwt.token")
-
-    assert result == expected_identity
+# --- verify_jwt: success path -------------------------------------------------
 
 
-# --- Real HS256 verify_jwt behavior (ADR-0008 amendment 2026-09-03) --------
+def test_verify_jwt_returns_identity_for_successful_introspection(monkeypatch, platform_base_url):
+    body = {
+        "phone": "01615888102",
+        "userId": 64,
+        "role": "USER",
+        "issuedAt": "2026-09-01T00:00:00Z",
+        "expiresAt": "2026-09-02T00:00:00Z",
+    }
+    _install_get(monkeypatch, response=FakeResponse(status_code=200, json_data=body))
+
+    result = asyncio.run(verify_jwt("some.valid.token"))
+
+    assert result == CustomerIdentity(customer_id="01615888102")
 
 
-def test_verify_jwt_returns_identity_for_valid_token_correct_secret_and_issuer(configured_secret):
-    token = _make_token(sub="cust-123")
-    assert verify_jwt(token) == CustomerIdentity(customer_id="cust-123")
+# --- verify_jwt: non-200 responses -------------------------------------------
 
 
-def test_verify_jwt_returns_none_for_expired_token(configured_secret):
-    token = _make_token(exp_delta=-3600)  # expired an hour ago, beyond leeway
-    assert verify_jwt(token) is None
-
-
-def test_verify_jwt_returns_none_for_wrong_secret(configured_secret):
-    token = _make_token(secret="not-the-configured-secret")
-    assert verify_jwt(token) is None
-
-
-def test_verify_jwt_returns_none_for_wrong_issuer(configured_secret):
-    token = _make_token(iss="some-other-issuer")
-    assert verify_jwt(token) is None
-
-
-def test_verify_jwt_returns_none_when_issuer_check_disabled_and_no_iss_configured(monkeypatch):
-    # settings.JWT_ISSUER == "" disables the issuer check entirely, per the
-    # implementation's `if settings.JWT_ISSUER:` guard. A token with no iss
-    # claim at all must still verify successfully in that mode.
-    monkeypatch.setattr(settings, "JWT_HS256_SECRET", TEST_SECRET)
-    monkeypatch.setattr(settings, "JWT_ISSUER", "")
-    token = _make_token(iss=None)
-    assert verify_jwt(token) == CustomerIdentity(customer_id="cust-123")
-
-
-def test_verify_jwt_returns_none_for_token_missing_sub_claim(configured_secret):
-    token = _make_token(sub=None)
-    assert verify_jwt(token) is None
-
-
-def test_verify_jwt_returns_none_for_token_with_non_string_sub(configured_secret):
-    token = jwt.encode(
-        {"sub": 1234567890, "iss": TEST_ISSUER, "exp": int(time.time()) + 900},
-        TEST_SECRET,
-        algorithm="HS256",
+def test_verify_jwt_returns_none_for_401_invalid_or_garbage_token(monkeypatch, platform_base_url):
+    _install_get(
+        monkeypatch,
+        response=FakeResponse(status_code=401, json_data={"message": "invalid token"}),
     )
-    assert verify_jwt(token) is None
+
+    assert asyncio.run(verify_jwt("garbage-not-a-real-token")) is None
 
 
-@pytest.mark.parametrize("token", [
-    "",
-    "not-a-jwt-at-all",
-    "Bearer abc.def.ghi",
-    "....",
-    "a" * 10000,
+def test_verify_jwt_returns_none_for_401_missing_token_message(monkeypatch, platform_base_url):
+    _install_get(
+        monkeypatch,
+        response=FakeResponse(status_code=401, json_data={"message": "token is required"}),
+    )
+
+    assert asyncio.run(verify_jwt("some.token.value")) is None
+
+
+@pytest.mark.parametrize("status_code", [400, 403, 404, 500, 503])
+def test_verify_jwt_returns_none_for_other_non_200_statuses(monkeypatch, platform_base_url, status_code):
+    _install_get(monkeypatch, response=FakeResponse(status_code=status_code, json_data={}))
+
+    assert asyncio.run(verify_jwt("some.token.value")) is None
+
+
+# --- verify_jwt: malformed/missing claims on an otherwise-200 response ------
+
+
+def test_verify_jwt_returns_none_when_phone_field_missing(monkeypatch, platform_base_url):
+    _install_get(
+        monkeypatch,
+        response=FakeResponse(status_code=200, json_data={"userId": 64, "role": "USER"}),
+    )
+
+    assert asyncio.run(verify_jwt("some.token.value")) is None
+
+
+@pytest.mark.parametrize("phone_value", [None, 1615888102, 12.5, [], {}])
+def test_verify_jwt_returns_none_when_phone_is_not_a_string(monkeypatch, platform_base_url, phone_value):
+    _install_get(
+        monkeypatch,
+        response=FakeResponse(status_code=200, json_data={"phone": phone_value}),
+    )
+
+    assert asyncio.run(verify_jwt("some.token.value")) is None
+
+
+def test_verify_jwt_returns_none_when_phone_is_empty_string(monkeypatch, platform_base_url):
+    # "" is a str but falsy -- covered by the `if not phone` guard, distinct
+    # from the non-string branch above.
+    _install_get(
+        monkeypatch,
+        response=FakeResponse(status_code=200, json_data={"phone": ""}),
+    )
+
+    assert asyncio.run(verify_jwt("some.token.value")) is None
+
+
+def test_verify_jwt_returns_none_when_response_body_is_not_valid_json(monkeypatch, platform_base_url):
+    _install_get(
+        monkeypatch,
+        response=FakeResponse(status_code=200, raise_on_json=True),
+    )
+
+    assert asyncio.run(verify_jwt("some.token.value")) is None
+
+
+# --- verify_jwt: network errors, must never raise ----------------------------
+
+
+@pytest.mark.parametrize("exc", [
+    httpx.ConnectError("connection refused"),
+    httpx.TimeoutException("request timed out"),
+    httpx.ReadTimeout("read timed out"),
 ])
-def test_verify_jwt_returns_none_for_malformed_tokens_with_secret_configured(configured_secret, token):
-    assert verify_jwt(token) is None
+def test_verify_jwt_returns_none_on_network_error(monkeypatch, platform_base_url, exc):
+    _install_get(monkeypatch, exception=exc)
+
+    assert asyncio.run(verify_jwt("some.token.value")) is None
 
 
-def test_verify_jwt_returns_none_for_truncated_jwt_with_secret_configured(configured_secret):
-    full_token = _make_token()
-    truncated = full_token[: len(full_token) // 2]
-    assert verify_jwt(truncated) is None
+# --- verify_jwt: falsy token short-circuits, no HTTP call --------------------
 
 
-def test_verify_jwt_fail_closed_default_rejects_validly_signed_token_when_secret_unconfigured():
-    # Critical regression check (NFR-SEC-01): settings.JWT_HS256_SECRET is
-    # NOT monkeypatched here and stays at its real default (empty string).
-    # A token that is validly signed -- with literally any secret -- must
-    # still be rejected, proving the empty-secret gate can't be bypassed by
-    # presenting a well-formed, correctly-signed JWT. This is what keeps the
-    # other test files that monkeypatch verify_jwt directly or construct
-    # CustomerIdentity without going through it safe from this change.
-    assert settings.JWT_HS256_SECRET == ""
-    token = _make_token(secret="anything-at-all")
-    assert verify_jwt(token) is None
+@pytest.mark.parametrize("token", ["", None])
+def test_verify_jwt_short_circuits_for_falsy_token_without_http_call(monkeypatch, platform_base_url, token):
+    calls = _install_get(monkeypatch, response=FakeResponse(status_code=200, json_data={"phone": "x"}))
+
+    assert asyncio.run(verify_jwt(token)) is None
+    assert calls == []
 
 
-def test_require_customer_identity_returns_identity_end_to_end_with_real_verification(configured_secret):
-    token = _make_token(sub="cust-456")
-    identity = require_customer_identity(f"Bearer {token}")
-    assert identity == CustomerIdentity(customer_id="cust-456")
+# --- verify_jwt: outbound request shape --------------------------------------
+
+
+def test_verify_jwt_builds_correct_outbound_request(monkeypatch, platform_base_url):
+    calls = _install_get(
+        monkeypatch,
+        response=FakeResponse(status_code=200, json_data={"phone": "01615888102"}),
+    )
+
+    asyncio.run(verify_jwt("abc.def.ghi"))
+
+    # Only httpx.AsyncClient.get was monkeypatched (not .post/.request), so a
+    # captured call here also proves the request used GET.
+    assert len(calls) == 1
+    call = calls[0]
+    assert call["url"] == f"{TEST_BASE_URL}/auth/v1/auth/session"
+    assert call["headers"] == {"Authorization": "Bearer abc.def.ghi"}
+
+
+# --- require_customer_identity -----------------------------------------------
+
+
+def test_require_customer_identity_returns_identity_for_valid_token(monkeypatch, platform_base_url):
+    _install_get(
+        monkeypatch,
+        response=FakeResponse(status_code=200, json_data={"phone": "01615888102"}),
+    )
+
+    result = asyncio.run(require_customer_identity("Bearer abc.def.ghi"))
+
+    assert result == CustomerIdentity(customer_id="01615888102")
+
+
+def test_require_customer_identity_raises_for_missing_header():
+    with pytest.raises(AuthRequiredError):
+        asyncio.run(require_customer_identity(None))
+
+
+def test_require_customer_identity_raises_for_empty_header():
+    with pytest.raises(AuthRequiredError):
+        asyncio.run(require_customer_identity(""))
+
+
+def test_require_customer_identity_raises_for_header_without_bearer_prefix():
+    with pytest.raises(AuthRequiredError):
+        asyncio.run(require_customer_identity("garbage"))
+
+
+def test_require_customer_identity_raises_when_introspection_rejects_token(monkeypatch, platform_base_url):
+    _install_get(
+        monkeypatch,
+        response=FakeResponse(status_code=401, json_data={"message": "invalid token"}),
+    )
+
+    with pytest.raises(AuthRequiredError):
+        asyncio.run(require_customer_identity("Bearer abc.def.ghi"))
+
+
+def test_require_customer_identity_raises_on_network_error(monkeypatch, platform_base_url):
+    _install_get(monkeypatch, exception=httpx.ConnectError("connection refused"))
+
+    with pytest.raises(AuthRequiredError):
+        asyncio.run(require_customer_identity("Bearer abc.def.ghi"))
+
+
+def test_require_customer_identity_end_to_end_success(monkeypatch, platform_base_url):
+    calls = _install_get(
+        monkeypatch,
+        response=FakeResponse(status_code=200, json_data={"phone": "01615888102"}),
+    )
+
+    identity = asyncio.run(require_customer_identity("Bearer abc.def.ghi"))
+
+    assert identity == CustomerIdentity(customer_id="01615888102")
+    assert len(calls) == 1
+    assert calls[0]["headers"] == {"Authorization": "Bearer abc.def.ghi"}
+
+
+# Note: identity.py does not currently import `logging` or emit any log
+# records at all (its docstring promise of "never logs the raw token" is
+# structurally true because there is no logging call to leak it from). This
+# file has no pre-existing log-capture fixture of its own (unlike
+# tests/test_audit.py's `audit_spy`, which targets a different module's
+# logger), so per the task instructions a dedicated "no raw token in logs"
+# test is skipped here rather than inventing new capture infra for one check
+# with nothing to assert against.

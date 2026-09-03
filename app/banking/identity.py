@@ -1,7 +1,7 @@
 import re
 from dataclasses import dataclass
 
-import jwt
+import httpx
 
 from app.config import settings
 
@@ -22,59 +22,49 @@ def extract_jwt(authorization_header: str | None) -> str | None:
     return match.group(1)
 
 
-def verify_jwt(token: str) -> CustomerIdentity | None:
-    """Real HS256 verification (ADR-0008 amendment 2026-09-03).
+async def verify_jwt(token: str) -> CustomerIdentity | None:
+    """Real verification via remote token introspection (ADR-0008 amendment,
+    revised 2026-09-03): the bank does not hand out its JWT signing secret, so
+    instead of verifying the signature locally, this asks the bank's own auth
+    service to verify the token and tell us who it belongs to. Never raises —
+    any failure (network error, non-200 response, missing/malformed claims)
+    returns None (NFR-SEC-01 fail-closed). Never logs the raw token."""
+    if not token:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{settings.PLATFORM_API_BASE_URL}/auth/v1/auth/session",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+    except httpx.HTTPError:
+        return None
 
-    A live login against the bank's dev environment confirmed the algorithm
-    and claims shape: HS256 (symmetric shared secret), `sub` is the
-    customer's phone number and is the session key per ADR-0005, `iss` is
-    the literal string "internet-banking", no `aud` claim, ~15-minute
-    lifetime. Only the actual shared secret value remains pending from the
-    bank — until `JWT_HS256_SECRET` is configured, this stays fail-closed
-    per NFR-SEC-01: an unconfigured or unverifiable token is never treated
-    as valid. Never raises, and never logs the raw token, secret, or
-    decoded claims.
-    """
-    if not settings.JWT_HS256_SECRET:
-        return None  # NFR-SEC-01: no signing configuration = fail closed
+    if resp.status_code != 200:
+        return None
 
     try:
-        decode_kwargs = {"algorithms": [settings.JWT_ALGORITHM], "leeway": settings.JWT_LEEWAY_SECONDS}
-        if settings.JWT_ISSUER:
-            decode_kwargs["issuer"] = settings.JWT_ISSUER
-        claims = jwt.decode(token, settings.JWT_HS256_SECRET, **decode_kwargs,
-                             options={"verify_aud": False})  # no aud claim exists on this token
+        data = resp.json()
+    except ValueError:
+        return None
 
-        sub = claims.get("sub")
-        if not sub or not isinstance(sub, str):
-            return None  # ADR-0005: session key IS sub; no sub, no identity
+    phone = data.get("phone")
+    if not phone or not isinstance(phone, str):
+        return None
 
-        return CustomerIdentity(customer_id=sub)
-
-    except jwt.ExpiredSignatureError:
-        return None
-    except jwt.InvalidIssuerError:
-        return None
-    except jwt.InvalidSignatureError:
-        return None
-    except jwt.DecodeError:
-        return None
-    except jwt.InvalidTokenError:
-        return None
-    except Exception:
-        return None
+    return CustomerIdentity(customer_id=phone)
 
 
 class AuthRequiredError(Exception):
     """Raised when a banking-service-eligible request has no valid customer identity."""
 
 
-def require_customer_identity(authorization_header: str | None) -> CustomerIdentity:
+async def require_customer_identity(authorization_header: str | None) -> CustomerIdentity:
     token = extract_jwt(authorization_header)
     if token is None:
         raise AuthRequiredError
 
-    identity = verify_jwt(token)
+    identity = await verify_jwt(token)
     if identity is None:
         raise AuthRequiredError
 

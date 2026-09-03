@@ -107,7 +107,7 @@ async def _kb_stream(req: ChatRequest):
 async def _chat_stream(req: ChatRequest, authorization: str | None):
     turn_started_at = time.monotonic()
     token = extract_jwt(authorization)
-    customer_identity = verify_jwt(token) if token else None
+    customer_identity = await verify_jwt(token) if token else None
 
     recent_turns = get_session(customer_identity.customer_id) if customer_identity else []
 

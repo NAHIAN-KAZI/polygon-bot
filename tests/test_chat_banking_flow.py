@@ -177,7 +177,7 @@ def test_banking_service_adapter_auth_error_requires_auth(client, monkeypatch):
     async def fake_classify(message, recent_turns=None):
         return BankingService(category="account_info", service="balance", subservice=None)
 
-    def fake_verify_jwt(token):
+    async def fake_verify_jwt(token):
         return CustomerIdentity(customer_id=CUSTOMER_ID)
 
     fulfill_calls = []
@@ -214,7 +214,7 @@ def test_banking_service_adapter_unavailable_error(client, monkeypatch):
     async def fake_classify(message, recent_turns=None):
         return BankingService(category="account_info", service="balance", subservice=None)
 
-    def fake_verify_jwt(token):
+    async def fake_verify_jwt(token):
         return CustomerIdentity(customer_id=CUSTOMER_ID)
 
     async def fake_fulfill(customer_identity, jwt, category, service, subservice, payload):
@@ -244,7 +244,7 @@ def test_banking_service_mock_adapter_success(client, monkeypatch):
     async def fake_classify(message, recent_turns=None):
         return BankingService(category="pay_transfer", service="transfer_funds", subservice="internal")
 
-    def fake_verify_jwt(token):
+    async def fake_verify_jwt(token):
         return CustomerIdentity(customer_id=CUSTOMER_ID)
 
     mock_data = {"mock": True, "subservice": "internal", "note": "synthetic"}
@@ -281,7 +281,7 @@ def test_banking_service_real_adapter_balance_success(client, monkeypatch):
     async def fake_classify(message, recent_turns=None):
         return BankingService(category="account_info", service="balance", subservice="balance")
 
-    def fake_verify_jwt(token):
+    async def fake_verify_jwt(token):
         return CustomerIdentity(customer_id=CUSTOMER_ID)
 
     async def fake_fulfill(customer_identity, jwt, category, service, subservice, payload):
@@ -339,7 +339,7 @@ def test_record_turn_called_for_kb_question_with_identity(client, monkeypatch):
     async def fake_classify(message, recent_turns=None):
         return KbQuestion()
 
-    def fake_verify_jwt(token):
+    async def fake_verify_jwt(token):
         return CustomerIdentity(customer_id=CUSTOMER_ID)
 
     monkeypatch.setattr(chat_module, "classify", fake_classify)
@@ -362,7 +362,7 @@ def test_record_turn_called_for_banking_service_with_identity(client, monkeypatc
     async def fake_classify(message, recent_turns=None):
         return BankingService(category="account_info", service="balance", subservice="balance")
 
-    def fake_verify_jwt(token):
+    async def fake_verify_jwt(token):
         return CustomerIdentity(customer_id=CUSTOMER_ID)
 
     async def fake_fulfill(customer_identity, jwt, category, service, subservice, payload):
@@ -504,7 +504,7 @@ def test_audit_called_once_for_adapter_auth_error(client, monkeypatch):
     async def fake_classify(message, recent_turns=None):
         return BankingService(category="account_info", service="balance", subservice=None)
 
-    def fake_verify_jwt(token):
+    async def fake_verify_jwt(token):
         return CustomerIdentity(customer_id=CUSTOMER_ID)
 
     async def fake_fulfill(customer_identity, jwt, category, service, subservice, payload):
@@ -530,7 +530,7 @@ def test_audit_called_once_for_service_unavailable(client, monkeypatch):
     async def fake_classify(message, recent_turns=None):
         return BankingService(category="account_info", service="balance", subservice=None)
 
-    def fake_verify_jwt(token):
+    async def fake_verify_jwt(token):
         return CustomerIdentity(customer_id=CUSTOMER_ID)
 
     async def fake_fulfill(customer_identity, jwt, category, service, subservice, payload):
@@ -555,7 +555,7 @@ def test_audit_called_once_for_banking_service_success(client, monkeypatch):
     async def fake_classify(message, recent_turns=None):
         return BankingService(category="account_info", service="balance", subservice="balance")
 
-    def fake_verify_jwt(token):
+    async def fake_verify_jwt(token):
         return CustomerIdentity(customer_id=CUSTOMER_ID)
 
     async def fake_fulfill(customer_identity, jwt, category, service, subservice, payload):
