@@ -1,6 +1,10 @@
 import re
 from dataclasses import dataclass
 
+import jwt
+
+from app.config import settings
+
 _BEARER_RE = re.compile(r"^Bearer (\S+)$")
 
 
@@ -19,13 +23,46 @@ def extract_jwt(authorization_header: str | None) -> str | None:
 
 
 def verify_jwt(token: str) -> CustomerIdentity | None:
-    """Fail-closed stub (ADR-0008): the real issuer/algorithm/key for
-    customer JWTs are not yet available (BRD Open Item 1), so every token
-    is currently treated as unverifiable. The fixed `verify_jwt(token) ->
-    CustomerIdentity | None` interface is the point — a real implementation
-    can replace this body without changing the signature or any call site.
+    """Real HS256 verification (ADR-0008 amendment 2026-09-03).
+
+    A live login against the bank's dev environment confirmed the algorithm
+    and claims shape: HS256 (symmetric shared secret), `sub` is the
+    customer's phone number and is the session key per ADR-0005, `iss` is
+    the literal string "internet-banking", no `aud` claim, ~15-minute
+    lifetime. Only the actual shared secret value remains pending from the
+    bank — until `JWT_HS256_SECRET` is configured, this stays fail-closed
+    per NFR-SEC-01: an unconfigured or unverifiable token is never treated
+    as valid. Never raises, and never logs the raw token, secret, or
+    decoded claims.
     """
-    return None
+    if not settings.JWT_HS256_SECRET:
+        return None  # NFR-SEC-01: no signing configuration = fail closed
+
+    try:
+        decode_kwargs = {"algorithms": [settings.JWT_ALGORITHM], "leeway": settings.JWT_LEEWAY_SECONDS}
+        if settings.JWT_ISSUER:
+            decode_kwargs["issuer"] = settings.JWT_ISSUER
+        claims = jwt.decode(token, settings.JWT_HS256_SECRET, **decode_kwargs,
+                             options={"verify_aud": False})  # no aud claim exists on this token
+
+        sub = claims.get("sub")
+        if not sub or not isinstance(sub, str):
+            return None  # ADR-0005: session key IS sub; no sub, no identity
+
+        return CustomerIdentity(customer_id=sub)
+
+    except jwt.ExpiredSignatureError:
+        return None
+    except jwt.InvalidIssuerError:
+        return None
+    except jwt.InvalidSignatureError:
+        return None
+    except jwt.DecodeError:
+        return None
+    except jwt.InvalidTokenError:
+        return None
+    except Exception:
+        return None
 
 
 class AuthRequiredError(Exception):

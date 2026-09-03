@@ -34,5 +34,14 @@ class Settings:
     PLATFORM_API_BASE_URL: str = os.environ.get("PLATFORM_API_BASE_URL", "")
     TAXONOMY_REFRESH_SECONDS: int = int(os.environ.get("TAXONOMY_REFRESH_SECONDS", "900"))
 
+    # JWT verification (ADR-0008 amendment 2026-09-03). Algorithm confirmed HS256 via
+    # a live login against the bank's dev environment. Unconfigured secret must fail
+    # closed per NFR-SEC-01 — verify_jwt returns None, never treats an unverifiable
+    # token as valid.
+    JWT_ALGORITHM: str = os.environ.get("JWT_ALGORITHM", "HS256")
+    JWT_HS256_SECRET: str = os.environ.get("JWT_HS256_SECRET", "")   # empty = fail closed
+    JWT_ISSUER: str = os.environ.get("JWT_ISSUER", "internet-banking")  # observed real value; "" disables the check
+    JWT_LEEWAY_SECONDS: int = int(os.environ.get("JWT_LEEWAY_SECONDS", "30"))
+
 
 settings = Settings()
