@@ -40,6 +40,26 @@ assumed up front:
 Neither of these was anticipated when this ADR was written; both are implementation constraints
 on the same decision, not a reason to revisit it.
 
+**Confirmed 2026-09-06 (T-23, full 5-endpoint QA pass on the `account_info` synthetic
+category):** classification remains genuinely probabilistic even with `think: true` — a live QA
+pass found only 1/5 natural-language `account_info` messages classified correctly on first
+attempt, with re-running the identical message producing *different* wrong answers across runs
+(confirmed nondeterminism, not a deterministic bug). Tested and **confirmed ineffective**: adding
+`"enum": [...]` (the real taxonomy ids) to `build_tools()`'s JSON schema — Ollama's tool-calling
+for this model does not enforce JSON-schema enum constraints as constrained decoding; the model
+still hallucinated invented ids even with the enum present, exactly as ineffective as prose
+description alone. Adopted instead: `classify()` now retries once (with a corrective message
+noting the previous attempt was invalid) when `is_valid_path` rejects a `route_banking_service`
+call, and falls back to a generic `ask_clarification`-style response rather than `UNKNOWN_SERVICE`
+if the retry is also invalid — turning a confidently-wrong "not available" into an honest "let me
+ask" rather than eliminating the underlying unreliability. `build_system_prompt()` also gained
+few-shot examples for `account_info`'s 4 services specifically, since that small synthetic
+category is otherwise buried among dozens of real ones in the rendered taxonomy text. This is a
+practical mitigation, not a fix — classification accuracy for this category remains an accepted,
+known limitation. Explicitly out of scope: switching models, two-step classification, or real
+grammar-constrained decoding via a different serving stack — legitimate future options if this
+mitigation proves insufficient, not attempted here.
+
 ## Alternatives considered
 **Separate lightweight pre-classifier** (e.g. embedding similarity against taxonomy label text) —
 faster and cheaper for obvious cases, but adds a second mechanism to build, tune, and keep in

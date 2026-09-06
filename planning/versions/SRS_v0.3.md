@@ -5,7 +5,7 @@
 | | |
 |---|---|
 | **Document title** | Polygon Bot — Software Requirements Specification |
-| **Version** | 0.4 |
+| **Version** | 0.3 |
 | **Date** | 2026-09-03 |
 | **Author** | Nahian Kazi |
 | **Based on** | Polygon Bot BRD v0.3 |
@@ -157,7 +157,7 @@ behavior, unchanged).
 | FR-ROUTE-02 | KB-classified messages shall be answered via the existing, unmodified RAG flow (retrieval → prompt → `/api/generate` streaming). | M |
 | FR-ROUTE-03 | When the model calls `ask_clarification`, the system shall stream its clarifying question as the reply and shall not call the banking-service integration or return routing information for that turn. | M |
 | FR-ROUTE-04 | If the caller supplies `category`, `service`, and `subservice` directly in the request, the system shall skip classification and route directly, still validating the triple against the current taxonomy (§3.2) before proceeding. | M |
-| FR-ROUTE-05 | **Corrected 2026-09-06 (T-23):** the tool schema offered to the model documents the taxonomy's real category/service/subservice values, but the model is not schema-constrained to only those values — Ollama's tool-calling does not enforce JSON-schema `enum` constraints as constrained decoding (confirmed live: a hallucinated id was still returned even with an `enum` present). The system instead validates every `route_banking_service` call against the live taxonomy (§3.2) post-hoc via `is_valid_path` before ever treating it as valid — an invented value is caught here, never passed through. | M |
+| FR-ROUTE-05 | The tool schema offered to the model shall only ever expose category/service/subservice values that currently exist in the taxonomy (§3.2) — the model must not be able to select or invent a value outside it. | M |
 
 *Business rules / errors:* if the model's tool call returns a category/service/subservice
 combination that isn't a valid path in the taxonomy (a hallucinated value slipping past the
@@ -455,4 +455,4 @@ No orphans.
 6. *(Added 2026-09-01)* Whether `support/v1/services`/`support/v1/pay-transfer` require their own service-level auth for a non-mobile-app caller like Polygon Bot — `user-app-api-map.md` doesn't document auth for these two specifically; needs confirming with the platform team before FR-CATALOG-01 can be implemented against production. (§3.2, §2.6)
 
 ---
-*End of document — v0.4, Approved 2026-09-06 (amended from v0.3: FR-ROUTE-05 corrected to describe post-hoc validation instead of a schema-level constraint, per T-23's live-tested finding that Ollama does not enforce JSON-schema enums). Open items: 6 — JWT shape now confirmed (secret value still pending), taxonomy source resolved, 5 of many adapters now real, 3 remain pending external confirmation, none block moving forward.*
+*End of document — v0.3, Approved 2026-09-03 (amended from v0.2 following a live login against the bank's dev environment confirming the JWT's HS256 shape). Open items: 6 — JWT shape now confirmed (secret value still pending), taxonomy source resolved, 5 of many adapters now real, 3 remain pending external confirmation, none block moving forward.*
