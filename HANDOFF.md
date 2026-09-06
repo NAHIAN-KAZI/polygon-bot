@@ -57,12 +57,14 @@ Always handle both `done` and `error` — a stream is not guaranteed to reach `d
 | `AUTH_REQUIRED` | set | null | null — missing/invalid JWT, or downstream rejected it |
 | `UNKNOWN_SERVICE` | set | null | null — not a valid category/service/subservice path |
 | `SERVICE_UNAVAILABLE` | set | null | null — routed and authorized, downstream call failed |
+| `ACCOUNT_SELECTION_REQUIRED` | set | `{accounts:[...]}` | null — pick one and resubmit via direct route with `payload.accountNumber` |
 
 ## Known gaps — read before testing
 
-1. **JWT verification is implemented but not yet active.** Algorithm/claim shape are confirmed (HS256, `sub`=customer phone number, `iss`="internet-banking", no `aud`, ~15-min token lifetime) — but the actual shared HS256 signing secret hasn't been provided by the bank's auth team yet. Until it is, every banking-service request correctly returns `AUTH_REQUIRED`, even with a real, valid, unexpired token — this was live-verified. Plain KB questions work today regardless of this.
-2. **`X-API-Key` is a placeholder.** Will rotate before go-live. Do not ship `devtestkey123` in any client.
-3. **Base URL is internal-network only.** Confirm it's reachable from wherever your client actually runs.
+1. **JWT verification is live.** It verifies real tokens via the bank's own `GET /auth/v1/auth/session` introspection endpoint (not local signature checking — the bank doesn't hand out its signing secret). A real, valid, unexpired bearer token now successfully authenticates — live-verified end to end, including a real `BANKING_SERVICE` response with real account data. An invalid/expired/missing token correctly returns `AUTH_REQUIRED`.
+2. **Multi-account resolution is structured-only in v1.** If a customer has 2+ accounts and doesn't specify which for `balance`/`transaction_history`, the response is `ACCOUNT_SELECTION_REQUIRED` with the full list in `payload.accounts`; the client must resubmit with `payload.accountNumber` set. Free-text follow-ups like "the savings one" are not resolved automatically. If the customer has exactly 1 account, this is skipped automatically — no extra step needed.
+3. **`X-API-Key` is a placeholder.** Will rotate before go-live. Do not ship `devtestkey123` in any client.
+4. **Base URL is internal-network only.** Confirm it's reachable from wherever your client actually runs.
 
 ## Example — plain KB question
 

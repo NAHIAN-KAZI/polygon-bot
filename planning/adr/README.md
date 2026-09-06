@@ -16,3 +16,4 @@
 | [0012](ADR-0012-real-adapters-for-read-only-queries.md) | Real adapters for the 5 subservices with a known live endpoint | Accepted |
 | [0013](ADR-0013-routing-uses-real-service-id.md) | Routing responses use the mobile app's real service.id | Accepted |
 | [0014](ADR-0014-jwt-passthrough-to-downstream-services.md) | Forward the customer's JWT as-is to downstream banking services | Accepted |
+| [0015](ADR-0015-account-selection-clarification.md) | Account-selection clarification for balance/transaction_history | Accepted |

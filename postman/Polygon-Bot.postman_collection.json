@@ -152,7 +152,7 @@
           "raw": "{\n  \"message\": \"What's my balance?\",\n  \"category\": \"account_info\",\n  \"service\": \"balance\",\n  \"payload\": {\"accountNumber\": \"123456\"}\n}"
         },
         "url": { "raw": "{{base_url}}/chat", "host": ["{{base_url}}"], "path": ["chat"] },
-        "description": "account_info/balance is a synthetic taxonomy entry (ADR-0011) backed by a real adapter (POST /transfer/v1/accounting/balance on the bank platform). Without a valid jwt this returns AUTH_REQUIRED — expected until real JWT verification is wired in (see HANDOFF.md)."
+        "description": "account_info/balance is a synthetic taxonomy entry (ADR-0011) backed by a real adapter (POST /transfer/v1/accounting/balance on the bank platform). JWT verification is live (see HANDOFF.md) — without a valid jwt this returns AUTH_REQUIRED; with one, real balance data comes back. payload.accountNumber is hardcoded here to test the explicit-account path; see the 'Account Selection Required' request for the auto-resolve/multi-account path."
       },
       "event": [
         {
@@ -163,6 +163,42 @@
               "pm.test('status is 200', () => pm.response.to.have.status(200));",
               "pm.test('stream contains a result event', () => {",
               "  pm.expect(pm.response.text()).to.include('event: result');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Chat - Account Selection Required (account_info/balance, no accountNumber)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-API-Key", "value": "{{api_key}}" },
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message\": \"What's my balance?\",\n  \"category\": \"account_info\",\n  \"service\": \"balance\"\n}"
+        },
+        "url": { "raw": "{{base_url}}/chat", "host": ["{{base_url}}"], "path": ["chat"] },
+        "description": "No payload.accountNumber given (ADR-0015) — tests the account-resolution flow. With a valid jwt: if the customer has exactly 1 account, this transparently succeeds with BANKING_SERVICE (no clarification needed); if 2+, returns ACCOUNT_SELECTION_REQUIRED with payload.accounts listing them — resubmit with payload.accountNumber set to the chosen one. Without a valid jwt, still AUTH_REQUIRED as usual."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', () => pm.response.to.have.status(200));",
+              "pm.test('stream contains a result event', () => {",
+              "  pm.expect(pm.response.text()).to.include('event: result');",
+              "});",
+              "pm.test('result type is one of the expected outcomes', () => {",
+              "  const text = pm.response.text();",
+              "  const oneOf = ['BANKING_SERVICE', 'ACCOUNT_SELECTION_REQUIRED', 'AUTH_REQUIRED', 'SERVICE_UNAVAILABLE'];",
+              "  pm.expect(oneOf.some((t) => text.includes(`\"type\": \"${t}\"`))).to.be.true;",
               "});"
             ]
           }

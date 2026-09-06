@@ -93,6 +93,18 @@ data: {}
 - `SERVICE_UNAVAILABLE` — the request was routed and authorized, but the downstream banking
   service call itself failed. `category`/`service`/`subservice` are populated, `payload`/`routing`
   are `null`.
+- `ACCOUNT_SELECTION_REQUIRED` — the request needed an account number the customer didn't supply
+  (e.g. `balance`, `transaction_history`), and the customer has more than one account (if they
+  have exactly one, this is skipped automatically and the request just succeeds). `category`/
+  `service`/`subservice` are populated, `routing` is `null`. `payload` is `{"accounts":
+  [{"accountNumber", "accountName", "accountType", "balance"}, ...]}` — full account numbers are
+  included here for the client's resubmit, even though the accompanying `token` text only shows a
+  masked last-4 form. To resolve: have the customer pick one entry from `payload.accounts` and
+  resubmit using the same direct-route mechanism described above — `category`+`service`
+  (+`subservice` if present) exactly as returned, with `payload.accountNumber` set to the chosen
+  account's full `accountNumber`. No new request field or endpoint. Free-text follow-ups like "the
+  savings one" are not resolved automatically in this version — only a structured resubmit with an
+  explicit `accountNumber` is supported.
 
 `result` is never sent for a pure knowledge-base answer — its absence is how a client tells the
 two response shapes apart.
