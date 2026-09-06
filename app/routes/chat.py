@@ -69,13 +69,116 @@ def _result_event(
 
 def _subservice_reply(service: str, subservice: str | None, data: dict) -> str:
     key = subservice or service
+    fallback = f"Sure — here's information about {service.replace('_', ' ')}."
+
+    if not isinstance(data, dict):
+        return fallback
+
     if key == "balance":
         return f"Your available balance is {data.get('balance')}."
+
+    if key == "accounts":
+        try:
+            inner = data.get("data")
+            accounts = inner.get("accounts") if isinstance(inner, dict) else None
+            if not isinstance(accounts, list):
+                return fallback
+            if not accounts:
+                return "You don't have any accounts on record."
+            descriptions = []
+            for a in accounts:
+                if not isinstance(a, dict):
+                    continue
+                account_type = str(a.get("accountType") or "account").replace("_", " ").title()
+                account_number = a.get("accountNumber")
+                if account_number:
+                    descriptions.append(f"{account_type} (ending {str(account_number)[-4:]})")
+                else:
+                    descriptions.append(account_type)
+            if not descriptions:
+                return "You don't have any accounts on record."
+            plural = "account" if len(descriptions) == 1 else "accounts"
+            return f"You have {len(descriptions)} {plural}: {', '.join(descriptions)}."
+        except Exception:
+            return fallback
+
+    if key == "device_history":
+        try:
+            devices = data.get("devices")
+            if not isinstance(devices, list):
+                return fallback
+            if not devices:
+                return "You don't have any devices on record."
+            names = [d.get("deviceName") for d in devices if isinstance(d, dict) and d.get("deviceName")]
+            if not names:
+                return fallback
+            plural = "device" if len(names) == 1 else "devices"
+            return f"You have {len(names)} {plural} linked: {', '.join(str(n) for n in names)}."
+        except Exception:
+            return fallback
+
     if key == "transaction_history":
-        return "Here are your recent transactions."
-    if key in ("accounts", "device_history", "login_history"):
-        return f"Here's your {key.replace('_', ' ')} information."
-    return f"Sure — here's information about {service.replace('_', ' ')}."
+        try:
+            transactions = data.get("transactions")
+            if not isinstance(transactions, list):
+                return fallback
+            if not transactions:
+                return "You don't have any recent transactions."
+            pagination = data.get("pagination") if isinstance(data.get("pagination"), dict) else {}
+            total_count = pagination.get("totalCount")
+            shown = len(transactions)
+            if isinstance(total_count, int) and total_count > shown:
+                summary = f"Here are your {shown} most recent transactions (out of {total_count} total)."
+            else:
+                plural = "transaction" if shown == 1 else "transactions"
+                summary = f"Here are your {shown} most recent {plural}."
+            latest = transactions[0]
+            if isinstance(latest, dict):
+                amount = latest.get("amount")
+                description = latest.get("description")
+                txn_type = str(latest.get("type") or "").upper()
+                verb = {"DEBIT": "debit", "CREDIT": "credit"}.get(txn_type)
+                if amount is not None and description and verb:
+                    summary += f" Your most recent was a ৳{amount} {description} {verb}."
+            return summary
+        except Exception:
+            return fallback
+
+    if key == "login_history":
+        try:
+            logins = None
+            for candidate_key in ("records", "loginHistory", "logins", "history"):
+                candidate = data.get(candidate_key)
+                if isinstance(candidate, list):
+                    logins = candidate
+                    break
+            if logins is None and isinstance(data.get("data"), list):
+                logins = data.get("data")
+            if logins is None:
+                return fallback
+            if not logins:
+                return "There's no login history on record for this device."
+            pagination = data.get("pagination") if isinstance(data.get("pagination"), dict) else {}
+            total_count = pagination.get("totalCount")
+            shown = len(logins)
+            if isinstance(total_count, int) and total_count > shown:
+                summary = f"Here are your {shown} most recent logins (out of {total_count} total)."
+            else:
+                plural = "login" if shown == 1 else "logins"
+                summary = f"Here are your {shown} most recent {plural}."
+            latest = logins[0]
+            if isinstance(latest, dict):
+                status = latest.get("status")
+                ip_address = latest.get("ipAddress")
+                if status and ip_address:
+                    summary += f" The most recent was {str(status).lower()} from {ip_address}."
+                elif status:
+                    summary += f" The most recent was {str(status).lower()}."
+            return summary
+        except Exception:
+            return fallback
+
+    return fallback
 
 
 def _account_selection_reply(accounts: list[dict]) -> str:
