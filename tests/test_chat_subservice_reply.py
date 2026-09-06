@@ -17,7 +17,7 @@ already cover the end-to-end wiring; this file is purely about locking in the
 reply-text contract and the "never raises" safety property for every branch,
 using the exact live-confirmed payload shapes recorded in TASKS.md T-27.
 """
-from app.routes.chat import _subservice_reply
+from app.routes.chat import _account_card_summary, _subservice_reply
 
 
 # --- 1. balance: unchanged behavior ------------------------------------------
@@ -87,6 +87,95 @@ def test_accounts_malformed_accounts_not_a_list_falls_back():
 def test_accounts_malformed_data_itself_not_a_dict_falls_back():
     assert _subservice_reply("accounts", None, "not a dict") == (
         "Sure — here's information about accounts."
+    )
+
+
+# --- 2b. accounts + card mention integration (T-28) ----------------------------
+
+
+def test_accounts_with_number_and_one_active_card_includes_both_in_parenthetical():
+    data = {
+        "data": {
+            "accounts": [
+                {
+                    "accountName": "Test Savings",
+                    "accountNumber": "100126000015",
+                    "accountType": "SAVINGS",
+                    "cards": [{"cardType": "DEBIT", "status": "ACTIVE"}],
+                }
+            ]
+        }
+    }
+    reply = _subservice_reply("accounts", None, data)
+    assert reply == "You have 1 account: Savings (ending 0015, linked to 1 debit card)."
+
+
+def test_accounts_with_number_but_no_cards_has_only_ending_no_card_mention():
+    data = {
+        "data": {
+            "accounts": [
+                {
+                    "accountName": "Test Savings",
+                    "accountNumber": "100126000015",
+                    "accountType": "SAVINGS",
+                    "cards": [],
+                }
+            ]
+        }
+    }
+    reply = _subservice_reply("accounts", None, data)
+    assert reply == "You have 1 account: Savings (ending 0015)."
+    assert "linked to" not in reply
+    assert ", )" not in reply
+
+
+def test_accounts_with_no_number_and_no_cards_falls_back_to_bare_type_no_parens():
+    data = {
+        "data": {
+            "accounts": [
+                {
+                    "accountName": "Test Fixed",
+                    "accountNumber": None,
+                    "accountType": "FIXED_DEPOSIT",
+                    "cards": [],
+                }
+            ]
+        }
+    }
+    reply = _subservice_reply("accounts", None, data)
+    assert reply == "You have 1 account: Fixed Deposit."
+    assert "(" not in reply
+    assert ")" not in reply
+
+
+def test_accounts_multiple_only_some_with_cards_each_parenthetical_independent():
+    data = {
+        "data": {
+            "accounts": [
+                {
+                    "accountName": "A",
+                    "accountNumber": "100126000015",
+                    "accountType": "SAVINGS",
+                    "cards": [{"cardType": "DEBIT", "status": "ACTIVE"}],
+                },
+                {
+                    "accountName": "B",
+                    "accountNumber": "100126000099",
+                    "accountType": "SAVINGS",
+                    "cards": [],
+                },
+                {
+                    "accountName": "C",
+                    "accountNumber": None,
+                    "accountType": "FIXED_DEPOSIT",
+                },
+            ]
+        }
+    }
+    reply = _subservice_reply("accounts", None, data)
+    assert reply == (
+        "You have 3 accounts: Savings (ending 0015, linked to 1 debit card), "
+        "Savings (ending 0099), Fixed Deposit."
     )
 
 
@@ -283,3 +372,67 @@ def test_no_exception_for_any_malformed_input_across_all_known_services():
             reply = _subservice_reply(service, None, payload)
             assert isinstance(reply, str)
             assert reply != ""
+
+
+# --- 8. _account_card_summary direct unit tests (T-28) --------------------------
+
+
+def test_card_summary_none_returns_empty_string():
+    assert _account_card_summary(None) == ""
+
+
+def test_card_summary_empty_list_returns_empty_string():
+    assert _account_card_summary([]) == ""
+
+
+def test_card_summary_not_a_list_returns_empty_string():
+    assert _account_card_summary({"cardType": "DEBIT"}) == ""
+    assert _account_card_summary("oops") == ""
+
+
+def test_card_summary_single_active_debit_card_singular():
+    cards = [{"cardType": "DEBIT", "status": "ACTIVE"}]
+    assert _account_card_summary(cards) == "linked to 1 debit card"
+
+
+def test_card_summary_two_active_debit_cards_plural():
+    cards = [
+        {"cardType": "DEBIT", "status": "ACTIVE"},
+        {"cardType": "DEBIT", "status": "ACTIVE"},
+    ]
+    assert _account_card_summary(cards) == "linked to 2 debit cards"
+
+
+def test_card_summary_three_distinct_types_breakdown_in_list_order():
+    cards = [
+        {"cardType": "DEBIT", "status": "ACTIVE"},
+        {"cardType": "CREDIT", "status": "ACTIVE"},
+        {"cardType": "PREPAID", "status": "ACTIVE"},
+    ]
+    # Implementation counts into a dict keyed by lowercased cardType and
+    # iterates it in insertion order, so the breakdown follows the order
+    # types first appear in the input list.
+    assert _account_card_summary(cards) == "linked to 3 cards (1 debit, 1 credit, 1 prepaid)"
+
+
+def test_card_summary_blocked_card_excluded_from_count():
+    cards = [
+        {"cardType": "DEBIT", "status": "ACTIVE"},
+        {"cardType": "DEBIT", "status": "BLOCKED"},
+    ]
+    assert _account_card_summary(cards) == "linked to 1 debit card"
+
+
+def test_card_summary_missing_status_treated_as_active():
+    cards = [{"cardType": "DEBIT"}]
+    assert _account_card_summary(cards) == "linked to 1 debit card"
+
+
+def test_card_summary_missing_card_type_skipped_not_counted():
+    cards = [{"status": "ACTIVE"}]
+    assert _account_card_summary(cards) == ""
+
+
+def test_card_summary_non_dict_entry_skipped_valid_entry_still_counted():
+    cards = ["not a card", {"cardType": "DEBIT", "status": "ACTIVE"}]
+    assert _account_card_summary(cards) == "linked to 1 debit card"

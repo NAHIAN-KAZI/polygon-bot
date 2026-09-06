@@ -67,6 +67,43 @@ def _result_event(
     )
 
 
+def _account_card_summary(cards: object) -> str:
+    """Build a ", linked to N ... card(s)" style fragment for an account's cards.
+
+    Returns "" if there are no (countable) cards. Skips non-dict entries and
+    cards missing a usable cardType. Skips cards whose status is present and
+    clearly not ACTIVE; a missing status is treated as active/countable.
+    """
+    if not isinstance(cards, list):
+        return ""
+    counts: dict[str, int] = {}
+    for card in cards:
+        try:
+            if not isinstance(card, dict):
+                continue
+            status = card.get("status")
+            if status is not None and str(status).strip().upper() != "ACTIVE":
+                continue
+            card_type = card.get("cardType")
+            if not card_type:
+                continue
+            type_name = str(card_type).strip().lower()
+            if not type_name:
+                continue
+            counts[type_name] = counts.get(type_name, 0) + 1
+        except Exception:
+            continue
+    total = sum(counts.values())
+    if total == 0:
+        return ""
+    if len(counts) == 1:
+        ((only_type, count),) = counts.items()
+        noun = "card" if count == 1 else "cards"
+        return f"linked to {count} {only_type} {noun}"
+    breakdown = ", ".join(f"{count} {type_name}" for type_name, count in counts.items())
+    return f"linked to {total} cards ({breakdown})"
+
+
 def _subservice_reply(service: str, subservice: str | None, data: dict) -> str:
     key = subservice or service
     fallback = f"Sure — here's information about {service.replace('_', ' ')}."
@@ -91,8 +128,14 @@ def _subservice_reply(service: str, subservice: str | None, data: dict) -> str:
                     continue
                 account_type = str(a.get("accountType") or "account").replace("_", " ").title()
                 account_number = a.get("accountNumber")
+                extras = []
                 if account_number:
-                    descriptions.append(f"{account_type} (ending {str(account_number)[-4:]})")
+                    extras.append(f"ending {str(account_number)[-4:]}")
+                card_summary = _account_card_summary(a.get("cards"))
+                if card_summary:
+                    extras.append(card_summary)
+                if extras:
+                    descriptions.append(f"{account_type} ({', '.join(extras)})")
                 else:
                     descriptions.append(account_type)
             if not descriptions:
