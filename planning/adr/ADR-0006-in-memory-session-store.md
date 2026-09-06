@@ -27,3 +27,21 @@ actually needed.
 
 ## Related
 FR-IDENT-05..07, F-04
+
+**Confirmed 2026-09-06 (T-24):** live-reproduced a contamination bug — a single customer's
+session (30-min TTL, up to 10 turns) accumulated many unrelated turns across an extended
+testing session, and every one of them was being fed into `classify()` as raw prior
+messages on every subsequent classification call, regardless of relevance. Symptom:
+3 completely different questions ("what is my balance", "how many bank accounts do i
+have", "what devices are logged into my account") all returned the *identical* answer to
+the first question. Root cause: the recent-turns interface's actual intended purpose
+(FR-IDENT-05, "resolve natural follow-ups") is narrow — connecting an earlier clarifying
+question to the customer's answer to it — but the call site fed history into every
+classification regardless of whether one was actually pending. Fix: a new
+`get_classification_context(customer_id)` function (still behind the same get/set
+interface this ADR establishes) returns the session's turns only when the most recent
+one is itself an unresolved `CLARIFICATION_REQUIRED`/`ACCOUNT_SELECTION_REQUIRED`
+outcome — `[]` otherwise. Live re-verified on the exact same, previously-contaminated
+session: the same 3 questions now return 3 correct, distinct answers. Does not change
+this ADR's core decision (in-memory, keyed by customer_id, swappable interface) — only
+scopes *when* history is used.
