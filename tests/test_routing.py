@@ -27,6 +27,7 @@ from app.banking.routing import (
     classify,
 )
 from app.banking.session import ChatTurn
+from app.config import settings
 
 
 FAKE_TAXONOMY = {
@@ -399,3 +400,39 @@ def test_classify_retry_produces_ask_clarification_returns_retry_question(monkey
 
     assert result == Clarification(question="Which specific thing do you mean?")
     assert result != Clarification(question=_CLARIFICATION_FALLBACK)
+
+
+# --- classify: T-25 classification model is independent of RAG model -------
+
+
+def test_classify_request_uses_ollama_classify_model_not_ollama_model(monkeypatch):
+    monkeypatch.setattr(settings, "OLLAMA_MODEL", "some-other-rag-model")
+    monkeypatch.setattr(settings, "OLLAMA_CLASSIFY_MODEL", "test-classify-model")
+    captured_calls = []
+    _install_post_response(
+        monkeypatch,
+        _ollama_response([_tool_call("answer_kb_question", {})]),
+        captured_calls=captured_calls,
+    )
+
+    asyncio.run(classify("how does a savings account work?"))
+
+    assert len(captured_calls) == 1
+    sent_body = captured_calls[0]["kwargs"]["json"]
+    assert sent_body["model"] == "test-classify-model"
+    assert sent_body["model"] != "some-other-rag-model"
+
+
+def test_classify_request_body_does_not_include_think_key(monkeypatch):
+    captured_calls = []
+    _install_post_response(
+        monkeypatch,
+        _ollama_response([_tool_call("answer_kb_question", {})]),
+        captured_calls=captured_calls,
+    )
+
+    asyncio.run(classify("how does a savings account work?"))
+
+    assert len(captured_calls) == 1
+    sent_body = captured_calls[0]["kwargs"]["json"]
+    assert "think" not in sent_body

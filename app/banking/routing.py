@@ -84,7 +84,16 @@ def build_system_prompt(taxonomy: dict) -> str:
         '- "what devices are logged in?" -> route_banking_service(category="account_info", '
         'service="device_history")\n'
         '- "show my login history" -> route_banking_service(category="account_info", '
-        'service="login_history")'
+        'service="login_history")\n'
+        '- "I need help with my card" -> ask_clarification(question="Sure — what do you need '
+        'help with on your card? For example, freezing/unfreezing it, resetting the PIN, or '
+        'something else?")\n'
+        '  (this is vague — "my card" could mean many different things, so ASK rather than '
+        'guessing which card service they mean)\n'
+        '- "I want to transfer money" -> ask_clarification(question="Sure — how would you like '
+        'to transfer money? For example, to your own account, another bank, or a mobile wallet '
+        'like bKash?")\n'
+        '  (same reasoning — many transfer types exist, do not guess which one)'
     )
 
 
@@ -164,11 +173,10 @@ async def _post_classification(messages: list[dict]) -> list[dict]:
         resp = await client.post(
             f"{settings.OLLAMA_BASE_URL}/api/chat",
             json={
-                "model": settings.OLLAMA_MODEL,
+                "model": settings.OLLAMA_CLASSIFY_MODEL,
                 "messages": messages,
                 "tools": build_tools(),
                 "stream": False,
-                "think": True,
             },
         )
         resp.raise_for_status()
