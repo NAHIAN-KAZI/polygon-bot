@@ -16,8 +16,26 @@ existing tests (test_chat_banking_flow.py, test_chat_integration_contract.py)
 already cover the end-to-end wiring; this file is purely about locking in the
 reply-text contract and the "never raises" safety property for every branch,
 using the exact live-confirmed payload shapes recorded in TASKS.md T-27.
+
+TASKS.md T-29 added _synthesize_reply(message, service, subservice, data) ->
+str: an LLM-synthesized spoken reply (via Ollama /api/generate, using
+settings.OLLAMA_MODEL -- the RAG/generation model, deliberately NOT
+settings.OLLAMA_CLASSIFY_MODEL) that falls back to the existing deterministic
+_subservice_reply() template on any failure -- network error, non-200 status,
+malformed JSON body, or an empty/whitespace-only response string -- so a
+flaky/slow Ollama can never crash or block the /chat stream. The Ollama HTTP
+layer is mocked by monkeypatching httpx.AsyncClient.post directly, matching
+this codebase's existing style (see tests/test_routing.py's FakeResponse
+pattern) rather than pulling in a new test dependency like respx.
+_synthesize_reply is async and driven via asyncio.run(), matching
+tests/test_adapter_base.py (no pytest-asyncio in this repo).
 """
-from app.routes.chat import _account_card_summary, _subservice_reply
+import asyncio
+
+import httpx
+
+from app.config import settings
+from app.routes.chat import _account_card_summary, _subservice_reply, _synthesize_reply
 
 
 # --- 1. balance: unchanged behavior ------------------------------------------
@@ -436,3 +454,134 @@ def test_card_summary_missing_card_type_skipped_not_counted():
 def test_card_summary_non_dict_entry_skipped_valid_entry_still_counted():
     cards = ["not a card", {"cardType": "DEBIT", "status": "ACTIVE"}]
     assert _account_card_summary(cards) == "linked to 1 debit card"
+
+
+# --- 9. _synthesize_reply direct unit tests (T-29) ------------------------------
+
+
+class _FakeResponse:
+    """Mirrors tests/test_routing.py's FakeResponse: a minimal stand-in for
+    httpx.Response supporting raise_for_status()/json(), with json() able to
+    raise (simulating a malformed/non-JSON response body)."""
+
+    def __init__(self, json_data=None, status_code=200, json_exc=None):
+        self._json_data = json_data
+        self.status_code = status_code
+        self._json_exc = json_exc
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise httpx.HTTPStatusError("error", request=None, response=self)
+
+    def json(self):
+        if self._json_exc is not None:
+            raise self._json_exc
+        return self._json_data
+
+
+def _install_post_response(monkeypatch, json_data=None, status_code=200, json_exc=None, captured_calls=None):
+    async def fake_post(self, url, *args, **kwargs):
+        if captured_calls is not None:
+            captured_calls.append({"url": url, "kwargs": kwargs})
+        return _FakeResponse(json_data=json_data, status_code=status_code, json_exc=json_exc)
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+
+
+def _install_post_raises(monkeypatch, exc):
+    async def fake_post(self, url, *args, **kwargs):
+        raise exc
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+
+
+def test_synthesize_reply_success_returns_ollama_text_exactly(monkeypatch):
+    _install_post_response(monkeypatch, json_data={"response": "Your balance is real and specific."})
+    result = asyncio.run(_synthesize_reply("what's my balance", "balance", None, {"balance": 100}))
+    assert result == "Your balance is real and specific."
+
+
+def test_synthesize_reply_success_strips_whitespace(monkeypatch):
+    _install_post_response(monkeypatch, json_data={"response": "  some text  \n"})
+    result = asyncio.run(_synthesize_reply("what's my balance", "balance", None, {"balance": 100}))
+    assert result == "some text"
+
+
+def test_synthesize_reply_non_200_status_falls_back_to_subservice_reply(monkeypatch):
+    _install_post_response(monkeypatch, json_data={"response": "irrelevant, should never be seen"}, status_code=500)
+    data = {"balance": 100}
+    result = asyncio.run(_synthesize_reply("what's my balance", "balance", None, data))
+    assert result == _subservice_reply("balance", None, data)
+    assert result == "Your available balance is 100."
+
+
+def test_synthesize_reply_connect_error_falls_back_no_exception_propagates(monkeypatch):
+    _install_post_raises(monkeypatch, httpx.ConnectError("connection refused"))
+    data = {"balance": 100}
+    result = asyncio.run(_synthesize_reply("what's my balance", "balance", None, data))
+    assert result == _subservice_reply("balance", None, data)
+
+
+def test_synthesize_reply_timeout_falls_back_no_exception_propagates(monkeypatch):
+    _install_post_raises(monkeypatch, httpx.TimeoutException("request timed out"))
+    data = {"balance": 100}
+    result = asyncio.run(_synthesize_reply("what's my balance", "balance", None, data))
+    assert result == _subservice_reply("balance", None, data)
+
+
+def test_synthesize_reply_empty_string_response_falls_back(monkeypatch):
+    _install_post_response(monkeypatch, json_data={"response": ""})
+    data = {"balance": 100}
+    result = asyncio.run(_synthesize_reply("what's my balance", "balance", None, data))
+    assert result == _subservice_reply("balance", None, data)
+
+
+def test_synthesize_reply_whitespace_only_response_falls_back(monkeypatch):
+    """Confirms the implementation strips first, then checks falsy -- not
+    just an exact-empty-string check -- per TASKS.md T-29."""
+    _install_post_response(monkeypatch, json_data={"response": "   "})
+    data = {"balance": 100}
+    result = asyncio.run(_synthesize_reply("what's my balance", "balance", None, data))
+    assert result == _subservice_reply("balance", None, data)
+
+
+def test_synthesize_reply_malformed_json_body_falls_back_no_exception_propagates(monkeypatch):
+    _install_post_response(monkeypatch, json_exc=ValueError("not valid json"))
+    data = {"balance": 100}
+    result = asyncio.run(_synthesize_reply("what's my balance", "balance", None, data))
+    assert result == _subservice_reply("balance", None, data)
+
+
+def test_synthesize_reply_missing_response_key_falls_back(monkeypatch):
+    """Belt-and-suspenders for the `result.get("response") or ""` guard --
+    a response body with no "response" key at all must also fall back
+    rather than raising a KeyError."""
+    _install_post_response(monkeypatch, json_data={"unexpected": "shape"})
+    data = {"balance": 100}
+    result = asyncio.run(_synthesize_reply("what's my balance", "balance", None, data))
+    assert result == _subservice_reply("balance", None, data)
+
+
+def test_synthesize_reply_sends_correct_request_body(monkeypatch):
+    """Locks in the outbound Ollama request contract: uses
+    settings.OLLAMA_MODEL (the RAG/generation model) -- NOT
+    settings.OLLAMA_CLASSIFY_MODEL -- with stream=False and think matching
+    settings.OLLAMA_THINK, and a prompt that contains both the original
+    message and the fetched data's content."""
+    captured_calls = []
+    monkeypatch.setattr(settings, "OLLAMA_MODEL", "test-rag-model")
+    monkeypatch.setattr(settings, "OLLAMA_CLASSIFY_MODEL", "test-classify-model-must-not-be-used")
+    monkeypatch.setattr(settings, "OLLAMA_THINK", True)
+    _install_post_response(monkeypatch, json_data={"response": "ok"}, captured_calls=captured_calls)
+
+    data = {"balance": "distinctive-marker-999888777"}
+    asyncio.run(_synthesize_reply("what is my balance please", "balance", None, data))
+
+    assert len(captured_calls) == 1
+    body = captured_calls[0]["kwargs"]["json"]
+    assert body["model"] == "test-rag-model"
+    assert body["model"] != "test-classify-model-must-not-be-used"
+    assert body["stream"] is False
+    assert body["think"] is True
+    assert "what is my balance please" in body["prompt"]
+    assert "distinctive-marker-999888777" in body["prompt"]

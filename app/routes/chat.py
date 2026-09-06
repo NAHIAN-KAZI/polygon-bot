@@ -104,6 +104,43 @@ def _account_card_summary(cards: object) -> str:
     return f"linked to {total} cards ({breakdown})"
 
 
+async def _synthesize_reply(message: str, service: str, subservice: str | None, data: dict) -> str:
+    """LLM-synthesized spoken reply, tailored to the customer's actual question,
+    using only the real data already fetched. Falls back to the deterministic
+    _subservice_reply template on any failure (timeout, Ollama error, malformed
+    response, empty text) — never blocks or crashes the response."""
+    try:
+        prompt = (
+            "You are a banking assistant. A customer asked:\n"
+            f"\"{message}\"\n\n"
+            "Here is the real data already fetched to answer them (JSON):\n"
+            f"{json.dumps(data, default=str)}\n\n"
+            "Write a short, natural, accurate reply directly answering their "
+            "question using ONLY this data. Never invent numbers or details not "
+            "present here. If the data doesn't cover something specific they "
+            "asked about (e.g. an exact date range you don't actually have), say "
+            "what you DO have instead (e.g. \"here are your N most recent "
+            "transactions\") rather than pretending to have filtered by it. "
+            "Keep it to 1-3 sentences, plain prose, no markdown."
+        )
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{settings.OLLAMA_BASE_URL}/api/generate",
+                json={
+                    "model": settings.OLLAMA_MODEL,
+                    "prompt": prompt,
+                    "stream": False,
+                    "think": settings.OLLAMA_THINK,
+                },
+            )
+            resp.raise_for_status()
+            result = resp.json()
+        text = (result.get("response") or "").strip()
+        return text if text else _subservice_reply(service, subservice, data)
+    except Exception:
+        return _subservice_reply(service, subservice, data)
+
+
 def _subservice_reply(service: str, subservice: str | None, data: dict) -> str:
     key = subservice or service
     fallback = f"Sure — here's information about {service.replace('_', ' ')}."
@@ -376,7 +413,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                 if data.get("mock") is True:
                     yield _sse("token", {"token": f"Sure — here's information about {service.replace('_', ' ')}."})
                 else:
-                    yield _sse("token", {"token": _subservice_reply(service, subservice, data)})
+                    yield _sse("token", {"token": await _synthesize_reply(req.message, service, subservice, data)})
                 yield _result_event(
                     "BANKING_SERVICE",
                     category,

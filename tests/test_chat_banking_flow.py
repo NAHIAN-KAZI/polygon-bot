@@ -18,6 +18,8 @@ patches get_classification_context accordingly.
 import json
 from datetime import datetime, timezone
 
+import httpx
+
 import app.routes.chat as chat_module
 from app.banking.adapters.base import (
     AdapterAccountSelectionRequiredError,
@@ -352,6 +354,100 @@ def test_banking_service_real_adapter_balance_success(client, monkeypatch):
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "BANKING_SERVICE"
     assert result_event["payload"] == {"balance": "500.00"}
+
+
+class _FakeOllamaResponse:
+    """Minimal httpx.Response stand-in for mocking Ollama's /api/generate,
+    matching tests/test_routing.py's FakeResponse pattern."""
+
+    def __init__(self, json_data):
+        self._json_data = json_data
+        self.status_code = 200
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self._json_data
+
+
+def test_banking_service_real_adapter_success_uses_synthesized_reply(client, monkeypatch):
+    """TASKS.md T-29: the real-adapter (non-mock) BANKING_SERVICE success
+    branch now calls _synthesize_reply(...) instead of _subservice_reply(...)
+    directly. This drives the full /chat SSE flow end-to-end with a mocked
+    Ollama /api/generate call and confirms the LLM-synthesized text -- not
+    the deterministic template -- is what actually reaches the token event."""
+
+    async def fake_classify(message, recent_turns=None):
+        return BankingService(category="account_info", service="balance", subservice="balance")
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    async def fake_fulfill(customer_identity, jwt, category, service, subservice, payload):
+        return AdapterResult(data={"balance": "500.00"})
+
+    async def fake_post(self, url, *args, **kwargs):
+        return _FakeOllamaResponse({"response": "This is your distinctive synthesized reply 42."})
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", fake_fulfill)
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+    _install_session_fakes(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "what's my balance"}, headers=JWT_HEADERS)
+
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    assert [name for name, _ in events] == ["token", "result", "done"]
+
+    token_event = next(data for name, data in events if name == "token")
+    assert token_event["token"] == "This is your distinctive synthesized reply 42."
+
+    result_event = next(data for name, data in events if name == "result")
+    assert result_event["type"] == "BANKING_SERVICE"
+    assert result_event["payload"] == {"balance": "500.00"}
+
+
+def test_banking_service_mock_adapter_never_calls_synthesize_reply(client, monkeypatch):
+    """TASKS.md T-29: the data.get("mock") is True branch is unchanged --
+    still the plain hardcoded template line -- and must never invoke
+    _synthesize_reply (and therefore never hit Ollama) at all."""
+
+    async def fake_classify(message, recent_turns=None):
+        return BankingService(category="pay_transfer", service="transfer_funds", subservice="internal")
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    mock_data = {"mock": True, "subservice": "internal", "note": "synthetic"}
+
+    async def fake_fulfill(customer_identity, jwt, category, service, subservice, payload):
+        return AdapterResult(data=mock_data)
+
+    synth_calls = []
+
+    async def fake_synthesize_reply(message, service, subservice, data):
+        synth_calls.append((message, service, subservice, data))
+        return "SHOULD NEVER APPEAR"
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", fake_fulfill)
+    monkeypatch.setattr(chat_module, "_synthesize_reply", fake_synthesize_reply)
+    _install_session_fakes(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "transfer money"}, headers=JWT_HEADERS)
+
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    assert [name for name, _ in events] == ["token", "result", "done"]
+
+    token_event = next(data for name, data in events if name == "token")
+    assert token_event["token"] == "Sure — here's information about transfer funds."
+
+    assert synth_calls == []
 
 
 def test_banking_service_device_history_wrapped_devices_no_crash(client, monkeypatch):
