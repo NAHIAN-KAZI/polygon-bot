@@ -143,7 +143,7 @@ class DeviceHistoryAdapter:
         payload: dict | None,
     ) -> AdapterResult:
         body = await _call("GET", "/auth/v1/devices", jwt)
-        return AdapterResult(data=body)
+        return AdapterResult(data={"devices": body})
 
 
 class LoginHistoryAdapter:

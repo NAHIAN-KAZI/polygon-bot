@@ -347,6 +347,48 @@ def test_banking_service_real_adapter_balance_success(client, monkeypatch):
     assert result_event["payload"] == {"balance": "500.00"}
 
 
+def test_banking_service_device_history_wrapped_devices_no_crash(client, monkeypatch):
+    """T-22 regression test: the real DeviceHistoryAdapter now wraps the bare
+    array from GET /auth/v1/devices under a "devices" key before returning
+    AdapterResult. Before the fix, a bare list flowed all the way to this
+    success-path's data.get("mock") check and crashed with AttributeError.
+    This locks in that /chat's SSE response completes cleanly with a valid
+    BANKING_SERVICE result instead of crashing."""
+
+    async def fake_classify(message, recent_turns=None):
+        return BankingService(category="account_info", service="device_history", subservice=None)
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    devices_payload = {
+        "devices": [
+            {"id": 1, "deviceName": "iPhone"},
+            {"id": 2, "deviceName": "Pixel"},
+        ]
+    }
+
+    async def fake_fulfill(customer_identity, jwt, category, service, subservice, payload):
+        return AdapterResult(data=devices_payload)
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", fake_fulfill)
+    _install_session_fakes(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "what devices are logged in?"}, headers=JWT_HEADERS)
+
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    assert [name for name, _ in events] == ["token", "result", "done"]
+
+    result_event = next(data for name, data in events if name == "result")
+    assert result_event["type"] == "BANKING_SERVICE"
+    assert result_event["category"] == "account_info"
+    assert result_event["service"] == "device_history"
+    assert result_event["payload"] == devices_payload
+
+
 def test_direct_taxonomy_routing_skips_classify(client, monkeypatch):
     classify_calls = []
 

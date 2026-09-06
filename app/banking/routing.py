@@ -75,7 +75,16 @@ def build_system_prompt(taxonomy: dict) -> str:
         "service that matches something in this list. When in doubt, prefer ask_clarification "
         "over guessing.\n\n"
         "Available categories, services, and subservices:\n"
-        f"{_render_taxonomy(taxonomy)}"
+        f"{_render_taxonomy(taxonomy)}\n\n"
+        "Examples:\n"
+        '- "what\'s my balance?" -> route_banking_service(category="account_info", '
+        'service="balance")\n'
+        '- "how many accounts do I have?" -> route_banking_service(category="account_info", '
+        'service="accounts")\n'
+        '- "what devices are logged in?" -> route_banking_service(category="account_info", '
+        'service="device_history")\n'
+        '- "show my login history" -> route_banking_service(category="account_info", '
+        'service="login_history")'
     )
 
 
@@ -147,14 +156,10 @@ def build_tools() -> list[dict]:
     ]
 
 
-async def classify(
-    message: str, recent_turns: list[ChatTurn] | None = None
-) -> ClassificationResult:
-    messages = [{"role": "system", "content": build_system_prompt(get_taxonomy())}]
-    for turn in recent_turns or []:
-        messages.append({"role": "user", "content": turn.message})
-    messages.append({"role": "user", "content": message})
+_CLARIFICATION_FALLBACK = "Could you tell me more specifically what you'd like to do?"
 
+
+async def _post_classification(messages: list[dict]) -> list[dict]:
     async with httpx.AsyncClient(timeout=None) as client:
         resp = await client.post(
             f"{settings.OLLAMA_BASE_URL}/api/chat",
@@ -168,8 +173,18 @@ async def classify(
         )
         resp.raise_for_status()
         data = resp.json()
+    return data.get("message", {}).get("tool_calls") or []
 
-    tool_calls = data.get("message", {}).get("tool_calls") or []
+
+async def classify(
+    message: str, recent_turns: list[ChatTurn] | None = None
+) -> ClassificationResult:
+    messages = [{"role": "system", "content": build_system_prompt(get_taxonomy())}]
+    for turn in recent_turns or []:
+        messages.append({"role": "user", "content": turn.message})
+    messages.append({"role": "user", "content": message})
+
+    tool_calls = await _post_classification(messages)
     if not tool_calls:
         return KbQuestion()
 
@@ -187,6 +202,46 @@ async def classify(
         subservice = arguments.get("subservice") or None
         if is_valid_path(category, service, subservice):
             return BankingService(category=category, service=service, subservice=subservice)
-        return UnknownService(category=category, service=service, subservice=subservice)
+
+        # First attempt hallucinated a category/service/subservice id that doesn't exist
+        # anywhere in the real taxonomy (confirmed live: genuine model nondeterminism, not
+        # a fixable prompt/schema issue — see T-23). Retry once with a corrective message
+        # before falling back to a generic clarification, so a wrong-but-plausible guess
+        # doesn't become a confident "that's not available" to the customer.
+        retry_messages = messages + [
+            {"role": "assistant", "content": "", "tool_calls": [tool_calls[0]]},
+            {
+                "role": "user",
+                "content": (
+                    "That category/service/subservice doesn't exist. Re-check the list above "
+                    "and either pick a real id, or call ask_clarification if you're not sure."
+                ),
+            },
+        ]
+        retry_tool_calls = await _post_classification(retry_messages)
+        if not retry_tool_calls:
+            return Clarification(question=_CLARIFICATION_FALLBACK)
+
+        retry_call = retry_tool_calls[0]["function"]
+        retry_name = retry_call["name"]
+        retry_arguments = retry_call.get("arguments", {})
+
+        if retry_name == "answer_kb_question":
+            return KbQuestion()
+        if retry_name == "ask_clarification":
+            return Clarification(question=retry_arguments["question"])
+        if retry_name == "route_banking_service":
+            retry_category = retry_arguments["category"]
+            retry_service = retry_arguments["service"]
+            retry_subservice = retry_arguments.get("subservice") or None
+            if is_valid_path(retry_category, retry_service, retry_subservice):
+                return BankingService(
+                    category=retry_category,
+                    service=retry_service,
+                    subservice=retry_subservice,
+                )
+            return Clarification(question=_CLARIFICATION_FALLBACK)
+
+        return Clarification(question=_CLARIFICATION_FALLBACK)
 
     return KbQuestion()

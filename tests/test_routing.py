@@ -16,6 +16,7 @@ import pytest
 
 import app.banking.routing as routing
 from app.banking.routing import (
+    _CLARIFICATION_FALLBACK,
     BankingService,
     Clarification,
     KbQuestion,
@@ -71,6 +72,20 @@ def _install_post_response(monkeypatch, json_data, captured_calls=None):
         if captured_calls is not None:
             captured_calls.append({"url": url, "kwargs": kwargs})
         return FakeResponse(json_data)
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+
+
+def _install_post_response_sequence(monkeypatch, json_data_sequence, captured_calls=None):
+    """Like _install_post_response, but returns a different response on each
+    successive call -- used to drive T-23's retry-once behavior (first
+    attempt, then retry) with distinct Ollama responses."""
+    responses = iter(json_data_sequence)
+
+    async def fake_post(self, url, *args, **kwargs):
+        if captured_calls is not None:
+            captured_calls.append({"url": url, "kwargs": kwargs})
+        return FakeResponse(next(responses))
 
     monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
 
@@ -198,23 +213,36 @@ def test_classify_route_banking_service_valid_path_returns_banking_service(monke
     assert result == BankingService(category="banking", service="accounts", subservice="checking")
 
 
-def test_classify_route_banking_service_invalid_path_returns_unknown_service(monkeypatch):
+def test_classify_route_banking_service_invalid_path_falls_back_to_clarification_after_retry(
+    monkeypatch,
+):
     monkeypatch.setattr(routing, "is_valid_path", lambda *a, **k: False)
-    _install_post_response(
+    _install_post_response_sequence(
         monkeypatch,
-        _ollama_response(
-            [
-                _tool_call(
-                    "route_banking_service",
-                    {"category": "banking", "service": "made-up-service"},
-                )
-            ]
-        ),
+        [
+            _ollama_response(
+                [
+                    _tool_call(
+                        "route_banking_service",
+                        {"category": "banking", "service": "made-up-service"},
+                    )
+                ]
+            ),
+            _ollama_response(
+                [
+                    _tool_call(
+                        "route_banking_service",
+                        {"category": "banking", "service": "still-made-up-service"},
+                    )
+                ]
+            ),
+        ],
     )
 
     result = asyncio.run(classify("do the made up thing"))
 
-    assert result == UnknownService(category="banking", service="made-up-service", subservice=None)
+    assert result == Clarification(question=_CLARIFICATION_FALLBACK)
+    assert not isinstance(result, UnknownService)
     assert not isinstance(result, BankingService)
 
 
@@ -260,3 +288,114 @@ def test_classify_includes_recent_turns_as_prior_user_messages(monkeypatch):
     # prior turns precede the new message
     assert user_texts.index("what are your hours?") < user_texts.index("thanks, one more question")
     assert user_texts.index("do you have a mobile app?") < user_texts.index("thanks, one more question")
+
+
+# --- classify: T-23 retry-once-then-clarify --------------------------------
+
+
+def test_classify_valid_first_attempt_calls_ollama_exactly_once(monkeypatch):
+    monkeypatch.setattr(routing, "is_valid_path", lambda *a, **k: True)
+    captured_calls = []
+    _install_post_response(
+        monkeypatch,
+        _ollama_response(
+            [_tool_call("route_banking_service", {"category": "banking", "service": "accounts"})]
+        ),
+        captured_calls=captured_calls,
+    )
+
+    result = asyncio.run(classify("show me my accounts"))
+
+    assert result == BankingService(category="banking", service="accounts", subservice=None)
+    assert len(captured_calls) == 1
+
+
+def test_classify_retries_once_and_returns_banking_service_on_valid_retry(monkeypatch):
+    def fake_is_valid_path(category, service, subservice=None):
+        return category == "banking" and service == "accounts"
+
+    monkeypatch.setattr(routing, "is_valid_path", fake_is_valid_path)
+    captured_calls = []
+    _install_post_response_sequence(
+        monkeypatch,
+        [
+            _ollama_response(
+                [_tool_call("route_banking_service", {"category": "banking", "service": "made-up"})]
+            ),
+            _ollama_response(
+                [_tool_call("route_banking_service", {"category": "banking", "service": "accounts"})]
+            ),
+        ],
+        captured_calls=captured_calls,
+    )
+
+    result = asyncio.run(classify("show me my made up thing"))
+
+    assert result == BankingService(category="banking", service="accounts", subservice=None)
+    assert len(captured_calls) == 2
+
+    retry_messages = captured_calls[1]["kwargs"]["json"]["messages"]
+    retry_user_texts = [m["content"] for m in retry_messages if m["role"] == "user"]
+    assert any("doesn't exist" in text for text in retry_user_texts)
+    retry_assistant_messages = [m for m in retry_messages if m["role"] == "assistant"]
+    assert len(retry_assistant_messages) == 1
+    assert retry_assistant_messages[0]["tool_calls"] == [
+        _tool_call("route_banking_service", {"category": "banking", "service": "made-up"})
+    ]
+
+
+def test_classify_retry_also_invalid_falls_back_to_clarification(monkeypatch):
+    monkeypatch.setattr(routing, "is_valid_path", lambda *a, **k: False)
+    _install_post_response_sequence(
+        monkeypatch,
+        [
+            _ollama_response(
+                [_tool_call("route_banking_service", {"category": "banking", "service": "made-up"})]
+            ),
+            _ollama_response(
+                [_tool_call("route_banking_service", {"category": "banking", "service": "still-made-up"})]
+            ),
+        ],
+    )
+
+    result = asyncio.run(classify("do the made up thing"))
+
+    assert result == Clarification(question=_CLARIFICATION_FALLBACK)
+    assert not isinstance(result, UnknownService)
+
+
+def test_classify_retry_produces_no_tool_call_falls_back_to_clarification(monkeypatch):
+    monkeypatch.setattr(routing, "is_valid_path", lambda *a, **k: False)
+    _install_post_response_sequence(
+        monkeypatch,
+        [
+            _ollama_response(
+                [_tool_call("route_banking_service", {"category": "banking", "service": "made-up"})]
+            ),
+            {"message": {}},
+        ],
+    )
+
+    result = asyncio.run(classify("do the made up thing"))
+
+    assert result == Clarification(question=_CLARIFICATION_FALLBACK)
+
+
+def test_classify_retry_produces_ask_clarification_returns_retry_question(monkeypatch):
+    monkeypatch.setattr(routing, "is_valid_path", lambda *a, **k: False)
+    _install_post_response_sequence(
+        monkeypatch,
+        [
+            _ollama_response(
+                [_tool_call("route_banking_service", {"category": "banking", "service": "made-up"})]
+            ),
+            _ollama_response(
+                [_tool_call("ask_clarification", {"question": "Which specific thing do you mean?"})]
+            ),
+        ],
+    )
+
+    result = asyncio.run(classify("do the made up thing"))
+
+    assert result == Clarification(question="Which specific thing do you mean?")
+    assert result != Clarification(question=_CLARIFICATION_FALLBACK)

@@ -173,13 +173,22 @@ def test_accounts_adapter_without_id_calls_list_path(monkeypatch):
     assert calls[0]["path"] == "/polygon-bank/v1/accounts"
 
 
-def test_device_history_adapter_returns_whole_body_on_success(monkeypatch):
-    body = {"data": {"devices": []}}
+def test_device_history_adapter_wraps_bare_array_response_under_devices_key(monkeypatch):
+    """T-22 regression test: GET /auth/v1/devices returns a bare JSON array
+    (not an object), and the raw list must never flow through unwrapped --
+    app/routes/chat.py's success-path calls data.get("mock") on the adapter
+    result, which crashes with AttributeError on a bare list. fulfill() must
+    wrap the array under a "devices" key so callers always get a dict."""
+    body = [
+        {"id": 1, "deviceName": "iPhone"},
+        {"id": 2, "deviceName": "Pixel"},
+    ]
     _install_request(monkeypatch, response=FakeResponse(json_data=body))
 
     result = asyncio.run(real.device_history_adapter.fulfill(_IDENTITY, _JWT, "device_history", None))
 
-    assert result == AdapterResult(data=body)
+    assert result == AdapterResult(data={"devices": body})
+    assert isinstance(result.data, dict)
 
 
 def test_login_history_adapter_returns_whole_body_on_success(monkeypatch):
