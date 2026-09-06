@@ -64,6 +64,12 @@
             <span>Authorization bearer token</span>
             <input id="fldAuthToken" type="text" placeholder="JWT (sent as Authorization: Bearer &lt;token&gt;)" autocomplete="off" />
           </label>
+          <div class="full login-row">
+            <input id="loginUsername" type="text" placeholder="username" autocomplete="username" />
+            <input id="loginPassword" type="password" placeholder="password" autocomplete="current-password" />
+            <button id="loginBtn" type="button" class="login-btn">Login</button>
+          </div>
+          <div id="loginStatus" class="login-status full"></div>
         </div>
       </details>
 

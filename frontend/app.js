@@ -19,6 +19,10 @@ const fldService = document.getElementById("fldService");
 const fldSubservice = document.getElementById("fldSubservice");
 const fldPayload = document.getElementById("fldPayload");
 const fldAuthToken = document.getElementById("fldAuthToken");
+const loginUsername = document.getElementById("loginUsername");
+const loginPassword = document.getElementById("loginPassword");
+const loginBtn = document.getElementById("loginBtn");
+const loginStatus = document.getElementById("loginStatus");
 
 const KEY_STORAGE = "chatbot_api_key";
 
@@ -209,6 +213,62 @@ function readRoutingExtras() {
 
   return { body, headers: extraHeaders, error: null };
 }
+
+// Direct client-side login against the bank's own auth endpoint (T-26). No
+// backend proxy: the bank's dev environment sends permissive CORS headers
+// for this origin, and keeping credentials out of Polygon Bot's backend
+// entirely matches ADR-0008's design intent. Confirmed response shape
+// (postman/Polygon-Bank-Platform-API.postman_collection.json, T-20 live
+// login): { token: { accessToken, refreshToken }, user: {...} }.
+const BANK_LOGIN_URL = "https://internet-banking.dev-polygontech.xyz/auth/v1/auth/login";
+
+async function doLogin() {
+  const username = loginUsername.value.trim();
+  const password = loginPassword.value;
+  if (!username || !password) {
+    loginStatus.textContent = "Enter username and password.";
+    loginStatus.className = "login-status full error";
+    return;
+  }
+
+  loginBtn.disabled = true;
+  loginStatus.textContent = "Logging in...";
+  loginStatus.className = "login-status full";
+
+  try {
+    const res = await fetch(BANK_LOGIN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      loginStatus.textContent = `Login failed: ${data.message || res.statusText}`;
+      loginStatus.className = "login-status full error";
+      return;
+    }
+
+    const accessToken = data && data.token && data.token.accessToken;
+    if (!accessToken) {
+      loginStatus.textContent = "Login response missing token.accessToken.";
+      loginStatus.className = "login-status full error";
+      return;
+    }
+
+    fldAuthToken.value = accessToken;
+    loginPassword.value = "";
+    loginStatus.textContent = "Logged in — Authorization field populated.";
+    loginStatus.className = "login-status full ok";
+  } catch (err) {
+    loginStatus.textContent = `Error: ${err.message}`;
+    loginStatus.className = "login-status full error";
+  } finally {
+    loginBtn.disabled = false;
+  }
+}
+
+loginBtn.addEventListener("click", doLogin);
 
 function prettyOrDash(value) {
   if (value === null || value === undefined) return "—";

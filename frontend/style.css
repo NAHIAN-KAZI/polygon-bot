@@ -332,6 +332,54 @@ body {
   .routing-extras-grid { grid-template-columns: 1fr; }
 }
 
+.login-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+.login-row input {
+  flex: 1;
+  min-width: 0;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 0.82rem;
+  padding: 0.45rem 0.6rem;
+}
+.login-row input:focus {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.login-btn {
+  flex-shrink: 0;
+  background: var(--gradient);
+  color: #04140c;
+  font-weight: 600;
+  border: none;
+  border-radius: 999px;
+  padding: 0.45rem 1rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.login-btn:hover { filter: brightness(1.08); }
+.login-btn:disabled { opacity: 0.6; cursor: default; filter: none; }
+
+.login-status {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  min-height: 1em;
+}
+.login-status.ok { color: var(--good); }
+.login-status.error { color: var(--bad); }
+
+@media (max-width: 520px) {
+  .login-row { flex-wrap: wrap; }
+  .login-row input { flex: 1 1 100%; }
+}
+
 /* ---------- Structured result panel ---------- */
 
 .result-panel {
