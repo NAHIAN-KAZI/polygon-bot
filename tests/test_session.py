@@ -92,3 +92,98 @@ def test_chat_turn_construction_with_and_without_classification():
     turn_with = session.ChatTurn(timestamp=timestamp, message="classified", classification=classification)
     assert turn_with.classification == classification
     assert turn_with.message == "classified"
+
+
+# --- get_classification_context (TASKS.md T-24): scoped recent-turns context ---
+# --- for classify(), only surfaced when the last turn is itself an unresolved --
+# --- clarification-type outcome (CLARIFICATION_REQUIRED / --------------------
+# --- ACCOUNT_SELECTION_REQUIRED) — otherwise [], so unrelated past turns never -
+# --- bleed into a fresh classification. ---------------------------------------
+
+
+def test_get_classification_context_returns_empty_list_for_unknown_customer():
+    assert session.get_classification_context("cust-unknown") == []
+
+
+def test_get_classification_context_empty_when_last_turn_has_no_classification():
+    session.record_turn("cust-kb", _turn(message="what is the refund policy?", classification=None))
+
+    assert session.get_classification_context("cust-kb") == []
+
+
+def test_get_classification_context_empty_when_last_turn_is_banking_service():
+    session.record_turn(
+        "cust-bs",
+        _turn(message="what's my balance", classification={"type": "BANKING_SERVICE", "category": "account_info"}),
+    )
+
+    assert session.get_classification_context("cust-bs") == []
+
+
+def test_get_classification_context_empty_when_last_turn_is_auth_required():
+    session.record_turn(
+        "cust-auth",
+        _turn(message="what's my balance", classification={"type": "AUTH_REQUIRED", "category": "account_info"}),
+    )
+
+    assert session.get_classification_context("cust-auth") == []
+
+
+def test_get_classification_context_empty_when_last_turn_is_unknown_service():
+    session.record_turn(
+        "cust-unknown-svc",
+        _turn(message="do the thing", classification={"type": "UNKNOWN_SERVICE", "category": "x"}),
+    )
+
+    assert session.get_classification_context("cust-unknown-svc") == []
+
+
+def test_get_classification_context_empty_when_last_turn_is_service_unavailable():
+    session.record_turn(
+        "cust-unavail",
+        _turn(message="what's my balance", classification={"type": "SERVICE_UNAVAILABLE", "category": "account_info"}),
+    )
+
+    assert session.get_classification_context("cust-unavail") == []
+
+
+def test_get_classification_context_returns_full_history_when_last_turn_is_clarification_required():
+    session.record_turn("cust-clar", _turn(message="first", classification=None))
+    session.record_turn("cust-clar", _turn(message="second", classification={"type": "BANKING_SERVICE"}))
+    session.record_turn(
+        "cust-clar",
+        _turn(message="which account?", classification={"type": "CLARIFICATION_REQUIRED", "category": None}),
+    )
+
+    result = session.get_classification_context("cust-clar")
+
+    assert [t.message for t in result] == ["first", "second", "which account?"]
+    assert result == session.get_session("cust-clar")
+
+
+def test_get_classification_context_returns_full_history_when_last_turn_is_account_selection_required():
+    session.record_turn("cust-acct-sel", _turn(message="first", classification=None))
+    session.record_turn("cust-acct-sel", _turn(message="second", classification={"type": "BANKING_SERVICE"}))
+    session.record_turn(
+        "cust-acct-sel",
+        _turn(
+            message="what's my balance",
+            classification={"type": "ACCOUNT_SELECTION_REQUIRED", "category": "account_info"},
+        ),
+    )
+
+    result = session.get_classification_context("cust-acct-sel")
+
+    assert [t.message for t in result] == ["first", "second", "what's my balance"]
+    assert result == session.get_session("cust-acct-sel")
+
+
+def test_get_classification_context_empty_when_session_expired_even_if_last_turn_was_pending_clarification():
+    stale_turn = _turn(
+        minutes_ago=31,
+        message="which account?",
+        classification={"type": "CLARIFICATION_REQUIRED", "category": None},
+    )
+    session.record_turn("cust-expired-clar", stale_turn)
+
+    assert session.get_classification_context("cust-expired-clar") == []

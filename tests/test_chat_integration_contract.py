@@ -54,10 +54,11 @@ def _install_kb_fakes(monkeypatch):
 
 
 def _install_session_fakes(monkeypatch):
-    """Isolate get_session/record_turn from the real module-level session
-    store so tests don't leak state into each other (same helper as
-    test_chat_banking_flow.py)."""
-    monkeypatch.setattr(chat_module, "get_session", lambda customer_id: [])
+    """Isolate get_classification_context/record_turn from the real
+    module-level session store so tests don't leak state into each other
+    (same helper as test_chat_banking_flow.py; TASKS.md T-24 renamed the
+    call site from get_session to get_classification_context)."""
+    monkeypatch.setattr(chat_module, "get_classification_context", lambda customer_id: [])
 
     calls = []
 

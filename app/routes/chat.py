@@ -13,7 +13,7 @@ from app.banking.adapters import fulfill_banking_service
 from app.banking.adapters.base import AdapterAccountSelectionRequiredError, AdapterAuthError, AdapterUnavailableError
 from app.banking.identity import extract_jwt, verify_jwt
 from app.banking.routing import BankingService, Clarification, KbQuestion, UnknownService, classify
-from app.banking.session import ChatTurn, get_session, record_turn
+from app.banking.session import ChatTurn, get_classification_context, record_turn
 from app.banking.taxonomy import is_valid_path
 from app.config import settings
 from app.embeddings import embed_text
@@ -117,7 +117,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
     token = extract_jwt(authorization)
     customer_identity = await verify_jwt(token) if token else None
 
-    recent_turns = get_session(customer_identity.customer_id) if customer_identity else []
+    recent_turns = get_classification_context(customer_identity.customer_id) if customer_identity else []
 
     if req.category and req.service:
         if is_valid_path(req.category, req.service, req.subservice):

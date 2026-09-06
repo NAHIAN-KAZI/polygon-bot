@@ -48,3 +48,22 @@ def record_turn(customer_id: str, turn: ChatTurn) -> None:
     if len(entry.turns) > MAX_TURNS_PER_SESSION:
         entry.turns = entry.turns[-MAX_TURNS_PER_SESSION:]
     entry.last_active_at = turn.timestamp
+
+
+_PENDING_CLARIFICATION_TYPES = {"CLARIFICATION_REQUIRED", "ACCOUNT_SELECTION_REQUIRED"}
+
+
+def get_classification_context(customer_id: str) -> list[ChatTurn]:
+    """Recent turns to feed into classify(), scoped to the actual intended use case:
+    resolving a customer's answer to a clarifying question we just asked them. Returns
+    the session's turns only if the most recent one is itself an unresolved
+    clarification-type outcome — otherwise returns [], since unrelated past turns must
+    never bleed into a fresh classification (found live: a contaminated session turned
+    3 different questions into 3 identical wrong answers)."""
+    turns = get_session(customer_id)
+    if not turns:
+        return []
+    last_classification = turns[-1].classification or {}
+    if last_classification.get("type") not in _PENDING_CLARIFICATION_TYPES:
+        return []
+    return turns

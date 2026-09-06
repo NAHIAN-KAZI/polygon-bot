@@ -4,12 +4,19 @@ Covers the branches _chat_stream() dispatches to based on the classification
 result: Clarification, UnknownService, BankingService (with/without identity,
 adapter success/failure), and the direct category+service routing path that
 bypasses classify() entirely. classify/is_valid_path/extract_jwt/verify_jwt/
-get_session/record_turn/fulfill_banking_service are mocked at their
-app.routes.chat import sites, following the same monkeypatch style as
+get_classification_context/record_turn/fulfill_banking_service are mocked at
+their app.routes.chat import sites, following the same monkeypatch style as
 test_chat_regression.py and test_chat_contract_extension.py, so nothing here
 touches real Ollama, the taxonomy cache, or the real in-memory session store.
+
+TASKS.md T-24: _chat_stream builds recent_turns via
+session.get_classification_context(...) instead of the raw get_session(...)
+(scoped to the pending-clarification case only, to avoid contaminating a
+fresh classification with unrelated past turns). _install_session_fakes
+patches get_classification_context accordingly.
 """
 import json
+from datetime import datetime, timezone
 
 import app.routes.chat as chat_module
 from app.banking.adapters.base import (
@@ -57,9 +64,9 @@ def _spy():
 
 
 def _install_session_fakes(monkeypatch):
-    """Isolate get_session/record_turn from the real module-level session
-    store so tests don't leak state into each other."""
-    monkeypatch.setattr(chat_module, "get_session", lambda customer_id: [])
+    """Isolate get_classification_context/record_turn from the real
+    module-level session store so tests don't leak state into each other."""
+    monkeypatch.setattr(chat_module, "get_classification_context", lambda customer_id: [])
     record_turn_spy = _spy()
     monkeypatch.setattr(chat_module, "record_turn", record_turn_spy)
     return record_turn_spy
@@ -715,3 +722,86 @@ def test_audit_called_once_for_banking_service_success(client, monkeypatch):
     assert identity == CustomerIdentity(customer_id=CUSTOMER_ID)
     assert turn_classification["type"] == "BANKING_SERVICE"
     assert kwargs["latency_ms"] >= 0
+
+
+# --- recent_turns wiring (TASKS.md T-24): _chat_stream must build ------------
+# --- recent_turns via session.get_classification_context (scoped to the -----
+# --- pending-clarification case), not the raw get_session, and only when ----
+# --- a customer_identity was resolved from the JWT. --------------------------
+
+
+def test_chat_stream_calls_get_classification_context_with_customer_id_when_identity_present(client, monkeypatch):
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    async def fake_classify(message, recent_turns=None):
+        return KbQuestion()
+
+    context_calls = []
+
+    def fake_get_classification_context(customer_id):
+        context_calls.append(customer_id)
+        return []
+
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "get_classification_context", fake_get_classification_context)
+    monkeypatch.setattr(chat_module, "record_turn", _spy())
+    _install_kb_fakes(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "what is the refund policy?"}, headers=JWT_HEADERS)
+
+    assert resp.status_code == 200
+    assert context_calls == [CUSTOMER_ID]
+
+
+def test_chat_stream_does_not_call_get_classification_context_without_identity(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return KbQuestion()
+
+    context_calls = []
+
+    def fake_get_classification_context(customer_id):
+        context_calls.append(customer_id)
+        return []
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "get_classification_context", fake_get_classification_context)
+    monkeypatch.setattr(chat_module, "record_turn", _spy())
+    _install_kb_fakes(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "what is the refund policy?"}, headers=AUTH_HEADERS)
+
+    assert resp.status_code == 200
+    assert context_calls == []
+
+
+def test_chat_stream_passes_get_classification_context_result_into_classify(client, monkeypatch):
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    sentinel_turns = [
+        chat_module.ChatTurn(
+            timestamp=datetime.now(timezone.utc),
+            message="which account?",
+            classification={"type": "CLARIFICATION_REQUIRED"},
+        )
+    ]
+
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "get_classification_context", lambda customer_id: sentinel_turns)
+    monkeypatch.setattr(chat_module, "record_turn", _spy())
+
+    classify_calls = []
+
+    async def fake_classify(message, recent_turns=None):
+        classify_calls.append(recent_turns)
+        return KbQuestion()
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    _install_kb_fakes(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "savings"}, headers=JWT_HEADERS)
+
+    assert resp.status_code == 200
+    assert classify_calls == [sentinel_turns]
