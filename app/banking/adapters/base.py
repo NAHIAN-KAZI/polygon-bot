@@ -20,6 +20,16 @@ class AdapterAuthError(Exception):
     SERVICE_UNAVAILABLE per SRS FR-INTEG-06."""
 
 
+class AdapterAccountSelectionRequiredError(Exception):
+    """Raised when a real adapter needs an accountNumber it wasn't given, and the
+    customer has 2+ accounts. Callers (chat.py) must surface
+    ACCOUNT_SELECTION_REQUIRED instead of treating this as a generic failure."""
+
+    def __init__(self, accounts: list[dict]):
+        self.accounts = accounts
+        super().__init__(f"account selection required among {len(accounts)} accounts")
+
+
 class BankingAdapter(Protocol):
     async def fulfill(
         self,

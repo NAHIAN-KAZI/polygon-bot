@@ -108,6 +108,14 @@ def test_outcome_mapping_for_each_result_type(audit_spy, result_type, expected_o
     assert entry["outcome"] == expected_outcome
 
 
+def test_outcome_mapping_for_account_selection_required(audit_spy):
+    log_banking_turn(None, _classification("ACCOUNT_SELECTION_REQUIRED"))
+
+    entry = json.loads(audit_spy.calls[0])
+    assert entry["result_type"] == "ACCOUNT_SELECTION_REQUIRED"
+    assert entry["outcome"] == "failure"
+
+
 # --- adapter_name --------------------------------------------------------------
 
 
@@ -125,6 +133,15 @@ def test_adapter_name_is_none_for_non_resolvable_result_types(audit_spy, result_
 
     entry = json.loads(audit_spy.calls[0])
     assert entry["adapter_name"] is None
+
+
+def test_adapter_name_populated_for_account_selection_required_with_valid_path(audit_spy):
+    log_banking_turn(
+        None, _classification("ACCOUNT_SELECTION_REQUIRED", category="account_info", service="balance")
+    )
+
+    entry = json.loads(audit_spy.calls[0])
+    assert entry["adapter_name"] == "real:balance"
 
 
 def test_adapter_name_is_none_when_category_or_service_missing(audit_spy):

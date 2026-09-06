@@ -11,6 +11,7 @@ import dataclasses
 import pytest
 
 from app.banking.adapters.base import (
+    AdapterAccountSelectionRequiredError,
     AdapterAuthError,
     AdapterResult,
     AdapterUnavailableError,
@@ -51,6 +52,42 @@ def test_adapter_errors_are_distinct():
             raise AdapterAuthError("401 from downstream")
         except AdapterUnavailableError:
             pytest.fail("AdapterAuthError should not be caught as AdapterUnavailableError")
+
+
+def test_adapter_account_selection_required_error_is_exception_and_raisable():
+    accounts = [{"accountNumber": "111"}]
+    with pytest.raises(AdapterAccountSelectionRequiredError):
+        raise AdapterAccountSelectionRequiredError(accounts)
+    assert issubclass(AdapterAccountSelectionRequiredError, Exception)
+
+
+def test_adapter_account_selection_required_error_sets_accounts_attribute():
+    accounts = [
+        {"accountNumber": "111", "accountName": "Savings"},
+        {"accountNumber": "222", "accountName": "Checking"},
+    ]
+
+    exc = AdapterAccountSelectionRequiredError(accounts)
+
+    assert exc.accounts == accounts
+    assert exc.accounts is accounts
+
+
+def test_adapter_account_selection_required_error_is_a_plain_sibling_not_a_subclass():
+    exc = AdapterAccountSelectionRequiredError([{"accountNumber": "111"}])
+
+    assert not isinstance(exc, AdapterUnavailableError)
+    assert not isinstance(exc, AdapterAuthError)
+    assert not issubclass(AdapterAccountSelectionRequiredError, AdapterUnavailableError)
+    assert not issubclass(AdapterAccountSelectionRequiredError, AdapterAuthError)
+
+    with pytest.raises(AdapterAccountSelectionRequiredError):
+        try:
+            raise AdapterAccountSelectionRequiredError([{"accountNumber": "111"}])
+        except AdapterUnavailableError:
+            pytest.fail(
+                "AdapterAccountSelectionRequiredError should not be caught as AdapterUnavailableError"
+            )
 
 
 class _FakeAdapter:

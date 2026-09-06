@@ -1,6 +1,11 @@
 import httpx
 
-from app.banking.adapters.base import AdapterAuthError, AdapterResult, AdapterUnavailableError
+from app.banking.adapters.base import (
+    AdapterAccountSelectionRequiredError,
+    AdapterAuthError,
+    AdapterResult,
+    AdapterUnavailableError,
+)
 from app.banking.identity import CustomerIdentity
 from app.config import settings
 
@@ -38,6 +43,37 @@ async def _call(
         raise AdapterUnavailableError(f"{method} {path} returned non-JSON body") from exc
 
 
+async def _resolve_account_number(
+    customer_identity: CustomerIdentity, jwt: str | None, payload: dict | None,
+) -> str:
+    """Returns the accountNumber to use. If payload already has one, returns it
+    unchanged (no API call — a client that already knows the account skips this
+    entirely). Otherwise looks the customer's accounts up via AccountsAdapter:
+    0 accounts -> AdapterUnavailableError; 1 -> auto-resolved; 2+ -> raises
+    AdapterAccountSelectionRequiredError with a trimmed account list."""
+    explicit = (payload or {}).get("accountNumber")
+    if explicit:
+        return explicit
+
+    result = await accounts_adapter.fulfill(customer_identity, jwt, "accounts", None)
+    accounts = result.data.get("data", {}).get("accounts")
+    if not isinstance(accounts, list) or len(accounts) == 0:
+        raise AdapterUnavailableError("customer has no accounts on record")
+
+    if len(accounts) == 1:
+        account_number = accounts[0].get("accountNumber")
+        if not account_number:
+            raise AdapterUnavailableError("account record missing accountNumber")
+        return account_number
+
+    trimmed = [
+        {"accountNumber": a.get("accountNumber"), "accountName": a.get("accountName"),
+         "accountType": a.get("accountType"), "balance": a.get("balance")}
+        for a in accounts
+    ]
+    raise AdapterAccountSelectionRequiredError(trimmed)
+
+
 class BalanceAdapter:
     async def fulfill(
         self,
@@ -46,9 +82,7 @@ class BalanceAdapter:
         subservice: str,
         payload: dict | None,
     ) -> AdapterResult:
-        account_number = (payload or {}).get("accountNumber")
-        if not account_number:
-            raise AdapterUnavailableError("accountNumber is required in payload for balance")
+        account_number = await _resolve_account_number(customer_identity, jwt, payload)
 
         body = await _call(
             "POST",
@@ -71,11 +105,7 @@ class TransactionHistoryAdapter:
         payload: dict | None,
     ) -> AdapterResult:
         payload = payload or {}
-        account_number = payload.get("accountNumber")
-        if not account_number:
-            raise AdapterUnavailableError(
-                "accountNumber is required in payload for transaction_history"
-            )
+        account_number = await _resolve_account_number(customer_identity, jwt, payload)
 
         body = await _call(
             "GET",

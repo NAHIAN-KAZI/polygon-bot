@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, field_validator
 from app.auth import require_api_key
 from app.banking import audit
 from app.banking.adapters import fulfill_banking_service
-from app.banking.adapters.base import AdapterAuthError, AdapterUnavailableError
+from app.banking.adapters.base import AdapterAccountSelectionRequiredError, AdapterAuthError, AdapterUnavailableError
 from app.banking.identity import extract_jwt, verify_jwt
 from app.banking.routing import BankingService, Clarification, KbQuestion, UnknownService, classify
 from app.banking.session import ChatTurn, get_session, record_turn
@@ -76,6 +76,14 @@ def _subservice_reply(service: str, subservice: str | None, data: dict) -> str:
     if key in ("accounts", "device_history", "login_history"):
         return f"Here's your {key.replace('_', ' ')} information."
     return f"Sure — here's information about {service.replace('_', ' ')}."
+
+
+def _account_selection_reply(accounts: list[dict]) -> str:
+    options = ", ".join(
+        f"{a.get('accountType', 'account').title()} account ending {str(a.get('accountNumber', ''))[-4:]}"
+        for a in accounts
+    )
+    return f"You have multiple accounts — which one did you mean? {options}."
 
 
 async def _kb_stream(req: ChatRequest):
@@ -190,6 +198,18 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                 yield _result_event("AUTH_REQUIRED", category, service, subservice)
                 turn_classification = {
                     "type": "AUTH_REQUIRED",
+                    "category": category,
+                    "service": service,
+                    "subservice": subservice,
+                }
+                audit.log_banking_turn(customer_identity, turn_classification, latency_ms=(time.monotonic() - turn_started_at) * 1000)
+            except AdapterAccountSelectionRequiredError as exc:
+                yield _sse("token", {"token": _account_selection_reply(exc.accounts)})
+                yield _result_event(
+                    "ACCOUNT_SELECTION_REQUIRED", category, service, subservice, payload={"accounts": exc.accounts}
+                )
+                turn_classification = {
+                    "type": "ACCOUNT_SELECTION_REQUIRED",
                     "category": category,
                     "service": service,
                     "subservice": subservice,

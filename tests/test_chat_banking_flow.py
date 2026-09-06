@@ -12,7 +12,12 @@ touches real Ollama, the taxonomy cache, or the real in-memory session store.
 import json
 
 import app.routes.chat as chat_module
-from app.banking.adapters.base import AdapterAuthError, AdapterResult, AdapterUnavailableError
+from app.banking.adapters.base import (
+    AdapterAccountSelectionRequiredError,
+    AdapterAuthError,
+    AdapterResult,
+    AdapterUnavailableError,
+)
 from app.banking.identity import CustomerIdentity
 from app.banking.routing import BankingService, Clarification, KbQuestion, UnknownService
 
@@ -240,6 +245,42 @@ def test_banking_service_adapter_unavailable_error(client, monkeypatch):
     assert result_event["service"] == "balance"
 
 
+_ACCOUNT_SELECTION_ACCOUNTS = [
+    {"accountNumber": "111", "accountName": "Savings", "accountType": "SAVINGS", "balance": "100"},
+    {"accountNumber": "222", "accountName": "Checking", "accountType": "CURRENT", "balance": "50"},
+]
+
+
+def test_banking_service_account_selection_required(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return BankingService(category="account_info", service="balance", subservice=None)
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    async def fake_fulfill(customer_identity, jwt, category, service, subservice, payload):
+        raise AdapterAccountSelectionRequiredError(_ACCOUNT_SELECTION_ACCOUNTS)
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", fake_fulfill)
+    _install_session_fakes(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "what's my balance"}, headers=JWT_HEADERS)
+
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    assert [name for name, _ in events] == ["token", "result", "done"]
+
+    result_event = next(data for name, data in events if name == "result")
+    assert result_event["type"] == "ACCOUNT_SELECTION_REQUIRED"
+    assert result_event["category"] == "account_info"
+    assert result_event["service"] == "balance"
+    assert result_event["subservice"] is None
+    assert result_event["payload"] == {"accounts": _ACCOUNT_SELECTION_ACCOUNTS}
+    assert result_event["routing"] is None
+
+
 def test_banking_service_mock_adapter_success(client, monkeypatch):
     async def fake_classify(message, recent_turns=None):
         return BankingService(category="pay_transfer", service="transfer_funds", subservice="internal")
@@ -386,6 +427,37 @@ def test_record_turn_called_for_banking_service_with_identity(client, monkeypatc
         "category": "account_info",
         "service": "balance",
         "subservice": "balance",
+    }
+
+
+def test_record_turn_called_for_account_selection_required_with_identity(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return BankingService(category="account_info", service="balance", subservice=None)
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    async def fake_fulfill(customer_identity, jwt, category, service, subservice, payload):
+        raise AdapterAccountSelectionRequiredError(_ACCOUNT_SELECTION_ACCOUNTS)
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", fake_fulfill)
+    record_turn_spy = _install_session_fakes(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "what's my balance"}, headers=JWT_HEADERS)
+
+    assert resp.status_code == 200
+    assert len(record_turn_spy.calls) == 1
+    args, kwargs = record_turn_spy.calls[0]
+    customer_id, turn = args
+    assert customer_id == CUSTOMER_ID
+    assert turn.message == "what's my balance"
+    assert turn.classification == {
+        "type": "ACCOUNT_SELECTION_REQUIRED",
+        "category": "account_info",
+        "service": "balance",
+        "subservice": None,
     }
 
 
@@ -549,6 +621,31 @@ def test_audit_called_once_for_service_unavailable(client, monkeypatch):
     args, kwargs = audit_spy.calls[0]
     _, turn_classification = args
     assert turn_classification["type"] == "SERVICE_UNAVAILABLE"
+
+
+def test_audit_called_once_for_account_selection_required(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return BankingService(category="account_info", service="balance", subservice=None)
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    async def fake_fulfill(customer_identity, jwt, category, service, subservice, payload):
+        raise AdapterAccountSelectionRequiredError(_ACCOUNT_SELECTION_ACCOUNTS)
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", fake_fulfill)
+    _install_session_fakes(monkeypatch)
+    audit_spy = _install_audit_spy(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "what's my balance"}, headers=JWT_HEADERS)
+
+    assert resp.status_code == 200
+    assert len(audit_spy.calls) == 1
+    args, kwargs = audit_spy.calls[0]
+    _, turn_classification = args
+    assert turn_classification["type"] == "ACCOUNT_SELECTION_REQUIRED"
 
 
 def test_audit_called_once_for_banking_service_success(client, monkeypatch):

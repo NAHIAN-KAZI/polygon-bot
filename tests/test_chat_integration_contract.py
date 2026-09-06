@@ -20,7 +20,11 @@ import json
 import httpx
 
 import app.routes.chat as chat_module
-from app.banking.adapters.base import AdapterResult, AdapterUnavailableError
+from app.banking.adapters.base import (
+    AdapterAccountSelectionRequiredError,
+    AdapterResult,
+    AdapterUnavailableError,
+)
 from app.banking.identity import CustomerIdentity
 from app.banking.routing import BankingService, Clarification, KbQuestion, UnknownService
 
@@ -201,6 +205,41 @@ def test_result_type_service_unavailable_taxonomy_populated_payload_routing_null
     assert result_event["service"] == "balance"
     assert result_event["subservice"] == "checking"
     assert result_event["payload"] is None
+    assert result_event["routing"] is None
+    assert result_event["version"] == "1.0"
+
+
+def test_result_type_account_selection_required_payload_populated_routing_null(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return BankingService(category="account_info", service="balance", subservice="checking")
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    accounts = [
+        {"accountNumber": "111", "accountName": "Savings", "accountType": "SAVINGS", "balance": "100.00"},
+        {"accountNumber": "222", "accountName": "Checking", "accountType": "CURRENT", "balance": "50.00"},
+    ]
+
+    async def fake_fulfill(customer_identity, jwt, category, service, subservice, payload):
+        raise AdapterAccountSelectionRequiredError(accounts)
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", fake_fulfill)
+    _install_session_fakes(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "what's my balance"}, headers=JWT_HEADERS)
+
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    result_event = next(data for name, data in events if name == "result")
+
+    assert result_event["type"] == "ACCOUNT_SELECTION_REQUIRED"
+    assert result_event["category"] == "account_info"
+    assert result_event["service"] == "balance"
+    assert result_event["subservice"] == "checking"
+    assert result_event["payload"] == {"accounts": accounts}
     assert result_event["routing"] is None
     assert result_event["version"] == "1.0"
 

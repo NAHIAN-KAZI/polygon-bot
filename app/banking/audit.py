@@ -44,13 +44,19 @@ _OUTCOME_BY_RESULT_TYPE: dict[str, Outcome] = {
     "AUTH_REQUIRED": "failure",
     "UNKNOWN_SERVICE": "failure",
     "CLARIFICATION_REQUIRED": "failure",
+    "ACCOUNT_SELECTION_REQUIRED": "failure",
 }
 
 # Only these result types reflect a resolved taxonomy path where reporting
 # "adapter name invoked" is meaningful. CLARIFICATION_REQUIRED never has a
 # category/service yet, and UNKNOWN_SERVICE's category/service are — by
 # definition — not a valid taxonomy path, so no real adapter maps to them.
-_ADAPTER_RESOLVABLE_RESULT_TYPES = {"BANKING_SERVICE", "SERVICE_UNAVAILABLE", "AUTH_REQUIRED"}
+_ADAPTER_RESOLVABLE_RESULT_TYPES = {
+    "BANKING_SERVICE",
+    "SERVICE_UNAVAILABLE",
+    "AUTH_REQUIRED",
+    "ACCOUNT_SELECTION_REQUIRED",
+}
 
 
 def _session_key(customer_identity: CustomerIdentity | None) -> str | None:
