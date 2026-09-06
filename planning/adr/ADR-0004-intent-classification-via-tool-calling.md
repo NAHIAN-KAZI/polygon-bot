@@ -60,6 +60,24 @@ known limitation. Explicitly out of scope: switching models, two-step classifica
 grammar-constrained decoding via a different serving stack — legitimate future options if this
 mitigation proves insufficient, not attempted here.
 
+**Confirmed 2026-09-06 (T-25, model comparison after T-23's retry/fallback mitigation still left
+`qwen3:8b` unreliable):** switched the classification model specifically to `llama3.1:8b`,
+introducing a new `OLLAMA_CLASSIFY_MODEL` setting distinct from `OLLAMA_MODEL` (the latter stays
+`qwen3:8b`, still used for RAG-answer generation — the two were previously, incorrectly, sharing
+one config value). Live A/B testing against the real bank platform: `llama3.1:8b` scored 15/16
+correct across the `account_info` direct cases, a plain KB question, the canonical ambiguous test
+case ("I need help with my card"), and several novel ambiguous/specific messages never used to
+tune the prompt — versus `qwen3:8b`'s ~1/5 on the same `account_info` cases even with T-23's
+retry/fallback mitigation in place. Also 3-5x faster (2.4-6.7s vs 15-50s) and requires no `think`
+reasoning mode at all (removed from the request entirely, not just set to `false` — llama3.1
+doesn't have this Qwen-specific toggle). Required 2 additional few-shot examples in
+`build_system_prompt()` (card-help and transfer-money, both mapped to `ask_clarification`) — an
+initial test without them showed llama3.1 consistently guessing instead of asking on the
+canonical ambiguous case (3/4 confidently wrong, 1/4 hallucinated), which the added examples fully
+resolved (4/4 correct afterward, plus 5/6 correct on novel ambiguity never seen in the prompt).
+This does not change T-23's retry-then-clarify logic, which stays in place as a safety net for
+whichever model is configured.
+
 ## Alternatives considered
 **Separate lightweight pre-classifier** (e.g. embedding similarity against taxonomy label text) —
 faster and cheaper for obvious cases, but adds a second mechanism to build, tune, and keep in
