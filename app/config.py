@@ -5,7 +5,7 @@ class Settings:
     API_KEY: str = os.environ.get("API_KEY", "")
 
     OLLAMA_BASE_URL: str = os.environ.get("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
-    OLLAMA_MODEL: str = os.environ.get("OLLAMA_MODEL", "qwen3:8b")
+    OLLAMA_MODEL: str = os.environ.get("OLLAMA_MODEL", "llama3.1:8b")
     OLLAMA_CLASSIFY_MODEL: str = os.environ.get("OLLAMA_CLASSIFY_MODEL", "llama3.1:8b")
     OLLAMA_EMBED_MODEL: str = os.environ.get("OLLAMA_EMBED_MODEL", "all-minilm")
     EMBED_DIM: int = int(os.environ.get("EMBED_DIM", "384"))

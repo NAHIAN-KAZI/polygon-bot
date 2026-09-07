@@ -23,7 +23,9 @@ async def _call(
     exception escape."""
     headers = {"Authorization": f"Bearer {jwt}"}
     try:
-        async with httpx.AsyncClient(base_url=settings.PLATFORM_API_BASE_URL) as client:
+        async with httpx.AsyncClient(
+            base_url=settings.PLATFORM_API_BASE_URL, timeout=30.0
+        ) as client:
             response = await client.request(
                 method, path, headers=headers, params=params, json=json
             )

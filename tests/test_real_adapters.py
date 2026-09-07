@@ -438,6 +438,34 @@ def test_transaction_history_adapter_malformed_accounts_response_raises_adapter_
     assert len(calls) == 1
 
 
+# --- T-31: AsyncClient must be constructed with a timeout above httpx's
+# 5.0s default (too short for the real bank platform's observed latency) --
+
+
+def test_call_constructs_asyncclient_with_timeout_above_httpx_default(monkeypatch):
+    """Regression test for T-31: _call()'s httpx.AsyncClient(...) previously
+    omitted timeout=, silently falling back to httpx's 5.0s default. This
+    captures the actual kwargs AsyncClient is constructed with (not just the
+    request outcome, which the other tests in this file already cover) so a
+    future edit that drops or shrinks timeout= fails loudly here instead of
+    reappearing as sporadic AdapterUnavailableError against the real platform."""
+    captured_kwargs = {}
+    original_init = httpx.AsyncClient.__init__
+
+    def fake_init(self, *args, **kwargs):
+        captured_kwargs.update(kwargs)
+        return original_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(httpx.AsyncClient, "__init__", fake_init)
+    _install_request(monkeypatch, response=FakeResponse(json_data={"data": {}}))
+
+    asyncio.run(real.accounts_adapter.fulfill(_IDENTITY, _JWT, "accounts", {}))
+
+    assert "timeout" in captured_kwargs
+    assert captured_kwargs["timeout"] == 30.0
+    assert captured_kwargs["timeout"] > 5.0  # httpx.AsyncClient's own default
+
+
 def test_real_adapters_dict_has_exactly_the_five_expected_keys():
     assert set(real.REAL_ADAPTERS.keys()) == {
         "real:balance",
