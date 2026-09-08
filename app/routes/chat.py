@@ -1,3 +1,4 @@
+import copy
 import json
 import time
 from datetime import datetime, timezone
@@ -104,6 +105,21 @@ def _account_card_summary(cards: object) -> str:
     return f"linked to {total} cards ({breakdown})"
 
 
+def _mask_number(value: object, keep: int = 4) -> str | None:
+    s = str(value) if value is not None else ""
+    if len(s) <= keep:
+        return s or None
+    return "•" * (len(s) - keep) + s[-keep:]
+
+
+def _format_bdt(amount: object) -> str | None:
+    try:
+        n = float(amount)
+    except (TypeError, ValueError):
+        return None
+    return f"৳{n:,.0f}"
+
+
 async def _synthesize_reply(message: str, service: str, subservice: str | None, data: dict) -> str:
     """LLM-synthesized spoken reply, tailored to the customer's actual question,
     using only the real data already fetched. Falls back to the deterministic
@@ -121,6 +137,9 @@ async def _synthesize_reply(message: str, service: str, subservice: str | None, 
             "asked about (e.g. an exact date range you don't actually have), say "
             "what you DO have instead (e.g. \"here are your N most recent "
             "transactions\") rather than pretending to have filtered by it. "
+            "Never state a full account or card number — if you need to refer "
+            "to one, use only the masked form already present in the data "
+            "(the fields ending in \"Masked\"), if present. "
             "Keep it to 1-3 sentences, plain prose, no markdown."
         )
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -259,6 +278,52 @@ def _subservice_reply(service: str, subservice: str | None, data: dict) -> str:
             return fallback
 
     return fallback
+
+
+def _enrich_payload(service: str, subservice: str | None, data: dict) -> dict:
+    """Add masked/formatted display fields to a real-adapter payload, additive only
+    (never removes/overwrites raw fields). Defensive against missing/malformed
+    shapes — never raises. Returns data unchanged for shapes it doesn't recognize."""
+    key = subservice or service
+    try:
+        enriched = copy.deepcopy(data)
+    except Exception:
+        return data
+
+    try:
+        if key == "balance":
+            if isinstance(enriched, dict):
+                enriched["balanceFormatted"] = _format_bdt(enriched.get("balance"))
+            return enriched
+
+        if key == "accounts":
+            inner = enriched.get("data") if isinstance(enriched, dict) else None
+            if isinstance(inner, dict):
+                accounts = inner.get("accounts")
+                if isinstance(accounts, list):
+                    for a in accounts:
+                        if isinstance(a, dict):
+                            a["accountNumberMasked"] = _mask_number(a.get("accountNumber"))
+                ledger_accounts = inner.get("ledgerAccounts")
+                if isinstance(ledger_accounts, list):
+                    for led in ledger_accounts:
+                        if isinstance(led, dict):
+                            led["identifierMasked"] = _mask_number(led.get("identifier"))
+                            led["balanceFormatted"] = _format_bdt(led.get("balance"))
+            return enriched
+
+        if key == "transaction_history":
+            transactions = enriched.get("transactions") if isinstance(enriched, dict) else None
+            if isinstance(transactions, list):
+                for t in transactions:
+                    if isinstance(t, dict):
+                        t["accountNumberMasked"] = _mask_number(t.get("accountNumber"))
+                        t["amountFormatted"] = _format_bdt(t.get("amount"))
+            return enriched
+    except Exception:
+        return data
+
+    return data
 
 
 def _account_selection_reply(accounts: list[dict]) -> str:
@@ -413,6 +478,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                 if data.get("mock") is True:
                     yield _sse("token", {"token": f"Sure — here's information about {service.replace('_', ' ')}."})
                 else:
+                    data = _enrich_payload(service, subservice, data)
                     yield _sse("token", {"token": await _synthesize_reply(req.message, service, subservice, data)})
                 yield _result_event(
                     "BANKING_SERVICE",

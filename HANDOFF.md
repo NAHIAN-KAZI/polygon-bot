@@ -68,6 +68,39 @@ Always handle both `done` and `error` — a stream is not guaranteed to reach `d
 5. **`X-API-Key` is a placeholder.** Will rotate before go-live. Do not ship `devtestkey123` in any client.
 6. **Base URL is internal-network only.** Confirm it's reachable from wherever your client actually runs.
 
+## Frontend rendering guide (for cards/tables/UI)
+
+This API returns **JSON only, over SSE — never HTML.** Table/card layout,
+styling, and rendering are entirely your frontend's job; this API just gives
+you the structured data to render.
+
+1. **Masked numbers**: banking-service `payload` fields include additive
+   `*Masked` companions next to the raw field (e.g. `accountNumberMasked`
+   alongside `accountNumber`, `identifierMasked` alongside `identifier`) —
+   `"••••••••0015"` style, last 4 digits visible. **Use the `*Masked` field
+   for display; never render the raw number.** The spoken `token` reply also
+   never states a full number.
+2. **Currency formatting**: `*Formatted` companion fields (e.g.
+   `balanceFormatted`, `amountFormatted`) give a ready-to-display BDT string,
+   e.g. `"৳100,225,505"`. Raw numeric fields are unchanged alongside them.
+3. **Date-range tables** (transaction/login history): pass
+   `payload.startDate` and `payload.endDate` (ISO `YYYY-MM-DD`, both
+   required together) on the request. The response includes `dateFiltered:
+   true` and only in-range records when this worked. Omit both fields for
+   the default most-recent-N view (unchanged, existing behavior). There is
+   no free-text date parsing — a message like "last 20 days" typed in chat
+   does **not** auto-apply a filter; the caller must set the explicit fields
+   (e.g. from a date picker).
+4. **Action buttons**: no new field needed for this — `result.service` /
+   `result.subservice` (already returned on every `BANKING_SERVICE` result)
+   is enough to resolve the right action/route through your own app's
+   existing local service catalog, the same way the main services grid
+   already does.
+5. **Beneficiary details**: not yet a real integration — `beneficiary`
+   currently returns a generic placeholder (`payload.mock: true`). Blocked
+   until you share the real beneficiary-list endpoint/shape; flag it back to
+   us once you have it.
+
 ## Example — plain KB question
 
 ```bash

@@ -80,7 +80,15 @@ data: {}
 `result.type` is one of:
 - `BANKING_SERVICE` — the request was fulfilled; `payload` carries the raw fulfillment data,
   `routing` echoes back category/service/subservice plus `action: "redirect"` for a client that
-  wants to deep-link instead of just showing the reply text.
+  wants to deep-link instead of just showing the reply text. For a real (non-mock) adapter result,
+  `payload` also carries additive display fields alongside the raw ones — never a replacement for
+  them: `balance` gains `balanceFormatted` (BDT, e.g. `"৳1,235"`); each entry under
+  `data.accounts` gains `accountNumberMasked`, and each entry under `data.ledgerAccounts` gains
+  `identifierMasked` and `balanceFormatted`; each entry under `transactions` gains
+  `accountNumberMasked` and `amountFormatted`. Masked fields use `•` for all but the last 4
+  characters. The accompanying spoken `token` reply never states a full account/card number —
+  only these masked forms, if it needs to reference one. Other subservices (`device_history`,
+  `login_history`) and mock results (`payload.mock === true`) are unaffected.
 - `CLARIFICATION_REQUIRED` — the message was too vague to route; the preceding `token` event is
   the full clarifying question (not a live token stream, just one event). `category`/`service`/
   `subservice`/`payload`/`routing` are all `null`.

@@ -15,6 +15,7 @@ session.get_classification_context(...) instead of the raw get_session(...)
 fresh classification with unrelated past turns). _install_session_fakes
 patches get_classification_context accordingly.
 """
+import copy
 import json
 from datetime import datetime, timezone
 
@@ -353,7 +354,7 @@ def test_banking_service_real_adapter_balance_success(client, monkeypatch):
 
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "BANKING_SERVICE"
-    assert result_event["payload"] == {"balance": "500.00"}
+    assert result_event["payload"] == {"balance": "500.00", "balanceFormatted": "৳500"}
 
 
 class _FakeOllamaResponse:
@@ -407,7 +408,7 @@ def test_banking_service_real_adapter_success_uses_synthesized_reply(client, mon
 
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "BANKING_SERVICE"
-    assert result_event["payload"] == {"balance": "500.00"}
+    assert result_event["payload"] == {"balance": "500.00", "balanceFormatted": "৳500"}
 
 
 def test_banking_service_mock_adapter_never_calls_synthesize_reply(client, monkeypatch):
@@ -870,6 +871,315 @@ def test_chat_stream_does_not_call_get_classification_context_without_identity(c
 
     assert resp.status_code == 200
     assert context_calls == []
+
+
+# --- masking/formatting enrichment (TASKS.md T-32): _mask_number, ----------
+# --- _format_bdt, and _enrich_payload additively decorate real-adapter -----
+# --- payloads with display-friendly fields, only for the non-mock branch. --
+
+
+def test_mask_number_masks_all_but_last_four():
+    assert chat_module._mask_number("1234567890") == "••••••7890"
+
+
+def test_mask_number_custom_keep():
+    assert chat_module._mask_number("1234567890", keep=2) == "••••••••90"
+
+
+def test_mask_number_shorter_than_keep_returns_as_is():
+    assert chat_module._mask_number("123", keep=4) == "123"
+
+
+def test_mask_number_equal_to_keep_returns_as_is():
+    assert chat_module._mask_number("1234", keep=4) == "1234"
+
+
+def test_mask_number_empty_string_returns_none():
+    assert chat_module._mask_number("", keep=4) is None
+
+
+def test_mask_number_none_input_returns_none():
+    assert chat_module._mask_number(None) is None
+
+
+def test_format_bdt_int():
+    assert chat_module._format_bdt(5000) == "৳5,000"
+
+
+def test_format_bdt_float_rounds_to_whole_taka():
+    assert chat_module._format_bdt(5000.4) == "৳5,000"
+
+
+def test_format_bdt_numeric_string():
+    assert chat_module._format_bdt("500.00") == "৳500"
+
+
+def test_format_bdt_adds_thousands_separators():
+    assert chat_module._format_bdt(1234567) == "৳1,234,567"
+
+
+def test_format_bdt_non_numeric_string_returns_none():
+    assert chat_module._format_bdt("not a number") is None
+
+
+def test_format_bdt_none_returns_none():
+    assert chat_module._format_bdt(None) is None
+
+
+def test_enrich_payload_balance_adds_formatted_field_keeps_raw():
+    data = {"balance": "500.00", "currency": "BDT"}
+    result = chat_module._enrich_payload("balance", "balance", data)
+
+    assert result["balance"] == "500.00"
+    assert result["currency"] == "BDT"
+    assert result["balanceFormatted"] == "৳500"
+    # original untouched (additive, deep-copied)
+    assert data == {"balance": "500.00", "currency": "BDT"}
+
+
+def test_enrich_payload_accounts_adds_masked_and_formatted_fields():
+    data = {
+        "data": {
+            "accounts": [
+                {"accountNumber": "1234567890", "accountType": "SAVINGS"},
+                {"accountNumber": "5555", "accountType": "CURRENT"},
+            ],
+            "ledgerAccounts": [
+                {"identifier": "9876543210", "balance": "2500.00"},
+            ],
+        }
+    }
+    original_copy = copy.deepcopy(data)
+
+    result = chat_module._enrich_payload("accounts", None, data)
+
+    accounts = result["data"]["accounts"]
+    assert accounts[0]["accountNumber"] == "1234567890"
+    assert accounts[0]["accountNumberMasked"] == "••••••7890"
+    assert accounts[1]["accountNumber"] == "5555"
+    assert accounts[1]["accountNumberMasked"] == "5555"
+
+    ledger = result["data"]["ledgerAccounts"][0]
+    assert ledger["identifier"] == "9876543210"
+    assert ledger["identifierMasked"] == "••••••3210"
+    assert ledger["balance"] == "2500.00"
+    assert ledger["balanceFormatted"] == "৳2,500"
+
+    # original input untouched
+    assert data == original_copy
+
+
+def test_enrich_payload_transaction_history_adds_masked_and_formatted_fields():
+    data = {
+        "transactions": [
+            {"accountNumber": "1234567890", "amount": "150.75", "description": "Groceries"},
+        ],
+        "pagination": {"totalCount": 1},
+    }
+    original_copy = copy.deepcopy(data)
+
+    result = chat_module._enrich_payload("transaction_history", None, data)
+
+    txn = result["transactions"][0]
+    assert txn["accountNumber"] == "1234567890"
+    assert txn["accountNumberMasked"] == "••••••7890"
+    assert txn["amount"] == "150.75"
+    assert txn["amountFormatted"] == "৳151"
+    assert result["pagination"] == {"totalCount": 1}
+
+    assert data == original_copy
+
+
+def test_enrich_payload_device_history_passes_through_unchanged():
+    data = {"devices": [{"id": 1, "deviceName": "iPhone"}]}
+    result = chat_module._enrich_payload("device_history", None, data)
+    assert result == data
+
+
+def test_enrich_payload_login_history_passes_through_unchanged():
+    data = {"records": [{"status": "SUCCESS", "ipAddress": "1.2.3.4"}]}
+    result = chat_module._enrich_payload("login_history", None, data)
+    assert result == data
+
+
+def test_enrich_payload_unrecognized_key_passes_through_unchanged():
+    data = {"anything": "goes here"}
+    result = chat_module._enrich_payload("some_other_service", "some_other_subservice", data)
+    assert result == data
+
+
+def test_enrich_payload_accounts_missing_inner_data_key_no_crash():
+    data = {"unexpected": "shape"}
+    result = chat_module._enrich_payload("accounts", None, data)
+    assert result == data
+
+
+def test_enrich_payload_accounts_malformed_entries_no_crash():
+    data = {
+        "data": {
+            "accounts": ["not-a-dict", 123, None],
+            "ledgerAccounts": "not-a-list",
+        }
+    }
+    result = chat_module._enrich_payload("accounts", None, data)
+    assert result["data"]["accounts"] == ["not-a-dict", 123, None]
+    assert result["data"]["ledgerAccounts"] == "not-a-list"
+
+
+def test_enrich_payload_balance_non_dict_data_no_crash():
+    result = chat_module._enrich_payload("balance", "balance", "not-a-dict")
+    assert result == "not-a-dict"
+
+
+def test_enrich_payload_transaction_history_missing_transactions_key_no_crash():
+    data = {"pagination": {"totalCount": 0}}
+    result = chat_module._enrich_payload("transaction_history", None, data)
+    assert result == data
+
+
+def test_banking_service_real_adapter_accounts_success_enriches_payload(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return BankingService(category="account_info", service="accounts", subservice=None)
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    accounts_data = {
+        "data": {
+            "accounts": [{"accountNumber": "1234567890", "accountType": "SAVINGS"}],
+            "ledgerAccounts": [{"identifier": "9876543210", "balance": "2500.00"}],
+        }
+    }
+
+    async def fake_fulfill(customer_identity, jwt, category, service, subservice, payload):
+        return AdapterResult(data=accounts_data)
+
+    async def fake_synthesize_reply(message, service, subservice, data):
+        return "Here are your accounts."
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", fake_fulfill)
+    monkeypatch.setattr(chat_module, "_synthesize_reply", fake_synthesize_reply)
+    _install_session_fakes(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "show my accounts"}, headers=JWT_HEADERS)
+
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    result_event = next(data for name, data in events if name == "result")
+    assert result_event["type"] == "BANKING_SERVICE"
+
+    payload = result_event["payload"]
+    account = payload["data"]["accounts"][0]
+    assert account["accountNumber"] == "1234567890"
+    assert account["accountNumberMasked"] == "••••••7890"
+    ledger = payload["data"]["ledgerAccounts"][0]
+    assert ledger["identifierMasked"] == "••••••3210"
+    assert ledger["balanceFormatted"] == "৳2,500"
+
+
+def test_banking_service_real_adapter_balance_success_enriches_payload(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return BankingService(category="account_info", service="balance", subservice="balance")
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    async def fake_fulfill(customer_identity, jwt, category, service, subservice, payload):
+        return AdapterResult(data={"balance": "500.00"})
+
+    async def fake_synthesize_reply(message, service, subservice, data):
+        return "Your balance is ৳500."
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", fake_fulfill)
+    monkeypatch.setattr(chat_module, "_synthesize_reply", fake_synthesize_reply)
+    _install_session_fakes(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "what's my balance"}, headers=JWT_HEADERS)
+
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    result_event = next(data for name, data in events if name == "result")
+    payload = result_event["payload"]
+    assert payload["balance"] == "500.00"
+    assert payload["balanceFormatted"] == "৳500"
+
+
+def test_banking_service_real_adapter_transaction_history_success_enriches_payload(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return BankingService(category="account_info", service="transaction_history", subservice=None)
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    txn_data = {
+        "transactions": [
+            {"accountNumber": "1234567890", "amount": "150.75", "description": "Groceries", "type": "DEBIT"},
+        ],
+        "pagination": {"totalCount": 1},
+    }
+
+    async def fake_fulfill(customer_identity, jwt, category, service, subservice, payload):
+        return AdapterResult(data=txn_data)
+
+    async def fake_synthesize_reply(message, service, subservice, data):
+        return "Here are your recent transactions."
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", fake_fulfill)
+    monkeypatch.setattr(chat_module, "_synthesize_reply", fake_synthesize_reply)
+    _install_session_fakes(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "show my recent transactions"}, headers=JWT_HEADERS)
+
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    result_event = next(data for name, data in events if name == "result")
+    payload = result_event["payload"]
+    txn = payload["transactions"][0]
+    assert txn["accountNumberMasked"] == "••••••7890"
+    assert txn["amountFormatted"] == "৳151"
+
+
+def test_banking_service_mock_adapter_payload_not_enriched(client, monkeypatch):
+    """The mock-adapter branch must remain exactly as before T-32: _enrich_payload
+    is never invoked and the result payload is untouched."""
+
+    async def fake_classify(message, recent_turns=None):
+        return BankingService(category="pay_transfer", service="transfer_funds", subservice="internal")
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    mock_data = {"mock": True, "subservice": "internal", "note": "synthetic"}
+
+    async def fake_fulfill(customer_identity, jwt, category, service, subservice, payload):
+        return AdapterResult(data=mock_data)
+
+    enrich_calls = []
+    real_enrich_payload = chat_module._enrich_payload
+
+    def spy_enrich_payload(service, subservice, data):
+        enrich_calls.append((service, subservice, data))
+        return real_enrich_payload(service, subservice, data)
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", fake_fulfill)
+    monkeypatch.setattr(chat_module, "_enrich_payload", spy_enrich_payload)
+    _install_session_fakes(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "transfer money"}, headers=JWT_HEADERS)
+
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    result_event = next(data for name, data in events if name == "result")
+    assert result_event["payload"] == mock_data
+    assert enrich_calls == []
 
 
 def test_chat_stream_passes_get_classification_context_result_into_classify(client, monkeypatch):
