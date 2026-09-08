@@ -68,6 +68,28 @@ Always handle both `done` and `error` — a stream is not guaranteed to reach `d
 5. **`X-API-Key` is a placeholder.** Will rotate before go-live. Do not ship `devtestkey123` in any client.
 6. **Base URL is internal-network only.** Confirm it's reachable from wherever your client actually runs.
 
+## Action items for your team (as of 2026-09-08)
+
+1. **Switch to the `*Masked` fields for any account/card number on screen** —
+   `accountNumberMasked`, `identifierMasked`. Stop rendering the raw
+   `accountNumber`/`identifier` fields directly.
+2. **Switch to the `*Formatted` fields for currency amounts** —
+   `balanceFormatted`, `amountFormatted` (ready-to-display BDT strings).
+3. **Add a date-range control (e.g. date pickers) for transaction/login
+   history views**, sending `payload.startDate`/`payload.endDate` (ISO
+   `YYYY-MM-DD`, both required together) on the request.
+4. **No integration work needed for action buttons** — keep using
+   `result.service`/`result.subservice` against your own existing local
+   service catalog, same as today.
+5. **Beneficiary details are still blocked on your side** — send us the real
+   beneficiary-list endpoint/shape when it's available; we'll wire a real
+   adapter once we have it.
+6. **Incident (resolved)**: `GET /polygon-bank/v1/accounts` was returning
+   `500` on your platform 2026-09-08 ~09:00–10:18 UTC (Kong request id
+   `11fb8a2a60db7608dceee777be346759`), blocking balance/accounts/transaction
+   lookups on our end. Confirmed resolved as of 10:18 UTC — flagging in case
+   it recurs.
+
 ## Frontend rendering guide (for cards/tables/UI)
 
 This API returns **JSON only, over SSE — never HTML.** Table/card layout,
