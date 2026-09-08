@@ -87,8 +87,13 @@ data: {}
   `identifierMasked` and `balanceFormatted`; each entry under `transactions` gains
   `accountNumberMasked` and `amountFormatted`. Masked fields use `•` for all but the last 4
   characters. The accompanying spoken `token` reply never states a full account/card number —
-  only these masked forms, if it needs to reference one. Other subservices (`device_history`,
-  `login_history`) and mock results (`payload.mock === true`) are unaffected.
+  only these masked forms, if it needs to reference one. This is enforced at the source: the raw
+  fetched data is redacted (`accountNumber`/`identifier` replaced with their masked form,
+  `cifNumber`/`nid` stripped, and any 6+ digit run in free-text fields like `description` masked)
+  before it is ever shown to the LLM that synthesizes the spoken reply, so the model has no way to
+  see — and therefore no way to repeat — a full number. `payload` itself is unaffected by this;
+  it still carries the raw + masked fields exactly as described above. Other subservices
+  (`device_history`, `login_history`) and mock results (`payload.mock === true`) are unaffected.
 - `CLARIFICATION_REQUIRED` — the message was too vague to route; the preceding `token` event is
   the full clarifying question (not a live token stream, just one event). `category`/`service`/
   `subservice`/`payload`/`routing` are all `null`.

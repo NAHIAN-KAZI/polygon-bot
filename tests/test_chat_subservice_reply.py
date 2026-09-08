@@ -31,6 +31,7 @@ _synthesize_reply is async and driven via asyncio.run(), matching
 tests/test_adapter_base.py (no pytest-asyncio in this repo).
 """
 import asyncio
+import json
 
 import httpx
 
@@ -585,3 +586,42 @@ def test_synthesize_reply_sends_correct_request_body(monkeypatch):
     assert body["think"] is True
     assert "what is my balance please" in body["prompt"]
     assert "distinctive-marker-999888777" in body["prompt"]
+
+
+# --- 10. _synthesize_reply prompt redaction (T-35) --------------------------
+
+
+def test_synthesize_reply_prompt_redacts_raw_account_number_uses_masked_sibling(monkeypatch):
+    """_synthesize_reply must run `data` through _redact_for_prompt before
+    embedding it in the Ollama prompt, so a raw account number (with an
+    accountNumberMasked sibling already present, as T-32's _enrich_payload
+    adds before this is called) never reaches the model."""
+    captured_calls = []
+    _install_post_response(monkeypatch, json_data={"response": "ok"}, captured_calls=captured_calls)
+
+    data = {
+        "balance": "500.00",
+        "accountNumber": "1234567890",
+        "accountNumberMasked": "••••••7890",
+    }
+    asyncio.run(_synthesize_reply("what's my balance", "balance", "balance", data))
+
+    assert len(captured_calls) == 1
+    prompt = captured_calls[0]["kwargs"]["json"]["prompt"]
+    assert "1234567890" not in prompt
+    # json.dumps(..., default=str) escapes the non-ASCII "•" bullet, so look
+    # for its JSON-encoded form rather than the literal character.
+    assert json.dumps("••••••7890")[1:-1] in prompt
+
+
+def test_synthesize_reply_prompt_redacts_cif_and_nid(monkeypatch):
+    captured_calls = []
+    _install_post_response(monkeypatch, json_data={"response": "ok"}, captured_calls=captured_calls)
+
+    data = {"balance": "500.00", "cifNumber": "CIF-000111", "nid": "1234567890123"}
+    asyncio.run(_synthesize_reply("what's my balance", "balance", "balance", data))
+
+    prompt = captured_calls[0]["kwargs"]["json"]["prompt"]
+    assert "CIF-000111" not in prompt
+    assert "1234567890123" not in prompt
+    assert "[redacted]" in prompt

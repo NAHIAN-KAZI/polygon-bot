@@ -1,5 +1,6 @@
 import copy
 import json
+import re
 import time
 from datetime import datetime, timezone
 
@@ -120,6 +121,46 @@ def _format_bdt(amount: object) -> str | None:
     return f"৳{n:,.0f}"
 
 
+_DIGIT_RUN_RE = re.compile(r"\d{6,}")
+
+
+def _mask_digit_run(match: re.Match) -> str:
+    digits = match.group()
+    return "•" * (len(digits) - 4) + digits[-4:]
+
+
+def _redact_for_prompt(data: dict) -> dict:
+    """Deep copy of `data` with sensitive raw fields stripped/masked before it
+    is embedded in the LLM prompt. Never mutates `data` itself — the raw dict
+    is still returned unchanged to the frontend via the `result` payload."""
+    try:
+        redacted = copy.deepcopy(data)
+
+        def walk(node):
+            if isinstance(node, dict):
+                if "accountNumber" in node:
+                    node["accountNumber"] = node.get("accountNumberMasked", "[masked]")
+                if "identifier" in node:
+                    node["identifier"] = node.get("identifierMasked", "[masked]")
+                for key in ("cifNumber", "nid"):
+                    if key in node:
+                        node[key] = "[redacted]"
+                for key in ("description", "fromToAccount"):
+                    value = node.get(key)
+                    if isinstance(value, str):
+                        node[key] = _DIGIT_RUN_RE.sub(_mask_digit_run, value)
+                for value in node.values():
+                    walk(value)
+            elif isinstance(node, list):
+                for item in node:
+                    walk(item)
+
+        walk(redacted)
+        return redacted
+    except Exception:
+        return data
+
+
 async def _synthesize_reply(message: str, service: str, subservice: str | None, data: dict) -> str:
     """LLM-synthesized spoken reply, tailored to the customer's actual question,
     using only the real data already fetched. Falls back to the deterministic
@@ -130,7 +171,7 @@ async def _synthesize_reply(message: str, service: str, subservice: str | None, 
             "You are a banking assistant. A customer asked:\n"
             f"\"{message}\"\n\n"
             "Here is the real data already fetched to answer them (JSON):\n"
-            f"{json.dumps(data, default=str)}\n\n"
+            f"{json.dumps(_redact_for_prompt(data), default=str)}\n\n"
             "Write a short, natural, accurate reply directly answering their "
             "question using ONLY this data. Never invent numbers or details not "
             "present here. If the data doesn't cover something specific they "
@@ -155,9 +196,9 @@ async def _synthesize_reply(message: str, service: str, subservice: str | None, 
             resp.raise_for_status()
             result = resp.json()
         text = (result.get("response") or "").strip()
-        return text if text else _subservice_reply(service, subservice, data)
+        return text if text else _subservice_reply(service, subservice, _redact_for_prompt(data))
     except Exception:
-        return _subservice_reply(service, subservice, data)
+        return _subservice_reply(service, subservice, _redact_for_prompt(data))
 
 
 def _subservice_reply(service: str, subservice: str | None, data: dict) -> str:

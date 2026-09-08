@@ -15,6 +15,7 @@ session.get_classification_context(...) instead of the raw get_session(...)
 fresh classification with unrelated past turns). _install_session_fakes
 patches get_classification_context accordingly.
 """
+import asyncio
 import copy
 import json
 from datetime import datetime, timezone
@@ -1180,6 +1181,285 @@ def test_banking_service_mock_adapter_payload_not_enriched(client, monkeypatch):
     result_event = next(data for name, data in events if name == "result")
     assert result_event["payload"] == mock_data
     assert enrich_calls == []
+
+
+# --- prompt redaction (TASKS.md T-35): _redact_for_prompt strips/masks -----
+# --- sensitive raw fields before data is embedded in the LLM prompt, --------
+# --- without ever mutating the input or affecting the result payload. -------
+
+
+def test_redact_for_prompt_account_number_replaced_with_masked_sibling():
+    data = {"accountNumber": "1234567890", "accountNumberMasked": "••••••7890"}
+    result = chat_module._redact_for_prompt(data)
+    assert result["accountNumber"] == "••••••7890"
+
+
+def test_redact_for_prompt_account_number_without_masked_sibling_falls_back():
+    data = {"accountNumber": "1234567890"}
+    result = chat_module._redact_for_prompt(data)
+    assert result["accountNumber"] == "[masked]"
+
+
+def test_redact_for_prompt_identifier_replaced_with_masked_sibling():
+    data = {"identifier": "9876543210", "identifierMasked": "••••••3210"}
+    result = chat_module._redact_for_prompt(data)
+    assert result["identifier"] == "••••••3210"
+
+
+def test_redact_for_prompt_identifier_without_masked_sibling_falls_back():
+    data = {"identifier": "9876543210"}
+    result = chat_module._redact_for_prompt(data)
+    assert result["identifier"] == "[masked]"
+
+
+def test_redact_for_prompt_cif_number_always_redacted():
+    data = {"cifNumber": "CIF-000111", "accountNumber": "1234567890", "accountNumberMasked": "••••••7890"}
+    result = chat_module._redact_for_prompt(data)
+    assert result["cifNumber"] == "[redacted]"
+    assert result["accountNumber"] == "••••••7890"
+
+
+def test_redact_for_prompt_nid_always_redacted():
+    data = {"nid": "1234567890123"}
+    result = chat_module._redact_for_prompt(data)
+    assert result["nid"] == "[redacted]"
+
+
+def test_redact_for_prompt_description_masks_embedded_long_digit_run():
+    data = {"description": "Transfer to account 1234567890 for rent"}
+    result = chat_module._redact_for_prompt(data)
+    assert result["description"] == "Transfer to account ••••••7890 for rent"
+
+
+def test_redact_for_prompt_from_to_account_masks_embedded_long_digit_run():
+    data = {"fromToAccount": "9876543210"}
+    result = chat_module._redact_for_prompt(data)
+    assert result["fromToAccount"] == "••••••3210"
+
+
+def test_redact_for_prompt_short_digit_run_left_alone():
+    data = {"description": "Order #12345 confirmed"}
+    result = chat_module._redact_for_prompt(data)
+    assert result["description"] == "Order #12345 confirmed"
+
+
+def test_redact_for_prompt_walks_list_of_transaction_dicts():
+    data = {
+        "transactions": [
+            {"description": "Paid to 1112223334"},
+            {"description": "Paid to 5556667778"},
+        ]
+    }
+    result = chat_module._redact_for_prompt(data)
+    assert result["transactions"][0]["description"] == "Paid to ••••••3334"
+    assert result["transactions"][1]["description"] == "Paid to ••••••7778"
+
+
+def test_redact_for_prompt_walks_deeply_nested_dicts():
+    data = {"data": {"accounts": [{"accountNumber": "1234567890"}]}}
+    result = chat_module._redact_for_prompt(data)
+    assert result["data"]["accounts"][0]["accountNumber"] == "[masked]"
+
+
+def test_redact_for_prompt_does_not_mutate_original_input():
+    original = {
+        "accountNumber": "1234567890",
+        "accountNumberMasked": "••••••7890",
+        "cifNumber": "CIF-000111",
+        "nid": "1234567890123",
+        "description": "Transfer to 1234567890",
+        "nested": {"identifier": "9876543210"},
+    }
+    snapshot = copy.deepcopy(original)
+
+    result = chat_module._redact_for_prompt(original)
+
+    assert original == snapshot
+    # sanity: redaction actually changed something in the returned copy
+    assert result["accountNumber"] != original["accountNumber"]
+
+
+def test_redact_for_prompt_adversarial_circular_reference_falls_back_to_original():
+    data = {"accountNumber": "1234567890"}
+    data["self"] = data  # circular reference: copy.deepcopy handles cycles fine,
+    # but this locks in that a genuinely un-copyable/broken structure still
+    # returns the original data rather than raising.
+
+    class Uncopyable:
+        def __deepcopy__(self, memo):
+            raise RuntimeError("boom")
+
+    data["broken"] = Uncopyable()
+
+    result = chat_module._redact_for_prompt(data)
+    assert result is data
+
+
+def test_banking_service_real_adapter_success_prompt_redacted_payload_unchanged(client, monkeypatch):
+    """Full /chat flow (TASKS.md T-35): the account number embedded in a
+    `description` free-text field must never reach the Ollama prompt, but the
+    `result` event's payload (built from the T-32 enriched data) must still
+    carry the raw value alongside its masked/formatted siblings, unchanged
+    from pre-T-35 behavior -- redaction is prompt-only."""
+
+    async def fake_classify(message, recent_turns=None):
+        return BankingService(category="account_info", service="transaction_history", subservice=None)
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    txn_data = {
+        "transactions": [
+            {
+                "accountNumber": "1234567890",
+                "amount": "150.75",
+                "description": "Transfer to 9998887776 for rent",
+                "type": "DEBIT",
+            }
+        ],
+        "pagination": {"totalCount": 1},
+    }
+
+    async def fake_fulfill(customer_identity, jwt, category, service, subservice, payload):
+        return AdapterResult(data=txn_data)
+
+    captured_prompts = []
+
+    async def fake_post(self, url, *args, **kwargs):
+        captured_prompts.append(kwargs["json"]["prompt"])
+        return _FakeOllamaResponse({"response": "You spent ৳151 on a transfer recently."})
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", fake_fulfill)
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+    _install_session_fakes(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "show my recent transactions"}, headers=JWT_HEADERS)
+
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+
+    # the raw account number and the embedded digit run in `description`
+    # must never have reached the LLM prompt.
+    assert len(captured_prompts) == 1
+    prompt = captured_prompts[0]
+    assert "1234567890" not in prompt
+    assert "9998887776" not in prompt
+    # json.dumps(..., default=str) escapes the non-ASCII "•" bullet, so look
+    # for the JSON-encoded form rather than the literal character.
+    assert json.dumps("••••••7890")[1:-1] in prompt  # accountNumberMasked substitute, added by T-32 _enrich_payload
+    assert json.dumps("••••••7776")[1:-1] in prompt  # masked description digit run
+
+    # the result payload must be raw + masked/formatted, exactly as T-32 left it.
+    result_event = next(data for name, data in events if name == "result")
+    txn = result_event["payload"]["transactions"][0]
+    assert txn["accountNumber"] == "1234567890"
+    assert txn["accountNumberMasked"] == "••••••7890"
+    assert txn["amountFormatted"] == "৳151"
+    assert txn["description"] == "Transfer to 9998887776 for rent"
+
+
+# --- fallback-path redaction (TASKS.md T-35 follow-up): when the Ollama -----
+# --- call in _synthesize_reply fails or returns empty text, it falls back --
+# --- to the deterministic _subservice_reply template. Both fallback call ---
+# --- sites must pass _redact_for_prompt(data) into _subservice_reply, not --
+# --- the raw data, so the template's transaction_history branch (which -----
+# --- embeds `description` verbatim) never leaks a full account number into-
+# --- the customer-facing spoken reply. ---------------------------------------
+
+_LEAKY_TXN_DATA = {
+    "transactions": [
+        {
+            "accountNumber": "9876543210",
+            "accountNumberMasked": "••••••3210",
+            "amount": "100",
+            "description": "bKash: From 100126000015 to 4600000",
+            "type": "DEBIT",
+        }
+    ],
+    "pagination": {"totalCount": 1},
+}
+
+
+def test_synthesize_reply_fallback_on_exception_redacts_description(monkeypatch):
+    async def fake_post(self, url, *args, **kwargs):
+        raise httpx.ConnectTimeout("boom")
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+
+    reply = asyncio.run(
+        chat_module._synthesize_reply(
+            "show my recent transactions", "account_info", "transaction_history", copy.deepcopy(_LEAKY_TXN_DATA)
+        )
+    )
+
+    assert "100126000015" not in reply
+    assert "4600000" not in reply
+    assert "••••••••0015" in reply
+    assert "•••0000" in reply
+
+
+def test_synthesize_reply_fallback_on_empty_response_redacts_description(monkeypatch):
+    async def fake_post(self, url, *args, **kwargs):
+        return _FakeOllamaResponse({"response": ""})
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+
+    reply = asyncio.run(
+        chat_module._synthesize_reply(
+            "show my recent transactions", "account_info", "transaction_history", copy.deepcopy(_LEAKY_TXN_DATA)
+        )
+    )
+
+    assert "100126000015" not in reply
+    assert "4600000" not in reply
+    assert "••••••••0015" in reply
+    assert "•••0000" in reply
+
+
+def test_chat_stream_fallback_redacts_token_but_not_payload(client, monkeypatch):
+    """Full /chat flow: Ollama fails, so the spoken `token` text falls back to
+    _subservice_reply -- but it must receive redacted data, so the raw
+    description embedding a full account number never reaches the customer.
+    The `result` event's `payload` is unaffected (still raw + masked/formatted,
+    exactly as T-32 enrichment left it) since redaction is spoken-reply-only."""
+
+    async def fake_classify(message, recent_turns=None):
+        return BankingService(category="account_info", service="transaction_history", subservice=None)
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    async def fake_fulfill(customer_identity, jwt, category, service, subservice, payload):
+        return AdapterResult(data=copy.deepcopy(_LEAKY_TXN_DATA))
+
+    async def fake_post(self, url, *args, **kwargs):
+        raise httpx.ConnectTimeout("boom")
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", fake_fulfill)
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+    _install_session_fakes(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "show my recent transactions"}, headers=JWT_HEADERS)
+
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    assert [name for name, _ in events] == ["token", "result", "done"]
+
+    token_event = next(data for name, data in events if name == "token")
+    assert "100126000015" not in token_event["token"]
+    assert "4600000" not in token_event["token"]
+    assert "••••••••0015" in token_event["token"]
+
+    result_event = next(data for name, data in events if name == "result")
+    txn = result_event["payload"]["transactions"][0]
+    assert txn["accountNumber"] == "9876543210"
+    assert txn["accountNumberMasked"] == "••••••3210"
+    assert txn["description"] == "bKash: From 100126000015 to 4600000"
+    assert txn["amountFormatted"] == "৳100"
 
 
 def test_chat_stream_passes_get_classification_context_result_into_classify(client, monkeypatch):
