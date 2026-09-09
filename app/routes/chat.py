@@ -1,7 +1,9 @@
 import copy
 import json
+import logging
 import re
 import time
+import uuid
 from datetime import datetime, timezone
 
 import httpx
@@ -23,6 +25,8 @@ from app.llm import build_prompt, stream_generate
 from app.vectorstore import search
 
 router = APIRouter(prefix="/chat", tags=["chat"], dependencies=[Depends(require_api_key)])
+
+logger = logging.getLogger("chat.requests")
 
 
 class ChatRequest(BaseModel):
@@ -375,35 +379,66 @@ def _account_selection_reply(accounts: list[dict]) -> str:
     return f"You have multiple accounts — which one did you mean? {options}."
 
 
-async def _kb_stream(req: ChatRequest):
+async def _kb_stream(req: ChatRequest, request_id: str):
     top_k = req.top_k or settings.DEFAULT_TOP_K
     try:
         query_vector = await embed_text(req.message)
         hits = search(query_vector, top_k)
     except httpx.HTTPStatusError as e:
-        yield _sse("error", {"detail": f"Embedding model rejected the request: {e.response.text.strip()}"})
+        detail = f"Embedding model rejected the request: {e.response.text.strip()}"
+        logger.warning(json.dumps({"request_id": request_id, "stage": "embedding", "detail": detail}))
+        yield _sse("error", {"detail": detail})
         return
     except httpx.HTTPError:
-        yield _sse("error", {"detail": "Embedding model (Ollama) is unreachable"})
+        detail = "Embedding model (Ollama) is unreachable"
+        logger.warning(json.dumps({"request_id": request_id, "stage": "embedding", "detail": detail}))
+        yield _sse("error", {"detail": detail})
         return
     except Exception:
-        yield _sse("error", {"detail": "Vector store (Qdrant) is unreachable"})
+        detail = "Vector store (Qdrant) is unreachable"
+        logger.error(json.dumps({"request_id": request_id, "stage": "vector_search", "detail": detail}))
+        yield _sse("error", {"detail": detail})
         return
 
+    logger.info(json.dumps({
+        "request_id": request_id,
+        "hit_count": len(hits),
+        "top_score": hits[0]["score"] if hits else None,
+    }))
+
     prompt = build_prompt(req.message, hits)
+    answer_parts: list[str] = []
     try:
         async for token in stream_generate(prompt):
+            answer_parts.append(token)
             yield _sse("token", {"token": token})
     except httpx.HTTPError:
-        yield _sse("error", {"detail": "Generation model (Ollama) failed or became unreachable mid-stream"})
+        detail = "Generation model (Ollama) failed or became unreachable mid-stream"
+        logger.error(json.dumps({"request_id": request_id, "stage": "generation", "detail": detail}))
+        yield _sse("error", {"detail": detail})
         return
+
+    logger.info(json.dumps({"request_id": request_id, "answer": "".join(answer_parts)}))
 
     yield _sse("done", {})
 
 
 async def _chat_stream(req: ChatRequest, authorization: str | None):
-    turn_started_at = time.monotonic()
+    request_id = uuid.uuid4().hex
     token = extract_jwt(authorization)
+    logger.info(json.dumps({
+        "request_id": request_id,
+        "message": req.message,
+        "session_id": req.session_id,
+        "top_k": req.top_k,
+        "category": req.category,
+        "service": req.service,
+        "subservice": req.subservice,
+        "payload": req.payload,
+        "auth_present": token is not None,
+    }))
+
+    turn_started_at = time.monotonic()
     customer_identity = await verify_jwt(token) if token else None
 
     recent_turns = get_classification_context(customer_identity.customer_id) if customer_identity else []
@@ -433,7 +468,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
     turn_classification: dict | None = None
 
     if isinstance(result, KbQuestion):
-        async for chunk in _kb_stream(req):
+        async for chunk in _kb_stream(req, request_id):
             yield chunk
         if customer_identity is not None:
             record_turn(
@@ -446,10 +481,17 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
         yield _sse("token", {"token": result.question})
         yield _result_event("CLARIFICATION_REQUIRED", None, None, None)
         turn_classification = {"type": "CLARIFICATION_REQUIRED", "category": None, "service": None, "subservice": None}
-        audit.log_banking_turn(customer_identity, turn_classification, latency_ms=(time.monotonic() - turn_started_at) * 1000)
+        logger.info(json.dumps({"request_id": request_id, "type": "CLARIFICATION_REQUIRED", "token": result.question}))
+        audit.log_banking_turn(
+            customer_identity,
+            turn_classification,
+            latency_ms=(time.monotonic() - turn_started_at) * 1000,
+            request_id=request_id,
+        )
 
     elif isinstance(result, UnknownService):
-        yield _sse("token", {"token": "I'm not able to help with that specific request right now."})
+        unknown_service_token = "I'm not able to help with that specific request right now."
+        yield _sse("token", {"token": unknown_service_token})
         yield _result_event("UNKNOWN_SERVICE", result.category, result.service, result.subservice)
         turn_classification = {
             "type": "UNKNOWN_SERVICE",
@@ -457,7 +499,13 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
             "service": result.service,
             "subservice": result.subservice,
         }
-        audit.log_banking_turn(customer_identity, turn_classification, latency_ms=(time.monotonic() - turn_started_at) * 1000)
+        logger.info(json.dumps({"request_id": request_id, "type": "UNKNOWN_SERVICE", "token": unknown_service_token}))
+        audit.log_banking_turn(
+            customer_identity,
+            turn_classification,
+            latency_ms=(time.monotonic() - turn_started_at) * 1000,
+            request_id=request_id,
+        )
 
     elif isinstance(result, BankingService):
         category, service, subservice, payload = (
@@ -468,7 +516,8 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
         )
 
         if customer_identity is None:
-            yield _sse("token", {"token": "Please log in to continue with this request."})
+            auth_required_token = "Please log in to continue with this request."
+            yield _sse("token", {"token": auth_required_token})
             yield _result_event("AUTH_REQUIRED", category, service, subservice)
             turn_classification = {
                 "type": "AUTH_REQUIRED",
@@ -476,14 +525,21 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                 "service": service,
                 "subservice": subservice,
             }
-            audit.log_banking_turn(customer_identity, turn_classification, latency_ms=(time.monotonic() - turn_started_at) * 1000)
+            logger.info(json.dumps({"request_id": request_id, "type": "AUTH_REQUIRED", "token": auth_required_token}))
+            audit.log_banking_turn(
+                customer_identity,
+                turn_classification,
+                latency_ms=(time.monotonic() - turn_started_at) * 1000,
+                request_id=request_id,
+            )
         else:
             try:
                 adapter_result = await fulfill_banking_service(
                     customer_identity, token, category, service, subservice, payload
                 )
             except AdapterAuthError:
-                yield _sse("token", {"token": "Please log in to continue with this request."})
+                adapter_auth_error_token = "Please log in to continue with this request."
+                yield _sse("token", {"token": adapter_auth_error_token})
                 yield _result_event("AUTH_REQUIRED", category, service, subservice)
                 turn_classification = {
                     "type": "AUTH_REQUIRED",
@@ -491,9 +547,16 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                     "service": service,
                     "subservice": subservice,
                 }
-                audit.log_banking_turn(customer_identity, turn_classification, latency_ms=(time.monotonic() - turn_started_at) * 1000)
+                logger.info(json.dumps({"request_id": request_id, "type": "AUTH_REQUIRED", "token": adapter_auth_error_token}))
+                audit.log_banking_turn(
+                    customer_identity,
+                    turn_classification,
+                    latency_ms=(time.monotonic() - turn_started_at) * 1000,
+                    request_id=request_id,
+                )
             except AdapterAccountSelectionRequiredError as exc:
-                yield _sse("token", {"token": _account_selection_reply(exc.accounts)})
+                account_selection_token = _account_selection_reply(exc.accounts)
+                yield _sse("token", {"token": account_selection_token})
                 yield _result_event(
                     "ACCOUNT_SELECTION_REQUIRED", category, service, subservice, payload={"accounts": exc.accounts}
                 )
@@ -503,9 +566,20 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                     "service": service,
                     "subservice": subservice,
                 }
-                audit.log_banking_turn(customer_identity, turn_classification, latency_ms=(time.monotonic() - turn_started_at) * 1000)
+                logger.info(json.dumps({
+                    "request_id": request_id,
+                    "type": "ACCOUNT_SELECTION_REQUIRED",
+                    "token": account_selection_token,
+                }))
+                audit.log_banking_turn(
+                    customer_identity,
+                    turn_classification,
+                    latency_ms=(time.monotonic() - turn_started_at) * 1000,
+                    request_id=request_id,
+                )
             except AdapterUnavailableError:
-                yield _sse("token", {"token": "That service isn't available right now. Please try again shortly."})
+                service_unavailable_token = "That service isn't available right now. Please try again shortly."
+                yield _sse("token", {"token": service_unavailable_token})
                 yield _result_event("SERVICE_UNAVAILABLE", category, service, subservice)
                 turn_classification = {
                     "type": "SERVICE_UNAVAILABLE",
@@ -513,14 +587,25 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                     "service": service,
                     "subservice": subservice,
                 }
-                audit.log_banking_turn(customer_identity, turn_classification, latency_ms=(time.monotonic() - turn_started_at) * 1000)
+                logger.info(json.dumps({
+                    "request_id": request_id,
+                    "type": "SERVICE_UNAVAILABLE",
+                    "token": service_unavailable_token,
+                }))
+                audit.log_banking_turn(
+                    customer_identity,
+                    turn_classification,
+                    latency_ms=(time.monotonic() - turn_started_at) * 1000,
+                    request_id=request_id,
+                )
             else:
                 data = adapter_result.data
                 if data.get("mock") is True:
-                    yield _sse("token", {"token": f"Sure — here's information about {service.replace('_', ' ')}."})
+                    banking_service_token = f"Sure — here's information about {service.replace('_', ' ')}."
                 else:
                     data = _enrich_payload(service, subservice, data)
-                    yield _sse("token", {"token": await _synthesize_reply(req.message, service, subservice, data)})
+                    banking_service_token = await _synthesize_reply(req.message, service, subservice, data)
+                yield _sse("token", {"token": banking_service_token})
                 yield _result_event(
                     "BANKING_SERVICE",
                     category,
@@ -535,7 +620,18 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                     "service": service,
                     "subservice": subservice,
                 }
-                audit.log_banking_turn(customer_identity, turn_classification, latency_ms=(time.monotonic() - turn_started_at) * 1000)
+                logger.info(json.dumps({
+                    "request_id": request_id,
+                    "type": "BANKING_SERVICE",
+                    "token": banking_service_token,
+                    "payload": data,
+                }, default=str))
+                audit.log_banking_turn(
+                    customer_identity,
+                    turn_classification,
+                    latency_ms=(time.monotonic() - turn_started_at) * 1000,
+                    request_id=request_id,
+                )
 
     yield _sse("done", {})
 

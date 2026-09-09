@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -7,6 +9,8 @@ from app.config import settings
 from app.llm import check_ollama
 from app.vectorstore import check_qdrant, ensure_collection
 from app.routes import documents, chat
+
+logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 app = FastAPI(title="RAG Chatbot")
 

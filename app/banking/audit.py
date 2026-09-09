@@ -90,6 +90,7 @@ def log_banking_turn(
     turn_classification: dict,
     *,
     latency_ms: float | None = None,
+    request_id: str | None = None,
 ) -> None:
     """Emit exactly one structured JSON audit log line for a banking-service
     turn (FR-SEC-03/F-07).
@@ -100,6 +101,9 @@ def log_banking_turn(
 
     Never pass raw JWTs, API keys, message text, or adapter response bodies
     in — only the routing fields already present on `turn_classification`.
+
+    ``request_id``, if provided, is used as-is (e.g. to correlate with the
+    caller's own request-scoped logging) instead of self-generating one.
     """
     result_type = turn_classification.get("type")
     category = turn_classification.get("category")
@@ -108,7 +112,7 @@ def log_banking_turn(
 
     entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "request_id": uuid.uuid4().hex,
+        "request_id": request_id if request_id is not None else uuid.uuid4().hex,
         "session_key": _session_key(customer_identity),
         "category": category,
         "service": service,

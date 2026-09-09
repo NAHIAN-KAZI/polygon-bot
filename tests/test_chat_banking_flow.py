@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 
 import httpx
 
+import app.banking.audit as audit_module
 import app.routes.chat as chat_module
 from app.banking.adapters.base import (
     AdapterAccountSelectionRequiredError,
@@ -1491,3 +1492,413 @@ def test_chat_stream_passes_get_classification_context_result_into_classify(clie
 
     assert resp.status_code == 200
     assert classify_calls == [sentinel_turns]
+
+
+# --- operational logging (TASKS.md T-36): chat.requests logger ---------------
+# --- (request-entry log, KB-path stage logs, banking-path per-branch logs) ---
+# --- and audit.log_banking_turn's new request_id kwarg -----------------------
+
+
+def _install_chat_logger_spy(monkeypatch):
+    """Capture every chat_module.logger.{info,warning,error} call as
+    (level, msg) tuples, in call order, without emitting real log lines."""
+    calls = []
+
+    def _make(level):
+        def record(msg, *args, **kwargs):
+            calls.append((level, msg))
+        return record
+
+    monkeypatch.setattr(chat_module.logger, "info", _make("info"))
+    monkeypatch.setattr(chat_module.logger, "warning", _make("warning"))
+    monkeypatch.setattr(chat_module.logger, "error", _make("error"))
+    return calls
+
+
+def _kb_hit(score, chunk_id="doc-1", text="chunk text"):
+    return {"id": chunk_id, "score": score, "text": text, "filename": "doc.pdf"}
+
+
+def test_request_entry_logs_full_message_and_payload_and_auth_present_true(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return KbQuestion()
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    _install_kb_fakes(monkeypatch)
+    _install_session_fakes(monkeypatch)
+    log_calls = _install_chat_logger_spy(monkeypatch)
+
+    resp = client.post(
+        "/chat",
+        json={"message": "what is the refund policy?", "session_id": "sess-1", "top_k": 3},
+        headers=JWT_HEADERS,
+    )
+
+    assert resp.status_code == 200
+    level, first_msg = log_calls[0]
+    assert level == "info"
+    entry = json.loads(first_msg)
+    assert entry["message"] == "what is the refund policy?"
+    assert entry["session_id"] == "sess-1"
+    assert entry["top_k"] == 3
+    assert entry["category"] is None
+    assert entry["service"] is None
+    assert entry["subservice"] is None
+    assert entry["payload"] is None
+    assert entry["auth_present"] is True
+    assert "request_id" in entry and entry["request_id"]
+
+
+def test_request_entry_logs_auth_present_false_when_no_authorization(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return KbQuestion()
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    _install_kb_fakes(monkeypatch)
+    _install_session_fakes(monkeypatch)
+    log_calls = _install_chat_logger_spy(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "what is the refund policy?"}, headers=AUTH_HEADERS)
+
+    assert resp.status_code == 200
+    entry = json.loads(log_calls[0][1])
+    assert entry["auth_present"] is False
+
+
+def test_request_entry_logs_direct_taxonomy_routing_fields(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return KbQuestion()
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "is_valid_path", lambda category, service, subservice=None: True)
+    _install_session_fakes(monkeypatch)
+    log_calls = _install_chat_logger_spy(monkeypatch)
+
+    resp = client.post(
+        "/chat",
+        json={
+            "message": "balance please",
+            "category": "account_info",
+            "service": "balance",
+            "payload": {"foo": "bar"},
+        },
+        headers=AUTH_HEADERS,
+    )
+
+    assert resp.status_code == 200
+    entry = json.loads(log_calls[0][1])
+    assert entry["category"] == "account_info"
+    assert entry["service"] == "balance"
+    assert entry["payload"] == {"foo": "bar"}
+
+
+def test_request_entry_never_logs_raw_jwt(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return KbQuestion()
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    _install_kb_fakes(monkeypatch)
+    _install_session_fakes(monkeypatch)
+    log_calls = _install_chat_logger_spy(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "what is the refund policy?"}, headers=JWT_HEADERS)
+
+    assert resp.status_code == 200
+    raw_jwt = JWT_HEADERS["Authorization"].split(" ", 1)[1]
+    for _level, msg in log_calls:
+        assert raw_jwt not in msg
+        assert JWT_HEADERS["Authorization"] not in msg
+
+
+# --- KB path (_kb_stream) stage logging --------------------------------------
+
+
+def test_kb_stream_logs_hit_count_and_top_score_on_success(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return KbQuestion()
+
+    hits = [_kb_hit(0.91), _kb_hit(0.5)]
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "embed_text", _fake_embed_text)
+    monkeypatch.setattr(chat_module, "search", lambda vector, top_k: hits)
+    monkeypatch.setattr(chat_module, "stream_generate", _fake_stream_generate)
+    _install_session_fakes(monkeypatch)
+    log_calls = _install_chat_logger_spy(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "what is the refund policy?"}, headers=AUTH_HEADERS)
+
+    assert resp.status_code == 200
+    hit_log = next(json.loads(msg) for level, msg in log_calls if "hit_count" in msg)
+    assert hit_log["hit_count"] == 2
+    assert hit_log["top_score"] == 0.91
+
+
+def test_kb_stream_logs_top_score_none_on_zero_hits(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return KbQuestion()
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "embed_text", _fake_embed_text)
+    monkeypatch.setattr(chat_module, "search", lambda vector, top_k: [])
+    monkeypatch.setattr(chat_module, "stream_generate", _fake_stream_generate)
+    _install_session_fakes(monkeypatch)
+    log_calls = _install_chat_logger_spy(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "what is the refund policy?"}, headers=AUTH_HEADERS)
+
+    assert resp.status_code == 200
+    hit_log = next(json.loads(msg) for level, msg in log_calls if "hit_count" in msg)
+    assert hit_log["hit_count"] == 0
+    assert hit_log["top_score"] is None
+
+
+def test_kb_stream_logs_full_answer_text_on_generation_success(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return KbQuestion()
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    _install_kb_fakes(monkeypatch)
+    _install_session_fakes(monkeypatch)
+    log_calls = _install_chat_logger_spy(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "what is the refund policy?"}, headers=AUTH_HEADERS)
+
+    assert resp.status_code == 200
+    answer_log = next(json.loads(msg) for level, msg in log_calls if '"answer"' in msg)
+    assert answer_log["answer"] == "Hello world"
+
+
+def test_kb_stream_logs_warning_on_embedding_http_status_error(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return KbQuestion()
+
+    async def fake_embed_text_fails(message, client=None):
+        request = httpx.Request("POST", "http://ollama/api/embed")
+        response = httpx.Response(400, text="bad request", request=request)
+        raise httpx.HTTPStatusError("bad", request=request, response=response)
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "embed_text", fake_embed_text_fails)
+    _install_session_fakes(monkeypatch)
+    log_calls = _install_chat_logger_spy(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "what is the refund policy?"}, headers=AUTH_HEADERS)
+
+    assert resp.status_code == 200
+    level, msg = next((lvl, m) for lvl, m in log_calls if '"stage"' in m)
+    assert level == "warning"
+    entry = json.loads(msg)
+    assert entry["stage"] == "embedding"
+    assert "bad request" in entry["detail"]
+
+
+def test_kb_stream_logs_warning_on_embedding_unreachable(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return KbQuestion()
+
+    async def fake_embed_text_fails(message, client=None):
+        raise httpx.ConnectError("boom", request=httpx.Request("POST", "http://ollama/api/embed"))
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "embed_text", fake_embed_text_fails)
+    _install_session_fakes(monkeypatch)
+    log_calls = _install_chat_logger_spy(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "what is the refund policy?"}, headers=AUTH_HEADERS)
+
+    assert resp.status_code == 200
+    level, msg = next((lvl, m) for lvl, m in log_calls if '"stage"' in m)
+    assert level == "warning"
+    entry = json.loads(msg)
+    assert entry["stage"] == "embedding"
+    assert entry["detail"] == "Embedding model (Ollama) is unreachable"
+
+
+def test_kb_stream_logs_error_on_vector_store_unreachable(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return KbQuestion()
+
+    def fake_search_fails(vector, top_k):
+        raise RuntimeError("qdrant down")
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "embed_text", _fake_embed_text)
+    monkeypatch.setattr(chat_module, "search", fake_search_fails)
+    _install_session_fakes(monkeypatch)
+    log_calls = _install_chat_logger_spy(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "what is the refund policy?"}, headers=AUTH_HEADERS)
+
+    assert resp.status_code == 200
+    level, msg = next((lvl, m) for lvl, m in log_calls if '"stage"' in m)
+    assert level == "error"
+    entry = json.loads(msg)
+    assert entry["stage"] == "vector_search"
+    assert entry["detail"] == "Vector store (Qdrant) is unreachable"
+
+
+def test_kb_stream_logs_error_on_generation_failure_mid_stream(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return KbQuestion()
+
+    async def fake_stream_generate_fails(prompt):
+        yield "partial"
+        raise httpx.ReadTimeout("boom", request=httpx.Request("POST", "http://ollama/api/generate"))
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "embed_text", _fake_embed_text)
+    monkeypatch.setattr(chat_module, "search", _fake_search)
+    monkeypatch.setattr(chat_module, "stream_generate", fake_stream_generate_fails)
+    _install_session_fakes(monkeypatch)
+    log_calls = _install_chat_logger_spy(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "what is the refund policy?"}, headers=AUTH_HEADERS)
+
+    assert resp.status_code == 200
+    level, msg = next((lvl, m) for lvl, m in log_calls if '"stage"' in m)
+    assert level == "error"
+    entry = json.loads(msg)
+    assert entry["stage"] == "generation"
+    assert entry["detail"] == "Generation model (Ollama) failed or became unreachable mid-stream"
+    # Never logs a partial "answer" entry when generation blows up mid-stream.
+    assert not any('"answer"' in m for _lvl, m in log_calls)
+
+
+# --- banking-path per-branch logging ------------------------------------------
+
+
+def test_clarification_logs_type_and_token(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return Clarification(question="Which account would you like to check?")
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    _install_session_fakes(monkeypatch)
+    log_calls = _install_chat_logger_spy(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "check my thing"}, headers=AUTH_HEADERS)
+
+    assert resp.status_code == 200
+    branch_log = next(json.loads(msg) for _lvl, msg in log_calls if '"type"' in msg)
+    assert branch_log["type"] == "CLARIFICATION_REQUIRED"
+    assert branch_log["token"] == "Which account would you like to check?"
+
+
+def test_auth_required_logs_type_and_token(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return BankingService(category="account_info", service="balance", subservice=None)
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    _install_session_fakes(monkeypatch)
+    log_calls = _install_chat_logger_spy(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "what's my balance"}, headers=AUTH_HEADERS)
+
+    assert resp.status_code == 200
+    branch_log = next(json.loads(msg) for _lvl, msg in log_calls if '"type"' in msg)
+    assert branch_log["type"] == "AUTH_REQUIRED"
+    assert branch_log["token"] == "Please log in to continue with this request."
+
+
+def test_banking_service_success_logs_type_token_and_unredacted_payload(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return BankingService(category="account_info", service="transaction_history", subservice=None)
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    async def fake_fulfill(customer_identity, jwt, category, service, subservice, payload):
+        return AdapterResult(data=copy.deepcopy(_LEAKY_TXN_DATA))
+
+    async def fake_post(self, url, *args, **kwargs):
+        raise httpx.ConnectTimeout("boom")
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", fake_fulfill)
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+    _install_session_fakes(monkeypatch)
+    log_calls = _install_chat_logger_spy(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "show my recent transactions"}, headers=JWT_HEADERS)
+
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    result_event = next(data for name, data in events if name == "result")
+    token_event = next(data for name, data in events if name == "token")
+
+    branch_log = next(json.loads(msg) for _lvl, msg in log_calls if '"type"' in msg)
+    assert branch_log["type"] == "BANKING_SERVICE"
+    # The logged token matches whatever actually reached the customer.
+    assert branch_log["token"] == token_event["token"]
+    # The logged payload is the raw/unredacted result-event payload -- not
+    # run through _redact_for_prompt (that redaction is spoken-reply-only).
+    assert branch_log["payload"] == result_event["payload"]
+    assert branch_log["payload"]["transactions"][0]["accountNumber"] == "9876543210"
+
+
+# --- audit.log_banking_turn request_id correlation ----------------------------
+
+
+def test_audit_log_banking_turn_request_id_honored_when_passed(monkeypatch):
+    calls = []
+    monkeypatch.setattr(audit_module.logger, "info", lambda msg, *a, **k: calls.append(msg))
+
+    audit_module.log_banking_turn(
+        None,
+        {"type": "CLARIFICATION_REQUIRED", "category": None, "service": None, "subservice": None},
+        request_id="fixed-request-id-123",
+    )
+
+    entry = json.loads(calls[0])
+    assert entry["request_id"] == "fixed-request-id-123"
+
+
+def test_audit_log_banking_turn_self_generates_request_id_when_omitted(monkeypatch):
+    calls = []
+    monkeypatch.setattr(audit_module.logger, "info", lambda msg, *a, **k: calls.append(msg))
+
+    audit_module.log_banking_turn(
+        None, {"type": "CLARIFICATION_REQUIRED", "category": None, "service": None, "subservice": None}
+    )
+
+    entry = json.loads(calls[0])
+    assert isinstance(entry["request_id"], str)
+    assert len(entry["request_id"]) == 32  # uuid4().hex
+
+
+def test_audit_request_id_correlates_with_chat_requests_log_for_same_turn(client, monkeypatch):
+    """End-to-end: the request_id chat.requests logs for a turn's entry log
+    and branch log must match the request_id audit.log_banking_turn actually
+    receives for that same turn, so the two logs can be joined."""
+
+    async def fake_classify(message, recent_turns=None):
+        return Clarification(question="Which account would you like to check?")
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    _install_session_fakes(monkeypatch)
+    log_calls = _install_chat_logger_spy(monkeypatch)
+
+    audit_calls = []
+
+    def fake_log_banking_turn(customer_identity, turn_classification, *, latency_ms=None, request_id=None):
+        audit_calls.append(request_id)
+
+    monkeypatch.setattr(chat_module.audit, "log_banking_turn", fake_log_banking_turn)
+
+    resp = client.post("/chat", json={"message": "check my thing"}, headers=AUTH_HEADERS)
+
+    assert resp.status_code == 200
+    entry_log = json.loads(log_calls[0][1])
+    branch_log = next(json.loads(msg) for _lvl, msg in log_calls if '"type"' in msg)
+
+    assert len(audit_calls) == 1
+    assert audit_calls[0] == entry_log["request_id"] == branch_log["request_id"]
