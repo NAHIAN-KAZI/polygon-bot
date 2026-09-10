@@ -1,0 +1,46 @@
+name: Sync chatbot to internet-banking
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "**.md"
+      - ".github/workflows/**"
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout polygon-bot
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Clone internet-banking
+        env:
+          TOKEN: ${{ secrets.INTERNET_BANKING_TOKEN }}
+        run: |
+          git clone https://x-access-token:${TOKEN}@github.com/PolygonTechnology-xyz/internet-banking.git internet-banking
+
+      - name: Sync chatbot subtree
+        working-directory: internet-banking
+        env:
+          TOKEN: ${{ secrets.INTERNET_BANKING_TOKEN }}
+        run: |
+          git remote add chatbot https://x-access-token:${TOKEN}@github.com/NAHIAN-KAZI/polygon-bot.git
+          git fetch chatbot main
+          git subtree pull --prefix=chatbot chatbot main --squash -m "Sync chatbot from polygon-bot"
+
+      - name: Push updated chatbot
+        working-directory: internet-banking
+        env:
+          TOKEN: ${{ secrets.INTERNET_BANKING_TOKEN }}
+        run: |
+          git push https://x-access-token:${TOKEN}@github.com/PolygonTechnology-xyz/internet-banking.git main
