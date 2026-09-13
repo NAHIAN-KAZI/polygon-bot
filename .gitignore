@@ -4,3 +4,4 @@ __pycache__/
 .omc/
 .remember/
 chatbot.png
+.pytest_cache/
