@@ -5,3 +5,4 @@ __pycache__/
 .remember/
 chatbot.png
 .pytest_cache/
+.mypy_cache/
