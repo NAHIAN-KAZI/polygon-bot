@@ -272,11 +272,31 @@ class LoginHistoryAdapter:
         return AdapterResult(data=body)
 
 
+class BeneficiaryAdapter:
+    # T-37: response shape unconfirmed. The endpoint currently 500s on the
+    # bank's dev platform, so there's no live response to check whether the
+    # body is an object or a bare array (cf. DeviceHistoryAdapter, which only
+    # wraps in {"devices": ...} because that shape was live-confirmed).
+    # Passthrough only until the bank team fixes their 500 and we can see one.
+    async def fulfill(
+        self,
+        customer_identity: CustomerIdentity,
+        jwt: str | None,
+        subservice: str,
+        payload: dict | None,
+    ) -> AdapterResult:
+        service_type = (payload or {}).get("serviceType")
+        params = {"serviceType": service_type} if service_type else None
+        body = await _call("GET", "/beneficiary/v1/beneficiaries", jwt, params=params)
+        return AdapterResult(data=body)
+
+
 balance_adapter = BalanceAdapter()
 transaction_history_adapter = TransactionHistoryAdapter()
 accounts_adapter = AccountsAdapter()
 device_history_adapter = DeviceHistoryAdapter()
 login_history_adapter = LoginHistoryAdapter()
+beneficiary_adapter = BeneficiaryAdapter()
 
 REAL_ADAPTERS = {
     "real:balance": balance_adapter,
@@ -284,4 +304,5 @@ REAL_ADAPTERS = {
     "real:accounts": accounts_adapter,
     "real:device_history": device_history_adapter,
     "real:login_history": login_history_adapter,
+    "real:beneficiary": beneficiary_adapter,
 }

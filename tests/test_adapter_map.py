@@ -28,12 +28,12 @@ def test_get_adapter_name_labels_matching_subservice_id_even_with_unrelated_serv
 
 def test_get_adapter_name_returns_mock_for_unrelated_service_id():
     assert get_adapter_name("payments", "mobile_recharge") == "mock"
-    assert get_adapter_name("payments", "beneficiary") == "mock"
+    assert get_adapter_name("payments", "card_payment") == "mock"
 
 
 def test_get_adapter_name_returns_mock_when_service_and_subservice_are_none_or_unrelated():
     assert get_adapter_name("payments", None) == "mock"
-    assert get_adapter_name("payments", "mobile_recharge", "beneficiary") == "mock"
+    assert get_adapter_name("payments", "mobile_recharge", "card_payment") == "mock"
 
 
 def test_get_adapter_name_returns_real_for_each_synthetic_account_info_service():
@@ -41,6 +41,20 @@ def test_get_adapter_name_returns_real_for_each_synthetic_account_info_service()
     assert get_adapter_name("account_info", "accounts") == "real:accounts"
     assert get_adapter_name("account_info", "device_history") == "real:device_history"
     assert get_adapter_name("account_info", "login_history") == "real:login_history"
+
+
+def test_get_adapter_name_returns_real_for_beneficiary_service_id():
+    # category is irrelevant to get_adapter_name's logic (it only branches on
+    # service_id/subservice_id membership in REAL_ADAPTER_SUBSERVICE_IDS), so
+    # any category string exercises the same branch.
+    assert get_adapter_name("account_info", "beneficiary") == "real:beneficiary"
+
+
+def test_get_adapter_name_returns_real_for_beneficiary_subservice_id():
+    assert (
+        get_adapter_name("payments", "some_other_service", "beneficiary")
+        == "real:beneficiary"
+    )
 
 
 def test_requires_identity_always_true():

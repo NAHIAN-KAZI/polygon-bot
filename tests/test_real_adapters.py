@@ -1,6 +1,6 @@
-"""Tests for app/banking/adapters/real.py: the 5 real adapters (balance,
-transaction_history, accounts, device_history, login_history) that call the
-platform API via a shared _call() helper.
+"""Tests for app/banking/adapters/real.py: the 6 real adapters (balance,
+transaction_history, accounts, device_history, login_history, beneficiary)
+that call the platform API via a shared _call() helper.
 
 httpx.AsyncClient.request is monkeypatched directly (matching
 tests/test_taxonomy.py's style of monkeypatching the async call site rather
@@ -70,6 +70,7 @@ _ADAPTERS_WITH_VALID_PAYLOAD = [
     ("accounts_adapter", {}),
     ("device_history_adapter", {}),
     ("login_history_adapter", {"deviceId": "dev-1"}),
+    ("beneficiary_adapter", {}),
 ]
 
 
@@ -484,19 +485,64 @@ def test_call_constructs_asyncclient_with_timeout_above_httpx_default(monkeypatc
     assert captured_kwargs["timeout"] > 5.0  # httpx.AsyncClient's own default
 
 
-def test_real_adapters_dict_has_exactly_the_five_expected_keys():
+def test_real_adapters_dict_has_exactly_the_six_expected_keys():
     assert set(real.REAL_ADAPTERS.keys()) == {
         "real:balance",
         "real:transaction_history",
         "real:accounts",
         "real:device_history",
         "real:login_history",
+        "real:beneficiary",
     }
     assert real.REAL_ADAPTERS["real:balance"] is real.balance_adapter
     assert real.REAL_ADAPTERS["real:transaction_history"] is real.transaction_history_adapter
     assert real.REAL_ADAPTERS["real:accounts"] is real.accounts_adapter
     assert real.REAL_ADAPTERS["real:device_history"] is real.device_history_adapter
     assert real.REAL_ADAPTERS["real:login_history"] is real.login_history_adapter
+    assert real.REAL_ADAPTERS["real:beneficiary"] is real.beneficiary_adapter
+
+
+# --- T-37: BeneficiaryAdapter ------------------------------------------------
+
+
+def test_beneficiary_adapter_no_payload_omits_service_type_param_and_passes_body_through(monkeypatch):
+    body = {"data": {"beneficiaries": [{"id": "ben-1"}]}}
+    calls = _install_request(monkeypatch, response=FakeResponse(json_data=body))
+
+    result = asyncio.run(real.beneficiary_adapter.fulfill(_IDENTITY, _JWT, "beneficiary", None))
+
+    assert len(calls) == 1
+    assert calls[0]["method"] == "GET"
+    assert calls[0]["path"] == "/beneficiary/v1/beneficiaries"
+    assert calls[0]["params"] is None
+    assert result == AdapterResult(data=body)
+
+
+def test_beneficiary_adapter_empty_payload_omits_service_type_param(monkeypatch):
+    body = {"data": {"beneficiaries": []}}
+    calls = _install_request(monkeypatch, response=FakeResponse(json_data=body))
+
+    result = asyncio.run(real.beneficiary_adapter.fulfill(_IDENTITY, _JWT, "beneficiary", {}))
+
+    assert len(calls) == 1
+    assert calls[0]["params"] is None
+    assert result == AdapterResult(data=body)
+
+
+def test_beneficiary_adapter_forwards_service_type_param(monkeypatch):
+    body = {"data": {"beneficiaries": [{"id": "ben-1", "serviceType": "OWN_BANK"}]}}
+    calls = _install_request(monkeypatch, response=FakeResponse(json_data=body))
+
+    result = asyncio.run(
+        real.beneficiary_adapter.fulfill(
+            _IDENTITY, _JWT, "beneficiary", {"serviceType": "OWN_BANK"}
+        )
+    )
+
+    assert len(calls) == 1
+    assert calls[0]["path"] == "/beneficiary/v1/beneficiaries"
+    assert calls[0]["params"] == {"serviceType": "OWN_BANK"}
+    assert result == AdapterResult(data=body)
 
 
 # --- T-33: date-range filtering (_fetch_all_pages / _filter_by_date_range /
