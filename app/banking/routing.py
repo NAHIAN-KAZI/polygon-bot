@@ -214,7 +214,48 @@ async def classify(
 
     tool_calls = await _post_classification(messages)
     if not tool_calls:
-        return KbQuestion()
+        # First attempt called no tool at all (confirmed live on genuine banking requests,
+        # e.g. "how much money do I have in my account?") — retry once with a corrective
+        # message rather than silently falling through to the KB/RAG path, which would give
+        # a generic refusal instead of the real answer. See T-40.
+        retry_messages = messages + [
+            {
+                "role": "user",
+                "content": (
+                    "You didn't call any tool. Call route_banking_service if this is a banking "
+                    "request, ask_clarification if you're not sure what they want, or "
+                    "answer_kb_question only if this is a general knowledge question unrelated "
+                    "to the customer's own account."
+                ),
+            },
+        ]
+        retry_tool_calls = await _post_classification(retry_messages)
+        if not retry_tool_calls:
+            return Clarification(question=_CLARIFICATION_FALLBACK)
+
+        retry_call = retry_tool_calls[0]["function"]
+        retry_name = retry_call["name"]
+        retry_arguments = retry_call.get("arguments", {})
+
+        if retry_name == "answer_kb_question":
+            return KbQuestion()
+        if retry_name == "ask_clarification":
+            return Clarification(question=retry_arguments["question"])
+        if retry_name == "route_banking_service":
+            retry_category = retry_arguments["category"]
+            retry_service = retry_arguments["service"]
+            retry_subservice = retry_arguments.get("subservice") or None
+            retry_payload = retry_arguments.get("payload") or None
+            if is_valid_path(retry_category, retry_service, retry_subservice):
+                return BankingService(
+                    category=retry_category,
+                    service=retry_service,
+                    subservice=retry_subservice,
+                    payload=retry_payload,
+                )
+            return Clarification(question=_CLARIFICATION_FALLBACK)
+
+        return Clarification(question=_CLARIFICATION_FALLBACK)
 
     call = tool_calls[0]["function"]
     name = call["name"]

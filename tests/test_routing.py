@@ -174,14 +174,6 @@ def test_classify_answer_kb_question_returns_kb_question(monkeypatch):
     assert result == KbQuestion()
 
 
-def test_classify_no_tool_calls_falls_back_to_kb_question(monkeypatch):
-    _install_post_response(monkeypatch, {"message": {}})
-
-    result = asyncio.run(classify("some ambiguous message"))
-
-    assert result == KbQuestion()
-
-
 def test_classify_ask_clarification_returns_clarification(monkeypatch):
     _install_post_response(
         monkeypatch,
@@ -436,3 +428,107 @@ def test_classify_request_body_does_not_include_think_key(monkeypatch):
     assert len(captured_calls) == 1
     sent_body = captured_calls[0]["kwargs"]["json"]
     assert "think" not in sent_body
+
+
+# --- classify: T-40 zero-tool-calls retry -----------------------------------
+
+
+def test_classify_zero_tool_calls_then_valid_route_on_retry_returns_banking_service(
+    monkeypatch,
+):
+    monkeypatch.setattr(routing, "is_valid_path", lambda *a, **k: True)
+    captured_calls = []
+    _install_post_response_sequence(
+        monkeypatch,
+        [
+            {"message": {}},
+            _ollama_response(
+                [
+                    _tool_call(
+                        "route_banking_service",
+                        {"category": "banking", "service": "accounts"},
+                    )
+                ]
+            ),
+        ],
+        captured_calls=captured_calls,
+    )
+
+    result = asyncio.run(classify("how much money do I have in my account?"))
+
+    assert result == BankingService(category="banking", service="accounts", subservice=None)
+    assert len(captured_calls) == 2
+
+    retry_messages = captured_calls[1]["kwargs"]["json"]["messages"]
+    retry_user_texts = [m["content"] for m in retry_messages if m["role"] == "user"]
+    assert any("didn't call any tool" in text for text in retry_user_texts)
+    # unlike the invalid-path retry, there was no tool call on the first attempt to echo back
+    retry_assistant_messages = [m for m in retry_messages if m["role"] == "assistant"]
+    assert retry_assistant_messages == []
+
+
+def test_classify_zero_tool_calls_then_ask_clarification_on_retry(monkeypatch):
+    _install_post_response_sequence(
+        monkeypatch,
+        [
+            {"message": {}},
+            _ollama_response(
+                [_tool_call("ask_clarification", {"question": "What would you like to do?"})]
+            ),
+        ],
+    )
+
+    result = asyncio.run(classify("how much money do I have in my account?"))
+
+    assert result == Clarification(question="What would you like to do?")
+
+
+def test_classify_zero_tool_calls_then_answer_kb_question_on_retry(monkeypatch):
+    _install_post_response_sequence(
+        monkeypatch,
+        [
+            {"message": {}},
+            _ollama_response([_tool_call("answer_kb_question", {})]),
+        ],
+    )
+
+    result = asyncio.run(classify("how much money do I have in my account?"))
+
+    assert result == KbQuestion()
+
+
+def test_classify_zero_tool_calls_on_both_attempts_falls_back_to_clarification(monkeypatch):
+    captured_calls = []
+    _install_post_response(monkeypatch, {"message": {}}, captured_calls=captured_calls)
+
+    result = asyncio.run(classify("how much money do I have in my account?"))
+
+    assert result == Clarification(question=_CLARIFICATION_FALLBACK)
+    assert len(captured_calls) == 2
+
+
+def test_classify_zero_tool_calls_then_invalid_route_on_retry_falls_back_no_third_attempt(
+    monkeypatch,
+):
+    monkeypatch.setattr(routing, "is_valid_path", lambda *a, **k: False)
+    captured_calls = []
+    _install_post_response_sequence(
+        monkeypatch,
+        [
+            {"message": {}},
+            _ollama_response(
+                [
+                    _tool_call(
+                        "route_banking_service",
+                        {"category": "banking", "service": "made-up-service"},
+                    )
+                ]
+            ),
+        ],
+        captured_calls=captured_calls,
+    )
+
+    result = asyncio.run(classify("how much money do I have in my account?"))
+
+    assert result == Clarification(question=_CLARIFICATION_FALLBACK)
+    assert len(captured_calls) == 2
