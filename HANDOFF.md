@@ -58,6 +58,8 @@ Always handle both `done` and `error` — a stream is not guaranteed to reach `d
 | `UNKNOWN_SERVICE` | set | null | null — not a valid category/service/subservice path |
 | `SERVICE_UNAVAILABLE` | set | null | null — routed and authorized, downstream call failed |
 | `ACCOUNT_SELECTION_REQUIRED` | set | `{accounts:[...]}` | null — pick one and resubmit via direct route with `payload.accountNumber` |
+| `BENEFICIARY_MATCH` | set (`service:"beneficiary"`) | `{beneficiary:{...full dict}, destination:{...}\|null}` | `{category, service, subservice, action}` — `action` is the resolved destination (`own_bank_transfer`/`other_bank_transfer`/`wallet_transfer`/`manual`), see "Beneficiary integration" below |
+| `BENEFICIARY_SELECTION_REQUIRED` | set (`service:"beneficiary"`) | `{beneficiaries:[...trimmed]}` | null — pick one and resubmit with `payload.beneficiaryId` |
 
 ## Known gaps — read before testing
 
@@ -120,16 +122,43 @@ category from balance/accounts/etc).
      "district": null, "routingNumber": null, "mfsProvider": null, ...}
   ]}}
   ```
-- **Known limitation — no name-matching yet**: asking something like *"send
-  money to Ashan"* currently does **not** look up the beneficiary list at all.
-  It's classified generically and returns `CLARIFICATION_REQUIRED` ("own
-  account, another bank, or mobile wallet?") even when a beneficiary matching
-  that name already exists with a known `serviceType`. There is no server-side
-  fuzzy name search, and no result type analogous to `ACCOUNT_SELECTION_REQUIRED`
-  for "multiple beneficiaries matched this name, which one?" yet. If your flow
-  needs name-triggered beneficiary selection (matching your own app's tap-a-row
-  → auto-route-by-`serviceType` behavior), that's a real feature gap on our
-  side, not yet built — flag if you need it prioritized.
+- **Name-matching is live** (2026-09-27): a message like *"send money to
+  Ashan"* or *"transfer 500 taka to Dipu"* is classified straight to
+  `category:"polygon_services"`, `service:"beneficiary"`, with
+  `payload.nameQuery` set to the extracted name (and `payload.amount` if an
+  amount was also mentioned — not currently used server-side, but passed
+  through for your own reference). The server then matches that name against
+  the beneficiary list (case-insensitive substring/prefix first, fuzzy
+  fallback for typos) and responds with one of:
+  - **Exactly one match** → `BENEFICIARY_MATCH`. `payload.beneficiary` is the
+    full matched beneficiary object; `payload.destination` (also mirrored into
+    `routing.action`) tells you where to send the customer next, mirroring
+    your own app's `beneficiarySendRoute()` switch on `serviceType`:
+    - `serviceType: "OWN_BANK"` → `{"action": "own_bank_transfer"}`
+    - `serviceType: "OTHER_BANK"` → `{"action": "other_bank_transfer"}`
+    - `serviceType: "MFS"` with `mfsProvider` set → `{"action":
+      "wallet_transfer", "provider": "<lowercased provider>"}`
+    - anything else (e.g. `CARD_PAYMENT`, or `MFS` with no provider) →
+      `destination: null`, `routing.action: "manual"` — no deterministic
+      destination, same as your app's fallback-to-details-sheet case; the
+      spoken reply says so explicitly rather than guessing.
+    The spoken `token` reply already confirms who matched in plain language
+    (e.g. *"Sending to shanto via your Polygon Bank account — redirecting you
+    now."*) — live-verified against the real test account.
+  - **Zero matches** → `CLARIFICATION_REQUIRED` with an honest "I couldn't
+    find a beneficiary named X" reply (`category`/`service`/`subservice`/
+    `payload` all `null`, same convention as every other clarification case).
+  - **Two or more matches** → `BENEFICIARY_SELECTION_REQUIRED`.
+    `payload.beneficiaries` is a trimmed list (`id`, `nickname`,
+    `accountHolderName`, `serviceType`, `mfsProvider` only — not the full
+    object). Resubmit with `payload.beneficiaryId` set to the chosen `id`
+    (alongside `category`/`service` as before) to resolve directly to that
+    beneficiary — this takes priority over `nameQuery` if both are somehow
+    present, and follows the exact same single-match response shape above.
+  - There is no free-text date-range-style parsing beyond the name/amount
+    extraction described above — anything more complex (e.g. picking a
+    specific account of the sender's own to send *from*) still isn't handled
+    and would need its own follow-up.
 - **No masking applied yet** on `accountNumber` here (unlike accounts/balance/
   transactions, which have `*Masked` companion fields per the rendering guide
   below) — deliberately deferred pending a decision on scope; raw
