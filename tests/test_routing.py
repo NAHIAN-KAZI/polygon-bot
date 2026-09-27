@@ -147,7 +147,7 @@ def test_build_tools_route_banking_service_schema():
     route_tool = next(t for t in tools if t["function"]["name"] == "route_banking_service")
     params = route_tool["function"]["parameters"]
 
-    assert set(params["properties"].keys()) == {"category", "service", "subservice"}
+    assert set(params["properties"].keys()) == {"category", "service", "subservice", "payload"}
     assert set(params["required"]) == {"category", "service"}
     assert "subservice" not in params["required"]
 

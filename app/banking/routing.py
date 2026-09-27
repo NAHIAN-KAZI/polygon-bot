@@ -93,7 +93,17 @@ def build_system_prompt(taxonomy: dict) -> str:
         '- "I want to transfer money" -> ask_clarification(question="Sure — how would you like '
         'to transfer money? For example, to your own account, another bank, or a mobile wallet '
         'like bKash?")\n'
-        '  (same reasoning — many transfer types exist, do not guess which one)'
+        '  (same reasoning — many transfer types exist, do not guess which one)\n'
+        '- "send money to Ashan" -> route_banking_service(category="polygon_services", '
+        'service="beneficiary", payload={"nameQuery": "Ashan"})\n'
+        '  (the message names a specific person to send money to — that IS a specific, '
+        'actionable request, even though no account number or bank was given. Look up that '
+        'name as a saved beneficiary rather than asking which transfer type to use; put the '
+        'name verbatim as it appeared in the message into payload.nameQuery)\n'
+        '- "transfer 500 taka to Dipu" -> route_banking_service(category="polygon_services", '
+        'service="beneficiary", payload={"nameQuery": "Dipu", "amount": 500})\n'
+        '  (same pattern as above, plus the message also mentions an amount — include both '
+        'nameQuery and amount together in the same payload)'
     )
 
 
@@ -136,6 +146,16 @@ def build_tools() -> list[dict]:
                         "subservice": {
                             "type": "string",
                             "description": "The subservice id from the taxonomy list, if any.",
+                        },
+                        "payload": {
+                            "type": "object",
+                            "description": (
+                                "Extra structured details extracted from the message that the "
+                                "service needs, if any. For example {\"nameQuery\": \"Ashan\"} "
+                                "when the message names a person to send money to, optionally "
+                                "combined with {\"amount\": 500} if an amount was also "
+                                "mentioned. Omit entirely if nothing extra applies."
+                            ),
                         },
                     },
                     "required": ["category", "service"],
@@ -208,8 +228,11 @@ async def classify(
         category = arguments["category"]
         service = arguments["service"]
         subservice = arguments.get("subservice") or None
+        payload = arguments.get("payload") or None
         if is_valid_path(category, service, subservice):
-            return BankingService(category=category, service=service, subservice=subservice)
+            return BankingService(
+                category=category, service=service, subservice=subservice, payload=payload
+            )
 
         # First attempt hallucinated a category/service/subservice id that doesn't exist
         # anywhere in the real taxonomy (confirmed live: genuine model nondeterminism, not
@@ -242,11 +265,13 @@ async def classify(
             retry_category = retry_arguments["category"]
             retry_service = retry_arguments["service"]
             retry_subservice = retry_arguments.get("subservice") or None
+            retry_payload = retry_arguments.get("payload") or None
             if is_valid_path(retry_category, retry_service, retry_subservice):
                 return BankingService(
                     category=retry_category,
                     service=retry_service,
                     subservice=retry_subservice,
+                    payload=retry_payload,
                 )
             return Clarification(question=_CLARIFICATION_FALLBACK)
 

@@ -1,4 +1,5 @@
 import copy
+import difflib
 import json
 import logging
 import re
@@ -379,6 +380,99 @@ def _account_selection_reply(accounts: list[dict]) -> str:
     return f"You have multiple accounts — which one did you mean? {options}."
 
 
+def _match_beneficiaries(name_query: str, beneficiaries: list[dict]) -> list[dict]:
+    """Deterministic (no LLM) case-insensitive match of `name_query` against each
+    beneficiary's `nickname`/`accountHolderName`. Substring/prefix matches are
+    preferred; if none are found, falls back to `difflib` fuzzy matching over the
+    same fields. Skips entries missing both fields rather than raising."""
+    query = (name_query or "").strip().lower()
+    if not query or not isinstance(beneficiaries, list):
+        return []
+
+    substring_matches: dict[int, dict] = {}
+    fuzzy_pool: dict[str, dict] = {}
+    for b in beneficiaries:
+        if not isinstance(b, dict):
+            continue
+        names = []
+        for field in ("nickname", "accountHolderName"):
+            value = b.get(field)
+            if isinstance(value, str) and value.strip():
+                names.append(value.strip().lower())
+        if not names:
+            continue
+        if any(query in name or name.startswith(query) for name in names):
+            substring_matches[id(b)] = b
+            continue
+        for name in names:
+            fuzzy_pool.setdefault(name, b)
+
+    if substring_matches:
+        return list(substring_matches.values())
+
+    close_names = difflib.get_close_matches(query, fuzzy_pool.keys(), n=5, cutoff=0.6)
+    fuzzy_matches: dict[int, dict] = {}
+    for name in close_names:
+        b = fuzzy_pool[name]
+        fuzzy_matches[id(b)] = b
+    return list(fuzzy_matches.values())
+
+
+def _resolve_beneficiary_destination(beneficiary: dict) -> dict | None:
+    """Mirrors the mobile app's `beneficiarySendRoute()` switch on `serviceType`
+    (see beneficiary-to-transfer-flow.md) — `None` means no deterministic
+    destination (e.g. CARD_PAYMENT), same as that function's `null` case."""
+    service_type = beneficiary.get("serviceType")
+    if service_type == "OWN_BANK":
+        return {"action": "own_bank_transfer"}
+    if service_type == "OTHER_BANK":
+        return {"action": "other_bank_transfer"}
+    if service_type == "MFS":
+        provider = beneficiary.get("mfsProvider")
+        if provider:
+            return {"action": "wallet_transfer", "provider": str(provider).lower()}
+        return None
+    return None
+
+
+def _beneficiary_display_name(beneficiary: dict) -> str:
+    return beneficiary.get("nickname") or beneficiary.get("accountHolderName") or "that beneficiary"
+
+
+def _beneficiary_match_reply(beneficiary: dict, destination: dict | None) -> str:
+    name = _beneficiary_display_name(beneficiary)
+    if destination is None:
+        return f"Found {name}, but I can't route this transfer type automatically — please open it manually."
+    action = destination["action"]
+    if action == "own_bank_transfer":
+        return f"Sending to {name} via your Polygon Bank account — redirecting you now."
+    if action == "other_bank_transfer":
+        return f"Sending to {name} via their other bank account — redirecting you now."
+    if action == "wallet_transfer":
+        provider = destination.get("provider") or "wallet"
+        return f"Sending to {name} via {provider.title()} — redirecting you now."
+    return f"Found {name} — redirecting you now."
+
+
+def _beneficiary_selection_reply(beneficiaries: list[dict]) -> str:
+    names = ", ".join(_beneficiary_display_name(b) for b in beneficiaries)
+    return f"I found {len(beneficiaries)} beneficiaries matching that name — which one did you mean? {names}."
+
+
+def _beneficiary_not_found_reply(name_query: str) -> str:
+    return f"I couldn't find a beneficiary named {name_query}."
+
+
+def _trim_beneficiary(beneficiary: dict) -> dict:
+    return {
+        "id": beneficiary.get("id"),
+        "nickname": beneficiary.get("nickname"),
+        "accountHolderName": beneficiary.get("accountHolderName"),
+        "serviceType": beneficiary.get("serviceType"),
+        "mfsProvider": beneficiary.get("mfsProvider"),
+    }
+
+
 async def _kb_stream(req: ChatRequest, request_id: str):
     top_k = req.top_k or settings.DEFAULT_TOP_K
     try:
@@ -600,38 +694,121 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                 )
             else:
                 data = adapter_result.data
-                if data.get("mock") is True:
-                    banking_service_token = f"Sure — here's information about {service.replace('_', ' ')}."
+                if (
+                    service == "beneficiary"
+                    and isinstance(payload, dict)
+                    and (payload.get("nameQuery") or payload.get("beneficiaryId"))
+                ):
+                    beneficiaries_raw = data.get("beneficiaries") if isinstance(data, dict) else None
+                    beneficiaries = beneficiaries_raw if isinstance(beneficiaries_raw, list) else []
+
+                    beneficiary_id = payload.get("beneficiaryId")
+                    if beneficiary_id is not None:
+                        matches = [
+                            b for b in beneficiaries
+                            if isinstance(b, dict) and b.get("id") == beneficiary_id
+                        ]
+                    else:
+                        matches = _match_beneficiaries(payload.get("nameQuery", ""), beneficiaries)
+
+                    if len(matches) == 0:
+                        beneficiary_reply_token = _beneficiary_not_found_reply(
+                            payload.get("nameQuery") or "that beneficiary"
+                        )
+                        yield _sse("token", {"token": beneficiary_reply_token})
+                        yield _result_event("CLARIFICATION_REQUIRED", None, None, None)
+                        turn_classification = {
+                            "type": "CLARIFICATION_REQUIRED",
+                            "category": None,
+                            "service": None,
+                            "subservice": None,
+                        }
+                    elif len(matches) == 1:
+                        matched = matches[0]
+                        destination = _resolve_beneficiary_destination(matched)
+                        beneficiary_reply_token = _beneficiary_match_reply(matched, destination)
+                        yield _sse("token", {"token": beneficiary_reply_token})
+                        routing_action = destination["action"] if destination else "manual"
+                        yield _result_event(
+                            "BENEFICIARY_MATCH",
+                            category,
+                            service,
+                            subservice,
+                            payload={"beneficiary": matched, "destination": destination},
+                            routing={
+                                "category": category,
+                                "service": service,
+                                "subservice": subservice,
+                                "action": routing_action,
+                            },
+                        )
+                        turn_classification = {
+                            "type": "BENEFICIARY_MATCH",
+                            "category": category,
+                            "service": service,
+                            "subservice": subservice,
+                        }
+                    else:
+                        beneficiary_reply_token = _beneficiary_selection_reply(matches)
+                        yield _sse("token", {"token": beneficiary_reply_token})
+                        yield _result_event(
+                            "BENEFICIARY_SELECTION_REQUIRED",
+                            category,
+                            service,
+                            subservice,
+                            payload={"beneficiaries": [_trim_beneficiary(b) for b in matches]},
+                        )
+                        turn_classification = {
+                            "type": "BENEFICIARY_SELECTION_REQUIRED",
+                            "category": category,
+                            "service": service,
+                            "subservice": subservice,
+                        }
+
+                    logger.info(json.dumps({
+                        "request_id": request_id,
+                        "type": turn_classification["type"],
+                        "token": beneficiary_reply_token,
+                    }))
+                    audit.log_banking_turn(
+                        customer_identity,
+                        turn_classification,
+                        latency_ms=(time.monotonic() - turn_started_at) * 1000,
+                        request_id=request_id,
+                    )
                 else:
-                    data = _enrich_payload(service, subservice, data)
-                    banking_service_token = await _synthesize_reply(req.message, service, subservice, data)
-                yield _sse("token", {"token": banking_service_token})
-                yield _result_event(
-                    "BANKING_SERVICE",
-                    category,
-                    service,
-                    subservice,
-                    payload=data,
-                    routing={"category": category, "service": service, "subservice": subservice, "action": "redirect"},
-                )
-                turn_classification = {
-                    "type": "BANKING_SERVICE",
-                    "category": category,
-                    "service": service,
-                    "subservice": subservice,
-                }
-                logger.info(json.dumps({
-                    "request_id": request_id,
-                    "type": "BANKING_SERVICE",
-                    "token": banking_service_token,
-                    "payload": data,
-                }, default=str))
-                audit.log_banking_turn(
-                    customer_identity,
-                    turn_classification,
-                    latency_ms=(time.monotonic() - turn_started_at) * 1000,
-                    request_id=request_id,
-                )
+                    if data.get("mock") is True:
+                        banking_service_token = f"Sure — here's information about {service.replace('_', ' ')}."
+                    else:
+                        data = _enrich_payload(service, subservice, data)
+                        banking_service_token = await _synthesize_reply(req.message, service, subservice, data)
+                    yield _sse("token", {"token": banking_service_token})
+                    yield _result_event(
+                        "BANKING_SERVICE",
+                        category,
+                        service,
+                        subservice,
+                        payload=data,
+                        routing={"category": category, "service": service, "subservice": subservice, "action": "redirect"},
+                    )
+                    turn_classification = {
+                        "type": "BANKING_SERVICE",
+                        "category": category,
+                        "service": service,
+                        "subservice": subservice,
+                    }
+                    logger.info(json.dumps({
+                        "request_id": request_id,
+                        "type": "BANKING_SERVICE",
+                        "token": banking_service_token,
+                        "payload": data,
+                    }, default=str))
+                    audit.log_banking_turn(
+                        customer_identity,
+                        turn_classification,
+                        latency_ms=(time.monotonic() - turn_started_at) * 1000,
+                        request_id=request_id,
+                    )
 
     yield _sse("done", {})
 
