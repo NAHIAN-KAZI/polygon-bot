@@ -81,14 +81,59 @@ Always handle both `done` and `error` — a stream is not guaranteed to reach `d
 4. **No integration work needed for action buttons** — keep using
    `result.service`/`result.subservice` against your own existing local
    service catalog, same as today.
-5. **Beneficiary details are still blocked on your side** — send us the real
-   beneficiary-list endpoint/shape when it's available; we'll wire a real
-   adapter once we have it.
+5. **Beneficiary is now live** (was blocked, unblocked 2026-09-27) — see the
+   dedicated "Beneficiary integration" section below for the response shape
+   and current known limitation.
 6. **Incident (resolved)**: `GET /polygon-bank/v1/accounts` was returning
    `500` on your platform 2026-09-08 ~09:00–10:18 UTC (Kong request id
    `11fb8a2a60db7608dceee777be346759`), blocking balance/accounts/transaction
    lookups on our end. Confirmed resolved as of 10:18 UTC — flagging in case
    it recurs.
+
+## Beneficiary integration (as of 2026-09-27)
+
+`beneficiary` is a live real-data service — no longer mocked. Route: `category:
+"polygon_services"`, `service: "beneficiary"` (not `account_info` — different
+category from balance/accounts/etc).
+
+- **Request**: no required `payload` fields. Optional `payload.serviceType`
+  filters server-side: `"OWN_BANK"` / `"OTHER_BANK"` / `"MFS"` (matches the
+  values in each beneficiary's own `serviceType` field, below).
+- **Response shape**: `payload.beneficiaries` is a list of objects. Live-confirmed
+  fields per beneficiary: `id`, `nickname`, `accountHolderName`, `accountNumber`,
+  `serviceType` (`"OWN_BANK"` / `"OTHER_BANK"` / `"MFS"`), `identifierType`
+  (e.g. `"ACCOUNT"`, null for some entries), `mfsProvider` (null unless
+  `serviceType` is `"MFS"`), `bankName`, `branchName`, `district`,
+  `routingNumber` (all null for `OWN_BANK` entries — only populated for
+  `OTHER_BANK`), `providerId`, `icon`, `photoUrl`, `pinned`, `pinnedAt`,
+  `createdAt`.
+- **Example** (live, 2 real beneficiaries on a test account):
+  ```json
+  {"payload": {"beneficiaries": [
+    {"id": 18, "nickname": "dipu", "accountHolderName": "Md. Asad Chowdhury Dipu",
+     "accountNumber": "248400494640000", "serviceType": "OTHER_BANK",
+     "bankName": "Eastern Bank PLC.", "branchName": "banani", "district": "Dhaka",
+     "routingNumber": "56656565", "identifierType": null, "mfsProvider": null, ...},
+    {"id": 14, "nickname": "shanto", "accountHolderName": "Ashan",
+     "accountNumber": "100126000023", "serviceType": "OWN_BANK",
+     "identifierType": "ACCOUNT", "bankName": null, "branchName": null,
+     "district": null, "routingNumber": null, "mfsProvider": null, ...}
+  ]}}
+  ```
+- **Known limitation — no name-matching yet**: asking something like *"send
+  money to Ashan"* currently does **not** look up the beneficiary list at all.
+  It's classified generically and returns `CLARIFICATION_REQUIRED` ("own
+  account, another bank, or mobile wallet?") even when a beneficiary matching
+  that name already exists with a known `serviceType`. There is no server-side
+  fuzzy name search, and no result type analogous to `ACCOUNT_SELECTION_REQUIRED`
+  for "multiple beneficiaries matched this name, which one?" yet. If your flow
+  needs name-triggered beneficiary selection (matching your own app's tap-a-row
+  → auto-route-by-`serviceType` behavior), that's a real feature gap on our
+  side, not yet built — flag if you need it prioritized.
+- **No masking applied yet** on `accountNumber` here (unlike accounts/balance/
+  transactions, which have `*Masked` companion fields per the rendering guide
+  below) — deliberately deferred pending a decision on scope; raw
+  `accountNumber` is what you get today.
 
 ## Frontend rendering guide (for cards/tables/UI)
 

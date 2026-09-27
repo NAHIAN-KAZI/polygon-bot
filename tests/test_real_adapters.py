@@ -502,11 +502,14 @@ def test_real_adapters_dict_has_exactly_the_six_expected_keys():
     assert real.REAL_ADAPTERS["real:beneficiary"] is real.beneficiary_adapter
 
 
-# --- T-37: BeneficiaryAdapter ------------------------------------------------
+# --- T-37/T-38: BeneficiaryAdapter -------------------------------------------
 
 
-def test_beneficiary_adapter_no_payload_omits_service_type_param_and_passes_body_through(monkeypatch):
-    body = {"data": {"beneficiaries": [{"id": "ben-1"}]}}
+def test_beneficiary_adapter_no_payload_omits_service_type_param_and_wraps_bare_array(monkeypatch):
+    """T-38: GET /beneficiary/v1/beneficiaries returns a bare JSON array
+    (live-confirmed), so fulfill() must wrap it under a "beneficiaries" key,
+    mirroring DeviceHistoryAdapter's "devices" wrap."""
+    body = [{"id": "ben-1"}]
     calls = _install_request(monkeypatch, response=FakeResponse(json_data=body))
 
     result = asyncio.run(real.beneficiary_adapter.fulfill(_IDENTITY, _JWT, "beneficiary", None))
@@ -515,22 +518,23 @@ def test_beneficiary_adapter_no_payload_omits_service_type_param_and_passes_body
     assert calls[0]["method"] == "GET"
     assert calls[0]["path"] == "/beneficiary/v1/beneficiaries"
     assert calls[0]["params"] is None
-    assert result == AdapterResult(data=body)
+    assert result == AdapterResult(data={"beneficiaries": body})
+    assert isinstance(result.data, dict)
 
 
 def test_beneficiary_adapter_empty_payload_omits_service_type_param(monkeypatch):
-    body = {"data": {"beneficiaries": []}}
+    body = []
     calls = _install_request(monkeypatch, response=FakeResponse(json_data=body))
 
     result = asyncio.run(real.beneficiary_adapter.fulfill(_IDENTITY, _JWT, "beneficiary", {}))
 
     assert len(calls) == 1
     assert calls[0]["params"] is None
-    assert result == AdapterResult(data=body)
+    assert result == AdapterResult(data={"beneficiaries": body})
 
 
 def test_beneficiary_adapter_forwards_service_type_param(monkeypatch):
-    body = {"data": {"beneficiaries": [{"id": "ben-1", "serviceType": "OWN_BANK"}]}}
+    body = [{"id": "ben-1", "serviceType": "OWN_BANK"}]
     calls = _install_request(monkeypatch, response=FakeResponse(json_data=body))
 
     result = asyncio.run(
@@ -542,7 +546,7 @@ def test_beneficiary_adapter_forwards_service_type_param(monkeypatch):
     assert len(calls) == 1
     assert calls[0]["path"] == "/beneficiary/v1/beneficiaries"
     assert calls[0]["params"] == {"serviceType": "OWN_BANK"}
-    assert result == AdapterResult(data=body)
+    assert result == AdapterResult(data={"beneficiaries": body})
 
 
 # --- T-33: date-range filtering (_fetch_all_pages / _filter_by_date_range /
