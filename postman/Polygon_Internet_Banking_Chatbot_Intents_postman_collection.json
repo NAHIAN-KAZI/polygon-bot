@@ -1,0 +1,3907 @@
+{
+  "info": {
+    "_postman_id": "da2f777b-623f-4208-9d65-67fdeddf90a1",
+    "name": "Polygon Internet Banking · Chatbot Intent APIs",
+    "description": "# Polygon Internet Banking — Chatbot Intent APIs\n\nEvery API behind the 14 Polygon AI chatbot intents (`user_app`), one folder per intent, one request per operation.\nContracts were verified against the backend controllers + request DTOs and the Flutter app's call sites.\nSource doc: `user_app/docs/Internet Banking API cURL Reference.md`.\n\n## Quick start\n1. Open **00 · Setup → Login** and set `loginUsername` / `loginPassword` in the collection **Variables** tab, then send it.\n   The test script stores `accessToken` + `refreshToken` for every other request (auth is inherited from the collection).\n2. The access token lives **15 minutes**. Re-run **Login** or **Refresh token** when you get a `401`.\n   The console warns you before sending if the stored token has expired.\n3. For money-moving or sensitive calls, run **Send OTP** then **Verify OTP**. This stores `verificationToken`.\n   Also set `transactionPin`.\n4. Fill any other `{{variables}}` (account numbers, card IDs, request IDs…) in the collection Variables tab.\n   Path parameters appear under each request's **Params → Path Variables**.\n\n## Legend\n- `⚠️` in a request name = **no backend controller exists**. The app calls it, but expect `404`.\n- `(partial)` folder = the intent has no dedicated API and borrows APIs from other capabilities.\n\n## Conventions\n| Item | Value |\n|---|---|\n| Base URL | `https://internet-banking.dev-polygontech.xyz`, the dev environment, taken from `API_BASE_URL` in `user_app/.env`. For local Kong, swap in `http://localhost:10000`. |\n| Auth | `Authorization: Bearer {{accessToken}}`. The token comes from `POST /auth/v1/auth/login`. The backend reads the user ID from the JWT, so **no endpoint below takes a `userId`**. |\n| Public (no JWT) endpoints in this list | `support/v1/ai/public/chat` and `support/v1/ai/public/status` (Kong route `support-ai-public`, rate-limited to 10/min per IP). Kong also exposes `polygon-bank/v1/accounts/by-number` without its JWT plugin (GET only). |\n| Extra headers the app sends (not required by any controller here) | `Accept: application/json`, `Accept-language: en\\|bn`, `Version: <apiVersion>` |\n| Custom headers required | **None.** No controller in scope reads an `Idempotency-Key`, `X-*` or `deviceId` header. The one idempotency key in scope, for credit-card payment, goes in the **body**. |\n| Money in transfer/bill bodies | `amount` is a **`Long` in poisha** (1 BDT = 100 poisha), so `50000` = ৳500.00. The **exception** is `merchant/v1/qr/pay`, where `amount` is a `BigDecimal` in **taka**, sent as a string like `\"500.00\"`. |\n| `verificationToken` | UUID returned by `POST /otp/v1/verify` after an OTP is sent with `POST /otp/v1/send`. Required by every money-moving call and every sensitive card/profile action. |\n| `pin` | The user's 6-digit **transaction PIN**. |\n| `transactionTypeId` | An **admin-configured app-settings ID string**, such as the one on each Pay & Transfer menu leaf. It is response/config-dependent, so it is always a placeholder here. |\n| Date format | `transaction-list` `start`/`end` use `yyyy-MM-dd`, from the app's `toMysqlDateString()`. `month` params use `yyyy-MM` (`YearMonth.parse`). |\n\n## Coverage\n\"Operation\" means one cURL (one method + path). Shared endpoints are counted again under each intent that uses them.\n\n| Intent | API/Operation Count | Method confirmed from backend code | Needs API docs / backend work to confirm | Notes |\n|---|---:|---:|---:|---|\n| ACCOUNT_INFO | 8 | 8 | 0 | |\n| ATM_SUPPORT | 3 | 3 | 0 | **Partial.** No ATM locator. Borrows cash-by-code + disputes |\n| CARD_ISSUE | 6 | 6 | 0 | **Partial.** Borrows card lifecycle, disputes, complaints |\n| CARD_MANAGEMENT | 23 | 21 | 2 | The 2 `qr-settings/cards` ops have **no backend** |\n| CARD_REPLACEMENT | 3 | 3 | 0 | |\n| CHECK_BALANCE | 2 | 2 | 0 | Balance is **POST**, not GET |\n| EDIT_PERSONAL_DETAILS | 14 | 14 | 0 | KYC and profile image are multipart |\n| FAILED_TRANSFER | 5 | 5 | 0 | **Partial.** No single-transfer status/retry API |\n| FALLBACK | 7 | 7 | 0 | Chat endpoints stream SSE |\n| FEES | 1 | 1 | 0 | |\n| GREETING | 0 | 0 | 0 | No API |\n| LOST_OR_STOLEN_CARD | 2 | 2 | 0 | |\n| MINI_STATEMENT | 4 | 4 | 0 | |\n| TRANSFER | 29 | 28 | 1 | `other-banks` has **no backend**. `my-limit` PUT body unread |\n| **Total** | **107** | **104** | **3** | |\n\n## Open questions for backend\n| # | Endpoint | What's missing | Why |\n|---|---|---|---|\n| 1 | `GET auth/v1/user/qr-settings/cards` | **Everything**: method, response, auth | No backend controller exists. The method comes only from the app. |\n| 2 | `PUT auth/v1/user/qr-settings/cards/{id}` | **Everything**, including the body contract (`enabledForQr` is app-side only) | No backend controller exists. |\n| 3 | `GET transfer/v1/other-banks` | **Everything**: response shape, pagination | No backend controller exists. |\n| 4 | `PUT transfer/v1/my-limit/{account}` | Request body fields (`ChangeLimitRequest`) | DTO not read during this pass. |\n| 5 | `POST transfer/v1/transactions/do-transaction` | Whether a customer (USER) token is allowed. Allowed `transactionTypeCode` values | No OTP/PIN in the DTO, which suggests it may be an internal/admin path. Role annotation not verified. |\n| 6 | `POST customer/v1/me/kyc` | Accepted file types and max file size | Not declared on the controller. |\n| 7 | Card lifecycle (`freeze`, `unfreeze`, `close`, `reset-pin`, `international-transaction`, `debit`, `prepaid`, `replacement-requests`) | Which of `pin` / `password` is actually enforced | Enforced in the service layer, not in the DTO. |\n| 8 | `GET card/v1/card-products` | Allowed values for `cardCategory`, `scheme`, `domesticNetwork`, `internationalNetwork` | Plain `String` params, not enums. |\n| 9 | `GET transfer/v1/email-transfer` | Allowed `tab` values other than `pending` | Plain `String` with a default. |\n| 10 | `POST beneficiary/v1/beneficiaries` | Required fields for each `serviceType` | Validated in the service layer. |\n| 11 | All transfer/bill bodies | Valid `transactionTypeId` / `appSettingsId` values | Admin-configured at runtime (accounting app-settings), not in code. |\n| 12 | All endpoints | Response bodies/envelopes | Services differ: some return `ApiResponse<T>`, some `CommonResponse`, some raw DTOs/`Map`. Not documented here. |\n| 13 | Response-dependent IDs | `<ACCOUNT_ID>` (1.1), `<CARD_ID>` (card list `GET card/v1/cards`, not itself in intents 1–14), `<REQUEST_ID>` (list endpoints), `<QR_REFERENCE_ID>` (14.17), `<CONTACT_ID>` (7.10), `<TRANSACTION_REFERENCE_NO>` (8.1), `<VERIFICATION_TOKEN>` (`POST /otp/v1/verify`) | Each must be taken from an earlier call's response. |\n| 14 | `POST card/v1/cards/{id}/credit-card/payment` | Whether an OTP/PIN step is expected upstream | The DTO has none; only an idempotency key. |\n",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Warn when the stored access token has expired (15-minute JWT)",
+          "const t = pm.collectionVariables.get('accessToken');",
+          "try {",
+          "  const p = JSON.parse(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));",
+          "  if (p.exp && Date.now() / 1000 > p.exp) console.warn('accessToken expired: run 00 · Setup → Login');",
+          "} catch (e) {}"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://internet-banking.dev-polygontech.xyz",
+      "type": "string",
+      "description": "API gateway (dev). Local Kong: http://localhost:10000"
+    },
+    {
+      "key": "accessToken",
+      "value": "eyJhbGciOiJIUzI1NiJ9.eyJjaWYiOiIxMDkyNjAwMDAyMDIiLCJyb2xlIjoiVVNFUiIsInN0ZXBVcCI6ZmFsc2UsInJpc2siOiJOT1JNQUwiLCJ1c2VySWQiOjY2LCJzdWIiOiIwMTMxMTExMTExMCIsImp0aSI6IjkwYjNjMzgyLTFhYjAtNDdkOC05N2Q4LWI3YzVjNGEyODI2NCIsImlzcyI6ImludGVybmV0LWJhbmtpbmciLCJpYXQiOjE3OTA2NzkzMTMsImV4cCI6MTc5MDY4MDIxM30.2lAagoyWWvKXyAJIUcGdQak2EgPWB5JQJPRqjl2BBNc",
+      "type": "string",
+      "description": "Demo USER JWT (01311111110, userId 66). 15-minute lifetime. Refresh with Setup → Login"
+    },
+    {
+      "key": "refreshToken",
+      "value": "",
+      "type": "string",
+      "description": "Set by Setup → Login"
+    },
+    {
+      "key": "loginUsername",
+      "value": "01311111110",
+      "type": "string",
+      "description": "Login username (demo user)"
+    },
+    {
+      "key": "loginPassword",
+      "value": "",
+      "type": "string",
+      "description": "Fill in before running Login"
+    },
+    {
+      "key": "otpPhone",
+      "value": "01311111110",
+      "type": "string",
+      "description": "Phone to receive the OTP"
+    },
+    {
+      "key": "otp",
+      "value": "",
+      "type": "string",
+      "description": "OTP code received by SMS"
+    },
+    {
+      "key": "verificationToken",
+      "value": "",
+      "type": "string",
+      "description": "Set by Setup → Verify OTP"
+    },
+    {
+      "key": "transactionPin",
+      "value": "",
+      "type": "string",
+      "description": "6-digit transaction PIN"
+    },
+    {
+      "key": "accountHolderName",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "accountId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "accountIdentifier",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "accountNumber",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "accountOrCardNumber",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "bankName",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "beneficiaryId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "beneficiaryName",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "branchName",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "cardCategory",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "cardId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "cardNumber",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "cardProductId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "categoryId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "categoryRef",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "contactId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "description",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "district",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "division",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "dpsIdentifier",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "emailTransferId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "expectedMonthlyTurnover",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "fdIdentifier",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "fromAccountId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "fromAccountNumber",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "giftTemplateId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "holderName",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "monthlyIncome",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "newNickname",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "newValue",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "nickname",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "note",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "occupation",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "permanentAddress",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "presentAddress",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "qrReferenceId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "rawQrString",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "reason",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "remarks",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "requestId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "routingNumber",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "scheme",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "searchText",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "securityAnswer",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "securityQuestion",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "sessionKey",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "sourceAccountId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "sourceOfFund",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "toAccountNumber",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "transactionReferenceNo",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "transactionTypeCode",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "transactionTypeId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "username",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "walletHolderName",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "00 · Setup (run first)",
+      "description": "Helpers to get a fresh `accessToken` and an OTP `verificationToken`. Not part of the 14 intents.",
+      "item": [
+        {
+          "name": "Login (username + password)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{loginUsername}}\",\n  \"password\": \"{{loginPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "`POST /auth/v1/auth/login` (`LoginRequest`: `username` ✅, `password` or `pin`).\n\nStores `token.accessToken` → `{{accessToken}}` and `token.refreshToken` → `{{refreshToken}}`.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login succeeded', () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "const pair = j.token || (j.data && j.data.token) || j;",
+                  "if (pair.accessToken) {",
+                  "  pm.collectionVariables.set('accessToken', pair.accessToken);",
+                  "  if (pair.refreshToken) pm.collectionVariables.set('refreshToken', pair.refreshToken);",
+                  "  console.log('accessToken stored ✔');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Refresh token",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/v1/auth/refresh-token",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "v1",
+                "auth",
+                "refresh-token"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "`POST /auth/v1/auth/refresh-token`. Get a new token pair without logging in again.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Login succeeded', () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "const pair = j.token || (j.data && j.data.token) || j;",
+                  "if (pair.accessToken) {",
+                  "  pm.collectionVariables.set('accessToken', pair.accessToken);",
+                  "  if (pair.refreshToken) pm.collectionVariables.set('refreshToken', pair.refreshToken);",
+                  "  console.log('accessToken stored ✔');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Send OTP",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/otp/v1/send",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "otp",
+                "v1",
+                "send"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"{{otpPhone}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "`POST /otp/v1/send`. `phone` must match `^01[3-9]\\d{8}$`. Rate-limited per phone and IP.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Verify OTP",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/otp/v1/verify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "otp",
+                "v1",
+                "verify"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"{{otpPhone}}\",\n  \"otp\": \"{{otp}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "`POST /otp/v1/verify` → `verificationToken`, stored in `{{verificationToken}}`.\n\nThe dev environment may accept the `TEMP_OTP` bypass code when `IS_DEV=true`.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('OTP verified', () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "const t = j.verificationToken || (j.data && j.data.verificationToken);",
+                  "if (t) { pm.collectionVariables.set('verificationToken', t); console.log('verificationToken stored ✔'); }"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "01 · Account Info",
+      "description": "**Intent:** `ACCOUNT_INFO`\n\n\n",
+      "item": [
+        {
+          "name": "1.1 · Get all accounts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/polygon-bank/v1/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "polygon-bank",
+                "v1",
+                "accounts"
+              ]
+            },
+            "description": "**Purpose:** List every bank account belonging to the logged-in user.\n**Method:** GET — **CONFIRMED**\n**Endpoint:** `polygon-bank/v1/accounts`\n**Path params:** none · **Query params:** none\n**Headers:** `Authorization`\n**Body:** none\n**Source:** `polygon-bank/…/AccountController.java` `getAccounts()`"
+          },
+          "response": []
+        },
+        {
+          "name": "1.2 · Get account detail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/polygon-bank/v1/accounts/:accountId",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "polygon-bank",
+                "v1",
+                "accounts",
+                ":accountId"
+              ],
+              "variable": [
+                {
+                  "key": "accountId",
+                  "value": "{{accountId}}"
+                }
+              ]
+            },
+            "description": "**Purpose:** Get a single account by its internal numeric ID.\n**Method:** GET — **CONFIRMED**\n**Endpoint:** `polygon-bank/v1/accounts/{id}`\n**Path params:** `id` (Long, internal account ID from 1.1)\n**Query params:** none · **Body:** none\n**Source:** `polygon-bank/…/AccountController.java` `getAccountById()`"
+          },
+          "response": []
+        },
+        {
+          "name": "1.3 · Get account by account/card number",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/polygon-bank/v1/accounts/by-number/:accountOrCardNumber",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "polygon-bank",
+                "v1",
+                "accounts",
+                "by-number",
+                ":accountOrCardNumber"
+              ],
+              "variable": [
+                {
+                  "key": "accountOrCardNumber",
+                  "value": "{{accountOrCardNumber}}"
+                }
+              ]
+            },
+            "description": "**Purpose:** Resolve an account from an account number or card number.\n**Method:** GET — **CONFIRMED**\n**Endpoint:** `polygon-bank/v1/accounts/by-number/{number}`\n**Path params:** `number` (String: account number or card number)\n**Query params:** none · **Body:** none\n**Auth note:** Kong registers this as a separate GET-only route (`polygon-bank-by-number`) **without** the JWT plugin. Sending the Bearer token is harmless and matches what the app does.\n**Source:** `polygon-bank/…/AccountController.java` `getByNumber()`"
+          },
+          "response": []
+        },
+        {
+          "name": "1.4 · Get accounts by username",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/polygon-bank/v1/accounts/by-username/:username",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "polygon-bank",
+                "v1",
+                "accounts",
+                "by-username",
+                ":username"
+              ],
+              "variable": [
+                {
+                  "key": "username",
+                  "value": "{{username}}"
+                }
+              ]
+            },
+            "description": "**Purpose:** List accounts linked to a username.\n**Method:** GET — **CONFIRMED**\n**Endpoint:** `polygon-bank/v1/accounts/by-username/{username}`\n**Path params:** `username` (String)\n**Query params:** none · **Body:** none\n**Source:** `polygon-bank/…/AccountController.java` `getByUsername()`"
+          },
+          "response": []
+        },
+        {
+          "name": "1.5 · Star account for quick view",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/polygon-bank/v1/accounts/:accountId/quick-view",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "polygon-bank",
+                "v1",
+                "accounts",
+                ":accountId",
+                "quick-view"
+              ],
+              "variable": [
+                {
+                  "key": "accountId",
+                  "value": "{{accountId}}"
+                }
+              ]
+            },
+            "description": "**Purpose:** Star or unstar an account on the dashboard quick view.\n**Method:** PUT — **CONFIRMED**\n**Endpoint:** `polygon-bank/v1/accounts/{id}/quick-view`\n**Path params:** `id` (Long, internal account ID)\n**Query params:** none\n**Headers:** `Authorization`, `Content-Type: application/json`\n**Body (`QuickViewRequest`):** `isStarred` (Boolean, required)\n**Source:** `polygon-bank/…/AccountController.java` `toggleQuickView()`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"isStarred\": true\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "1.6 · My loans",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/loan/v1/loans",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "loan",
+                "v1",
+                "loans"
+              ]
+            },
+            "description": "**Purpose:** List the logged-in user's loan accounts.\n**Method:** GET — **CONFIRMED**\n**Endpoint:** `loan/v1/loans`\n**Path params:** none · **Query params:** none · **Body:** none\n**Source:** `loan/…/LoanController.java` `listMine()`"
+          },
+          "response": []
+        },
+        {
+          "name": "1.7 · FD profit history",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/product/v1/fixed-deposit/:fdIdentifier/profit-history",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "product",
+                "v1",
+                "fixed-deposit",
+                ":fdIdentifier",
+                "profit-history"
+              ],
+              "variable": [
+                {
+                  "key": "fdIdentifier",
+                  "value": "{{fdIdentifier}}"
+                }
+              ]
+            },
+            "description": "**Purpose:** Profit/interest history of one fixed deposit.\n**Method:** GET — **CONFIRMED**\n**Endpoint:** `product/v1/fixed-deposit/{id}/profit-history`\n**Path params:** `id` → backend name `fdIdentifier` (String, the FD identifier, **not** a numeric DB ID)\n**Query params:** none · **Body:** none\n**Source:** `product/…/FixedDepositController.java` `profitHistory()`"
+          },
+          "response": []
+        },
+        {
+          "name": "1.8 · DPS profit history",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/product/v1/dps/:dpsIdentifier/profit-history",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "product",
+                "v1",
+                "dps",
+                ":dpsIdentifier",
+                "profit-history"
+              ],
+              "variable": [
+                {
+                  "key": "dpsIdentifier",
+                  "value": "{{dpsIdentifier}}"
+                }
+              ]
+            },
+            "description": "**Purpose:** Profit/interest history of one DPS.\n**Method:** GET — **CONFIRMED**\n**Endpoint:** `product/v1/dps/{id}/profit-history`\n**Path params:** `id` → backend name `dpsIdentifier` (String)\n**Query params:** none · **Body:** none\n**Source:** `product/…/DpsController.java` `profitHistory()`"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "02 · ATM Support  (partial)",
+      "description": "**Intent:** `ATM_SUPPORT`\n\n\n**PARTIAL INTENT.** There is **no ATM locator API**. `locator/` is still a zero-entity skeleton, and no route is\nregistered for it in local Kong. This intent is covered only by **borrowing** two capabilities:\ncardless cash withdrawal (fund-transfer) and transaction disputes (service-request).\n\n",
+      "item": [
+        {
+          "name": "2.1 · Cash by code (cardless ATM withdrawal)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transfer/v1/cash-by-code",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transfer",
+                "v1",
+                "cash-by-code"
+              ]
+            },
+            "description": "**Purpose:** Generate a cash code that the recipient uses at an ATM without a card.\n**Method:** POST — **CONFIRMED**\n**Endpoint:** `transfer/v1/cash-by-code`\n**Path params:** none · **Query params:** none\n**Headers:** `Authorization`, `Content-Type: application/json`\n**Body (`CashByCodeRequest`):**\n\n| Field | Type | Required | Notes |\n|---|---|---|---|\n| `fromAccount` | String | ✅ | source account number |\n| `recipientMobile` | String | ✅ | `^01[3-9]\\d{8}$` |\n| `cashCodeDeliveryMethod` | enum | ✅ | `SCREEN_DISPLAY` \\| `MOBILE_NUMBER` \\| `EMAIL_ADDRESS` |\n| `deliveryEmail` | String | — | valid email; needed when method is `EMAIL_ADDRESS` (ASSUMPTION: enforced in the service, not the DTO) |\n| `transactionTypeId` | String | ✅ | admin-configured |\n| `amount` | Long (poisha) | ✅ | > 0 |\n| `verificationToken` | String | ✅ | from OTP verify |\n| `pin` | String | ✅ | transaction PIN |\n| `referenceNo`, `note`, `categoryId` (Long), `customCategoryId` | — | — | optional |\n\n**Source:** `fund-transfer/…/CashByCodeController.java`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"fromAccount\": \"{{accountNumber}}\",\n    \"recipientMobile\": \"01712345678\",\n    \"cashCodeDeliveryMethod\": \"MOBILE_NUMBER\",\n    \"transactionTypeId\": \"{{transactionTypeId}}\",\n    \"amount\": 200000,\n    \"note\": \"{{note}}\",\n    \"verificationToken\": \"{{verificationToken}}\",\n    \"pin\": \"{{transactionPin}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2.2 · Raise dispute (ATM debit problem)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/service-request/v1/disputes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "service-request",
+                "v1",
+                "disputes"
+              ]
+            },
+            "description": "**Purpose:** Dispute a transaction, for example when an ATM debited the account but dispensed no cash.\n**Method:** POST — **CONFIRMED**\n**Endpoint:** `service-request/v1/disputes`\n**Headers:** `Authorization`, `Content-Type: application/json`\n**Body (`RegisterDisputeRequest`):**\n\n| Field | Type | Required | Notes |\n|---|---|---|---|\n| `accountNumber` | String | ✅ | |\n| `transactionReferenceNo` | String | ✅ | from the transaction list |\n| `category` | enum | ✅ | `UNAUTHORIZED_TRANSACTION` \\| `DUPLICATE_CHARGE` \\| `AMOUNT_MISMATCH` \\| `SERVICE_NOT_RENDERED` \\| `OTHER` |\n| `remarks` | String | — | |\n| `otpType` | enum | ✅ | `SMS` \\| `EMAIL` |\n| `verificationToken` | String | ✅ | |\n\nThere is no ATM-specific category. `SERVICE_NOT_RENDERED` (debited, no cash) is the closest fit, and that choice is an ASSUMPTION.\n**Source:** `service-request/…/DisputeController.java` `submit()`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"accountNumber\": \"{{accountNumber}}\",\n    \"transactionReferenceNo\": \"{{transactionReferenceNo}}\",\n    \"category\": \"SERVICE_NOT_RENDERED\",\n    \"remarks\": \"ATM debited account but no cash dispensed\",\n    \"otpType\": \"SMS\",\n    \"verificationToken\": \"{{verificationToken}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2.3 · List disputes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/service-request/v1/disputes?accountNumber={{accountNumber}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "service-request",
+                "v1",
+                "disputes"
+              ],
+              "query": [
+                {
+                  "key": "accountNumber",
+                  "value": "{{accountNumber}}"
+                }
+              ]
+            },
+            "description": "**Purpose:** List the disputes raised on an account, to follow up on an ATM dispute.\n**Method:** GET — **CONFIRMED**\n**Endpoint:** `service-request/v1/disputes`\n**Query params:** `accountNumber` (String, **required**)\n**Source:** `service-request/…/DisputeController.java` `getByAccountNumber()`"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "03 · Card Issue  (partial)",
+      "description": "**Intent:** `CARD_ISSUE`\n\n\n**PARTIAL INTENT.** There is **no dedicated \"card not working\" / diagnostics API**. This intent borrows\ncard lifecycle actions (reset PIN, unfreeze) from CARD_MANAGEMENT, disputes from service-request, and complaints\nfrom support.\n\n",
+      "item": [
+        {
+          "name": "3.1 · Reset card PIN",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/card/v1/cards/:cardId/reset-pin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "card",
+                "v1",
+                "cards",
+                ":cardId",
+                "reset-pin"
+              ],
+              "variable": [
+                {
+                  "key": "cardId",
+                  "value": "{{cardId}}"
+                }
+              ]
+            },
+            "description": "**Purpose:** Reset the card PIN.\n**Method:** PATCH — **CONFIRMED**\n**Endpoint:** `card/v1/cards/{id}/reset-pin`\n**Path params:** `id` (Long, card ID from the card list)\n**Headers:** `Authorization`, `Content-Type: application/json`\n**Body (`CardLifecycleActionRequest`):** `verificationToken` (✅), `pin` (optional), `password` (optional)\n**ASSUMPTION:** `pin` and `password` are alternative re-authentication factors, so send one of them. The DTO marks neither as required. Which one is enforced is decided in the service layer.\n**Source:** `card/…/CardLifecycleController.java` `resetPin()`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"pin\": \"{{transactionPin}}\",\n    \"verificationToken\": \"{{verificationToken}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "3.2 · Unfreeze card",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/card/v1/cards/:cardId/unfreeze",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "card",
+                "v1",
+                "cards",
+                ":cardId",
+                "unfreeze"
+              ],
+              "variable": [
+                {
+                  "key": "cardId",
+                  "value": "{{cardId}}"
+                }
+              ]
+            },
+            "description": "**Purpose:** Unfreeze a card that was frozen.\n**Method:** PATCH — **CONFIRMED**\n**Endpoint:** `card/v1/cards/{id}/unfreeze`\n**Path params:** `id` (Long)\n**Body (`CardLifecycleActionRequest`):** `verificationToken` (✅), `pin` / `password` (optional; same ASSUMPTION as 3.1)\n**Source:** `card/…/CardLifecycleController.java` `unfreeze()`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"pin\": \"{{transactionPin}}\",\n    \"verificationToken\": \"{{verificationToken}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "3.3 · Raise dispute",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/service-request/v1/disputes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "service-request",
+                "v1",
+                "disputes"
+              ]
+            },
+            "description": "**Purpose:** Dispute a card transaction.\n**Method:** POST — **CONFIRMED** (same contract as 2.2)\n**Endpoint:** `service-request/v1/disputes`\n**Source:** `service-request/…/DisputeController.java` `submit()`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"accountNumber\": \"{{accountNumber}}\",\n    \"transactionReferenceNo\": \"{{transactionReferenceNo}}\",\n    \"category\": \"UNAUTHORIZED_TRANSACTION\",\n    \"remarks\": \"{{remarks}}\",\n    \"otpType\": \"SMS\",\n    \"verificationToken\": \"{{verificationToken}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "3.4 · List disputes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/service-request/v1/disputes?accountNumber={{accountNumber}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "service-request",
+                "v1",
+                "disputes"
+              ],
+              "query": [
+                {
+                  "key": "accountNumber",
+                  "value": "{{accountNumber}}"
+                }
+              ]
+            },
+            "description": "**Method:** GET — **CONFIRMED** (same as 2.3)\n**Endpoint:** `service-request/v1/disputes` · **Query:** `accountNumber` (required)"
+          },
+          "response": []
+        },
+        {
+          "name": "3.5 · Submit complaint",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/support/v1/complaints",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "support",
+                "v1",
+                "complaints"
+              ]
+            },
+            "description": "**Purpose:** Log a complaint ticket about a card problem.\n**Method:** POST — **CONFIRMED**\n**Endpoint:** `support/v1/complaints`\n**Headers:** `Authorization`, `Content-Type: application/json`\n**Body (`SubmitComplaintRequest`):**\n\n| Field | Type | Required | Notes |\n|---|---|---|---|\n| `category` | enum | ✅ | `ACCOUNT` \\| `CARD` \\| `TRANSACTION` \\| `LOAN_DEPOSIT` \\| `MOBILE_APP_TECHNICAL` \\| `SERVICE_QUALITY` \\| `OTHER` |\n| `description` | String | ✅ | max 2000 chars |\n\n**Source:** `support/…/ComplaintController.java` `submit()`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"category\": \"CARD\",\n    \"description\": \"{{description}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "3.6 · My complaints",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/support/v1/complaints",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "support",
+                "v1",
+                "complaints"
+              ]
+            },
+            "description": "**Purpose:** List the user's complaints.\n**Method:** GET — **CONFIRMED**\n**Endpoint:** `support/v1/complaints` · no params\n**Source:** `support/…/ComplaintController.java` `listMine()`"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "04 · Card Management",
+      "description": "**Intent:** `CARD_MANAGEMENT`\n\n\nAll endpoints in this section are served by `card/`. \"Card ID\" means the numeric `id` from the card list.\n\n",
+      "item": [
+        {
+          "name": "4.1 · Freeze card",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/card/v1/cards/:cardId/freeze",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "card",
+                "v1",
+                "cards",
+                ":cardId",
+                "freeze"
+              ],
+              "variable": [
+                {
+                  "key": "cardId",
+                  "value": "{{cardId}}"
+                }
+              ]
+            },
+            "description": "**Purpose:** Temporarily freeze a card.\n**Method:** PATCH — **CONFIRMED**\n**Endpoint:** `card/v1/cards/{id}/freeze`\n**Path params:** `id` (Long)\n**Body (`FreezeCardRequest`):** `reasonCode` (✅, enum; the only value today is `OTHER`), `verificationToken` (✅), `pin` / `password` (optional; see the 3.1 ASSUMPTION)\n**Source:** `card/…/CardLifecycleController.java` `freeze()`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"reasonCode\": \"OTHER\",\n    \"pin\": \"{{transactionPin}}\",\n    \"verificationToken\": \"{{verificationToken}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4.2 · Unfreeze card",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/card/v1/cards/:cardId/unfreeze",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "card",
+                "v1",
+                "cards",
+                ":cardId",
+                "unfreeze"
+              ],
+              "variable": [
+                {
+                  "key": "cardId",
+                  "value": "{{cardId}}"
+                }
+              ]
+            },
+            "description": "**Method:** PATCH — **CONFIRMED** (same contract as 3.2)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"pin\": \"{{transactionPin}}\",\n    \"verificationToken\": \"{{verificationToken}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4.3 · Close card",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/card/v1/cards/:cardId/close",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "card",
+                "v1",
+                "cards",
+                ":cardId",
+                "close"
+              ],
+              "variable": [
+                {
+                  "key": "cardId",
+                  "value": "{{cardId}}"
+                }
+              ]
+            },
+            "description": "**Purpose:** Permanently close a card.\n**Method:** PATCH — **CONFIRMED**\n**Endpoint:** `card/v1/cards/{id}/close`\n**Body (`CardLifecycleActionRequest`):** `verificationToken` (✅), `pin` / `password` (optional)\n**Source:** `card/…/CardLifecycleController.java` `close()`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"pin\": \"{{transactionPin}}\",\n    \"verificationToken\": \"{{verificationToken}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4.4 · Contactless on/off",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/card/v1/cards/:cardId/contactless",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "card",
+                "v1",
+                "cards",
+                ":cardId",
+                "contactless"
+              ],
+              "variable": [
+                {
+                  "key": "cardId",
+                  "value": "{{cardId}}"
+                }
+              ]
+            },
+            "description": "**Purpose:** Enable or disable contactless (tap) payments and optionally set a limit.\n**Method:** PATCH — **CONFIRMED**\n**Endpoint:** `card/v1/cards/{id}/contactless`\n**Body (`ContactlessPreferenceRequest`):** `enabled` (Boolean, ✅), `limitPoisha` (Long, optional, in poisha)\n**Note:** Unlike the other lifecycle calls, this one needs **no** `verificationToken` or PIN.\n**Source:** `card/…/CardLifecycleController.java` `updateContactless()`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"enabled\": true,\n    \"limitPoisha\": 500000\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4.5 · International transaction on/off",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/card/v1/cards/:cardId/international-transaction",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "card",
+                "v1",
+                "cards",
+                ":cardId",
+                "international-transaction"
+              ],
+              "variable": [
+                {
+                  "key": "cardId",
+                  "value": "{{cardId}}"
+                }
+              ]
+            },
+            "description": "**Method:** PATCH — **CONFIRMED**\n**Endpoint:** `card/v1/cards/{id}/international-transaction`\n**Body (`InternationalTransactionPreferenceRequest`):** `enabled` (✅), `verificationToken` (✅), `pin` / `password` (optional)\n**Source:** `card/…/CardLifecycleController.java` `updateInternationalTransaction()`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"enabled\": true,\n    \"pin\": \"{{transactionPin}}\",\n    \"verificationToken\": \"{{verificationToken}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4.6 · Reset card PIN",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/card/v1/cards/:cardId/reset-pin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "card",
+                "v1",
+                "cards",
+                ":cardId",
+                "reset-pin"
+              ],
+              "variable": [
+                {
+                  "key": "cardId",
+                  "value": "{{cardId}}"
+                }
+              ]
+            },
+            "description": "**Method:** PATCH — **CONFIRMED** (same contract as 3.1)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"pin\": \"{{transactionPin}}\",\n    \"verificationToken\": \"{{verificationToken}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4.7 · Card limit change — submit request",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/card/v1/cards/:cardId/limit-change-requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "card",
+                "v1",
+                "cards",
+                ":cardId",
+                "limit-change-requests"
+              ],
+              "variable": [
+                {
+                  "key": "cardId",
+                  "value": "{{cardId}}"
+                }
+              ]
+            },
+            "description": "**Purpose:** Ask for a new credit limit (maker-checker, reviewed by the bank).\n**Method:** POST — **CONFIRMED** (returns `201 Created`)\n**Endpoint:** `card/v1/cards/{id}/limit-change-requests`\n**Path params:** `id` → backend name `cardId` (Long)\n**Body (`SubmitCardLimitChangeRequest`):** `requestedCreditLimitPoisha` (BigDecimal, ✅, > 0, poisha), `reason` (optional)\n**Source:** `card/…/CardLimitChangeController.java` `submit()`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"requestedCreditLimitPoisha\": 20000000,\n    \"reason\": \"{{reason}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4.8 · Card limit change — list my requests",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/card/v1/cards/limit-change-requests?page=0&size=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "card",
+                "v1",
+                "cards",
+                "limit-change-requests"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "**Method:** GET — **CONFIRMED**\n**Endpoint:** `card/v1/cards/limit-change-requests`\n**Query params:** `page` (int, default `0`), `size` (int, default `10`)\n**Source:** `card/…/CardLimitChangeController.java` `listMine()`"
+          },
+          "response": []
+        },
+        {
+          "name": "4.9 · Card limit change — cancel request",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/card/v1/cards/limit-change-requests/:requestId",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "card",
+                "v1",
+                "cards",
+                "limit-change-requests",
+                ":requestId"
+              ],
+              "variable": [
+                {
+                  "key": "requestId",
+                  "value": "{{requestId}}"
+                }
+              ]
+            },
+            "description": "**Method:** DELETE — **CONFIRMED**\n**Endpoint:** `card/v1/cards/limit-change-requests/{id}`\n**Path params:** `id` (Long, the **request** ID from 4.8, not the card ID)\n**Source:** `card/…/CardLimitChangeController.java` `cancel()`"
+          },
+          "response": []
+        },
+        {
+          "name": "4.10 · Card products list (all)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/card/v1/card-products",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "card",
+                "v1",
+                "card-products"
+              ]
+            },
+            "description": "**Purpose:** List the card products available to apply for.\n**Method:** GET — **CONFIRMED**\n**Endpoint:** `card/v1/card-products`\n**Query params (all optional):** `cardCategory`, `scheme`, `domesticNetwork`, `internationalNetwork` (Strings; exact allowed values are not enumerated in the controller)\n**Source:** `card/…/CardProductController.java` `listAvailable()`"
+          },
+          "response": []
+        },
+        {
+          "name": "4.10 · Card products list (filtered)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/card/v1/card-products?cardCategory={{cardCategory}}&scheme={{scheme}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "card",
+                "v1",
+                "card-products"
+              ],
+              "query": [
+                {
+                  "key": "cardCategory",
+                  "value": "{{cardCategory}}"
+                },
+                {
+                  "key": "scheme",
+                  "value": "{{scheme}}"
+                }
+              ]
+            },
+            "description": "**Purpose:** List the card products available to apply for.\n**Method:** GET — **CONFIRMED**\n**Endpoint:** `card/v1/card-products`\n**Query params (all optional):** `cardCategory`, `scheme`, `domesticNetwork`, `internationalNetwork` (Strings; exact allowed values are not enumerated in the controller)\n**Source:** `card/…/CardProductController.java` `listAvailable()`"
+          },
+          "response": []
+        },
+        {
+          "name": "4.11 · Apply for debit card",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/card/v1/cards/debit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "card",
+                "v1",
+                "cards",
+                "debit"
+              ]
+            },
+            "description": "**Method:** POST — **CONFIRMED** (`201 Created`)\n**Endpoint:** `card/v1/cards/debit`\n**Body (`DebitCardApplicationRequest`):**\n\n| Field | Type | Required |\n|---|---|---|\n| `holderName` | String | ✅ |\n| `linkedAccountNumber` | String | ✅ |\n| `linkedAccountId` | Long | — |\n| `cardProductId` | Long | ✅ (from 4.10) |\n| `physical` | boolean | — (default `false`) |\n| `verificationToken` | String | ✅ |\n| `pin` / `password` | String | — (see 3.1 ASSUMPTION) |\n\n**Source:** `card/…/DebitCardApplicationController.java` `apply()`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"holderName\": \"{{holderName}}\",\n    \"linkedAccountNumber\": \"{{accountNumber}}\",\n    \"cardProductId\": {{cardProductId}},\n    \"physical\": true,\n    \"pin\": \"{{transactionPin}}\",\n    \"verificationToken\": \"{{verificationToken}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4.12 · Reveal debit card details",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/card/v1/cards/debit/:cardId/reveal",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "card",
+                "v1",
+                "cards",
+                "debit",
+                ":cardId",
+                "reveal"
+              ],
+              "variable": [
+                {
+                  "key": "cardId",
+                  "value": "{{cardId}}"
+                }
+              ]
+            },
+            "description": "**Method:** GET — **CONFIRMED**\n**Endpoint:** `card/v1/cards/debit/{id}/reveal`\n**Path params:** `id` → backend `cardId` (Long)\n**Source:** `card/…/DebitCardApplicationController.java` `reveal()`"
+          },
+          "response": []
+        },
+        {
+          "name": "4.13 · Apply for prepaid card",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/card/v1/cards/prepaid",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "card",
+                "v1",
+                "cards",
+                "prepaid"
+              ]
+            },
+            "description": "**Method:** POST — **CONFIRMED** (`201 Created`)\n**Endpoint:** `card/v1/cards/prepaid`\n**Body (`PrepaidCardApplicationRequest`):** the same fields as 4.11, plus these optional ones:\n`maxBalancePoisha` (BigDecimal), `initialLoadAmountPoisha` (BigDecimal), `sourceAccountId` (Long).\n**Warning:** per `CLAUDE.md`, prepaid applications fail unless `CARD_PREPAID_COA_ID` and `CARD_PREPAID_APP_SETTINGS_ID` are provisioned in accounting.\n**Source:** `card/…/PrepaidCardApplicationController.java` `apply()`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"holderName\": \"{{holderName}}\",\n    \"linkedAccountNumber\": \"{{accountNumber}}\",\n    \"cardProductId\": {{cardProductId}},\n    \"maxBalancePoisha\": 10000000,\n    \"initialLoadAmountPoisha\": 100000,\n    \"sourceAccountId\": {{sourceAccountId}},\n    \"physical\": false,\n    \"pin\": \"{{transactionPin}}\",\n    \"verificationToken\": \"{{verificationToken}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4.14 · Reveal prepaid card details",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/card/v1/cards/prepaid/:cardId/reveal",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "card",
+                "v1",
+                "cards",
+                "prepaid",
+                ":cardId",
+                "reveal"
+              ],
+              "variable": [
+                {
+                  "key": "cardId",
+                  "value": "{{cardId}}"
+                }
+              ]
+            },
+            "description": "**Method:** GET — **CONFIRMED**\n**Endpoint:** `card/v1/cards/prepaid/{id}/reveal`"
+          },
+          "response": []
+        },
+        {
+          "name": "4.15 · Virtual card — submit request",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/card/v1/cards/virtual/requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "card",
+                "v1",
+                "cards",
+                "virtual",
+                "requests"
+              ]
+            },
+            "description": "**Method:** POST — **CONFIRMED** (`201 Created`)\n**Endpoint:** `card/v1/cards/virtual/requests`\n**Body (`VirtualCardRequestCreateRequest`):** `linkedAccountNumber` (✅), `cardProductId` (Long, ✅), `holderName` (✅). No OTP or PIN is needed.\n**Source:** `card/…/VirtualCardController.java` `submit()`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"linkedAccountNumber\": \"{{accountNumber}}\",\n    \"cardProductId\": {{cardProductId}},\n    \"holderName\": \"{{holderName}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4.16 · Virtual card — list my requests",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/card/v1/cards/virtual/requests?page=0&size=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "card",
+                "v1",
+                "cards",
+                "virtual",
+                "requests"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "**Method:** GET — **CONFIRMED**\n**Endpoint:** `card/v1/cards/virtual/requests` · **Query:** `page` (default 0), `size` (default 10)"
+          },
+          "response": []
+        },
+        {
+          "name": "4.17 · Virtual card — cancel request",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/card/v1/cards/virtual/requests/:requestId",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "card",
+                "v1",
+                "cards",
+                "virtual",
+                "requests",
+                ":requestId"
+              ],
+              "variable": [
+                {
+                  "key": "requestId",
+                  "value": "{{requestId}}"
+                }
+              ]
+            },
+            "description": "**Method:** DELETE — **CONFIRMED**\n**Endpoint:** `card/v1/cards/virtual/requests/{id}` (`id` = request ID)"
+          },
+          "response": []
+        },
+        {
+          "name": "4.18 · Virtual card — reveal details",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/card/v1/cards/virtual/requests/:requestId/reveal",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "card",
+                "v1",
+                "cards",
+                "virtual",
+                "requests",
+                ":requestId",
+                "reveal"
+              ],
+              "variable": [
+                {
+                  "key": "requestId",
+                  "value": "{{requestId}}"
+                }
+              ]
+            },
+            "description": "**Method:** GET — **CONFIRMED**\n**Endpoint:** `card/v1/cards/virtual/requests/{id}/reveal`"
+          },
+          "response": []
+        },
+        {
+          "name": "4.19 · Star card for quick view",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/card/v1/cards/:cardId/quick-view?isStarred=true",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "card",
+                "v1",
+                "cards",
+                ":cardId",
+                "quick-view"
+              ],
+              "query": [
+                {
+                  "key": "isStarred",
+                  "value": "true"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "cardId",
+                  "value": "{{cardId}}"
+                }
+              ]
+            },
+            "description": "**Method:** PUT — **CONFIRMED**\n**Endpoint:** `card/v1/cards/{id}/quick-view`\n**Query params:** `isStarred` (boolean, **required**)\n**Body:** none. The flag is a **query param** here, unlike the account quick view (1.5), where it goes in the body. The app sends an empty `{}` body.\n**Source:** `card/…/CardController.java` `toggleQuickView()`"
+          },
+          "response": []
+        },
+        {
+          "name": "4.20 · Credit card bill payment (card service)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/card/v1/cards/:cardId/credit-card/payment",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "card",
+                "v1",
+                "cards",
+                ":cardId",
+                "credit-card",
+                "payment"
+              ],
+              "variable": [
+                {
+                  "key": "cardId",
+                  "value": "{{cardId}}"
+                }
+              ]
+            },
+            "description": "**Purpose:** Pay a credit card's outstanding balance from a source account.\n**Method:** POST — **CONFIRMED**\n**Endpoint:** `card/v1/cards/{id}/credit-card/payment`\n**Body (`CreditCardPaymentRequest`):**\n\n| Field | Type | Required | Notes |\n|---|---|---|---|\n| `paymentType` | String (enum) | ✅ | `TOTAL_OUTSTANDING` \\| `STATEMENT_DUE` \\| `MINIMUM_DUE` |\n| `sourceAccountId` | String | ✅ | parsed with `Long.parseLong`, so it must be a **numeric** account ID sent as a string |\n| `idempotencyKey` | String | ✅ | client-generated UUID; a repeat returns the original payment |\n\n**Note:** the body has **no amount**. The amount comes from `paymentType`. No OTP or PIN is required by the DTO.\n**Source:** `card/…/CardController.java` `payCreditCard()`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"paymentType\": \"STATEMENT_DUE\",\n    \"sourceAccountId\": \"{{sourceAccountId}}\",\n    \"idempotencyKey\": \"{{$guid}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4.21 · Credit card bill payment (bill-payment service)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bill/v1/payment/card_payment",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bill",
+                "v1",
+                "payment",
+                "card_payment"
+              ]
+            },
+            "description": "**Purpose:** Pay a card bill through the generic bill-payment pipeline.\n**Method:** POST — **CONFIRMED**\n**Endpoint:** `bill/v1/payment/card_payment`. The backend route is `POST /bill/v1/payment/{category}`, and here `category = card_payment`.\n**Body (`PaymentRequest`):**\n\n| Field | Type | Required | Notes |\n|---|---|---|---|\n| `fromAccount` | String | ✅ | |\n| `billerReference` | String | — | ASSUMPTION: the card number being paid |\n| `operator` | String | — | not used for card payment (mobile recharge only) |\n| `connectionType` | enum | — | `PREPAID` \\| `POSTPAID`, for mobile recharge only |\n| `transactionTypeId` | String | ✅ | |\n| `amount` | Long (poisha) | ✅ | |\n| `verificationToken` | String | ✅ | |\n| `pin` | String | ✅ | |\n| `referenceNo`, `note`, `categoryId`, `customCategoryId` | — | — | optional |\n\n**Source:** `bill-payment/…/PaymentController.java` `pay()`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"fromAccount\": \"{{accountNumber}}\",\n    \"billerReference\": \"{{cardNumber}}\",\n    \"transactionTypeId\": \"{{transactionTypeId}}\",\n    \"amount\": 500000,\n    \"verificationToken\": \"{{verificationToken}}\",\n    \"pin\": \"{{transactionPin}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4.22 · ⚠️ QR payment cards — list",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/v1/user/qr-settings/cards",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "v1",
+                "user",
+                "qr-settings",
+                "cards"
+              ]
+            },
+            "description": "**Purpose:** List the user's cards with their \"enabled for QR payment\" flag.\n**Method:** GET (from the app's `security_http_impl.dart` `getCards()`)\n**Endpoint:** `auth/v1/user/qr-settings/cards`\n**Status:** No controller in `auth/`, or anywhere else in the monorepo, maps `qr-settings`. The app falls back to local data (`_fallbackCardsOrFailure`) when the call fails."
+          },
+          "response": []
+        },
+        {
+          "name": "4.23 · ⚠️ QR payment card — enable/disable",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/v1/user/qr-settings/cards/:cardId",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "v1",
+                "user",
+                "qr-settings",
+                "cards",
+                ":cardId"
+              ],
+              "variable": [
+                {
+                  "key": "cardId",
+                  "value": "{{cardId}}"
+                }
+              ]
+            },
+            "description": "**Method:** PUT (from the app's `setCardEnabled()`)\n**Endpoint:** `auth/v1/user/qr-settings/cards/{id}`\n**Body (what the app sends):** `enabledForQr` (Boolean). The server contract is unconfirmed because the endpoint doesn't exist.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"enabledForQr\": true\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "05 · Card Replacement",
+      "description": "**Intent:** `CARD_REPLACEMENT`\n\n\n",
+      "item": [
+        {
+          "name": "5.1 · List replacement requests",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/card/v1/cards/replacement-requests?page=0&size=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "card",
+                "v1",
+                "cards",
+                "replacement-requests"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "**Method:** GET — **CONFIRMED**\n**Endpoint:** `card/v1/cards/replacement-requests`\n**Query params:** `page` (default 0), `size` (default 10)\n**Source:** `card/…/CardReplacementController.java` `listMine()`"
+          },
+          "response": []
+        },
+        {
+          "name": "5.2 · Cancel replacement request",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/card/v1/cards/replacement-requests/:requestId",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "card",
+                "v1",
+                "cards",
+                "replacement-requests",
+                ":requestId"
+              ],
+              "variable": [
+                {
+                  "key": "requestId",
+                  "value": "{{requestId}}"
+                }
+              ]
+            },
+            "description": "**Method:** DELETE — **CONFIRMED**\n**Endpoint:** `card/v1/cards/replacement-requests/{id}` (`id` = replacement request ID)\n**Source:** `card/…/CardReplacementController.java` `cancel()`"
+          },
+          "response": []
+        },
+        {
+          "name": "5.3 · Reveal replacement card details",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/card/v1/cards/replacement-requests/:requestId/reveal",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "card",
+                "v1",
+                "cards",
+                "replacement-requests",
+                ":requestId",
+                "reveal"
+              ],
+              "variable": [
+                {
+                  "key": "requestId",
+                  "value": "{{requestId}}"
+                }
+              ]
+            },
+            "description": "**Method:** GET — **CONFIRMED**\n**Endpoint:** `card/v1/cards/replacement-requests/{id}/reveal`\n**Source:** `card/…/CardReplacementController.java` `reveal()`"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "06 · Check Balance",
+      "description": "**Intent:** `CHECK_BALANCE`\n\n\n",
+      "item": [
+        {
+          "name": "6.1 · Account balance",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transfer/v1/accounting/balance",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transfer",
+                "v1",
+                "accounting",
+                "balance"
+              ]
+            },
+            "description": "**Purpose:** Current ledger balance of an account.\n**Method:** **POST** — **CONFIRMED**. The endpoint is a read, but the account number goes in a JSON body.\n**Endpoint:** `transfer/v1/accounting/balance`\n**Body (`BalanceRequest`):** `accountNumber` (String, ✅)\n**Source:** `fund-transfer/…/AccountingController.java` `getBalance()`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"accountNumber\": \"{{accountNumber}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "6.2 · Credit card summary",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/card/v1/cards/:cardId/credit-summary",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "card",
+                "v1",
+                "cards",
+                ":cardId",
+                "credit-summary"
+              ],
+              "variable": [
+                {
+                  "key": "cardId",
+                  "value": "{{cardId}}"
+                }
+              ]
+            },
+            "description": "**Purpose:** Credit limit, outstanding balance and available credit.\n**Method:** GET — **CONFIRMED**\n**Endpoint:** `card/v1/cards/{id}/credit-summary`\n**Source:** `card/…/CardController.java` `getCreditSummary()`"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "07 · Edit Personal Details",
+      "description": "**Intent:** `EDIT_PERSONAL_DETAILS`\n\n\n",
+      "item": [
+        {
+          "name": "7.1 · Get profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/v1/user",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "v1",
+                "user"
+              ]
+            },
+            "description": "**Method:** GET — **CONFIRMED**\n**Endpoint:** `auth/v1/user`\n**Source:** `auth/…/UserManagementController.java` `getMyProfile()`"
+          },
+          "response": []
+        },
+        {
+          "name": "7.2 · Update nickname",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/v1/user/profile/nickname",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "v1",
+                "user",
+                "profile",
+                "nickname"
+              ]
+            },
+            "description": "**Method:** PATCH — **CONFIRMED**\n**Endpoint:** `auth/v1/user/profile/nickname`\n**Body (`NickNameUpdateRequest`):** `nickName` (String, ✅). Note the capital **N**.\n**Source:** `auth/…/UserManagementController.java` `updateMyNickName()`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"nickName\": \"{{nickname}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "7.3 · Upload profile image (PATCH)",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/v1/user/profile/image",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "v1",
+                "user",
+                "profile",
+                "image"
+              ]
+            },
+            "description": "**Method:** PATCH — **CONFIRMED**\n**Endpoint:** `auth/v1/user/profile/image`\n**Content type:** `multipart/form-data` with the part named **`file`**\n**Source:** `auth/…/UserManagementController.java` `uploadProfileImage()`",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "/path/to/profile.jpg",
+                  "description": "Pick a file in Postman before sending"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "7.4 · Upload profile image (POST variant)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/v1/user/profile/image",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "v1",
+                "user",
+                "profile",
+                "image"
+              ]
+            },
+            "description": "**Method:** POST — **CONFIRMED**. The same path also accepts POST, but with a **different part name**.\n**Content type:** `multipart/form-data` with the part named **`image`**\n**Source:** `auth/…/UserManagementController.java` `uploadProfileImagePost()`",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "image",
+                  "type": "file",
+                  "src": "/path/to/profile.jpg",
+                  "description": "Pick a file in Postman before sending"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "7.5 · Update mobile number",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/v1/auth/mobile/update",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "v1",
+                "auth",
+                "mobile",
+                "update"
+              ]
+            },
+            "description": "**Method:** POST — **CONFIRMED**\n**Endpoint:** `auth/v1/auth/mobile/update`\n**Body (`UpdateMobileRequest`):** `newPhone` (✅, `^01[3-9]\\d{8}$`), `verificationToken` (✅; ASSUMPTION: from an OTP sent to the **new** number)\n**Source:** `auth/…/UserAuthController.java` `updateMobile()`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"newPhone\": \"01812345678\",\n    \"verificationToken\": \"{{verificationToken}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "7.6 · Update email address",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/v1/auth/email/update",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "v1",
+                "auth",
+                "email",
+                "update"
+              ]
+            },
+            "description": "**Method:** POST — **CONFIRMED**\n**Endpoint:** `auth/v1/auth/email/update`\n**Body (`UpdateEmailRequest`):** `newEmail` (✅, valid email), `verificationToken` (✅)\n**Source:** `auth/…/UserAuthController.java` `updateEmail()`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"newEmail\": \"user@example.com\",\n    \"verificationToken\": \"{{verificationToken}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "7.7 · Get address (demographic profile)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customer/v1/me/demographic",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customer",
+                "v1",
+                "me",
+                "demographic"
+              ]
+            },
+            "description": "**Method:** GET — **CONFIRMED**\n**Endpoint:** `customer/v1/me/demographic`\n**Source:** `customer/…/CustomerDemographicController.java` `getDemographic()`"
+          },
+          "response": []
+        },
+        {
+          "name": "7.8 · Update address (demographic profile)",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customer/v1/me/demographic",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customer",
+                "v1",
+                "me",
+                "demographic"
+              ]
+            },
+            "description": "**Method:** PATCH — **CONFIRMED**\n**Endpoint:** `customer/v1/me/demographic`\n**Body (`UpdateDemographicRequest`, all optional, partial update):** `presentAddress`, `permanentAddress`, `district`, `division` (Strings), `preferredBankingMode` (`CONVENTIONAL` \\| `ISLAMIC`)\n**Source:** `customer/…/CustomerDemographicController.java` `updateDemographic()`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"presentAddress\": \"{{presentAddress}}\",\n    \"permanentAddress\": \"{{permanentAddress}}\",\n    \"district\": \"{{district}}\",\n    \"division\": \"{{division}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "7.9 · Submit KYC",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customer/v1/me/kyc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customer",
+                "v1",
+                "me",
+                "kyc"
+              ]
+            },
+            "description": "**Method:** POST — **CONFIRMED**\n**Endpoint:** `customer/v1/me/kyc`\n**Content type:** `multipart/form-data`\n**Parts:**\n\n| Part | Type | Required | Notes |\n|---|---|---|---|\n| `nidFront` | file | ✅ | |\n| `nidBack` | file | ✅ | |\n| `signature` | file | ✅ | |\n| `occupation` | text | — | F-093 expected-transaction profile |\n| `sourceOfFund` | text | — | |\n| `monthlyIncome` | decimal, **poisha** | — | |\n| `expectedMonthlyTurnover` | decimal, **poisha** | — | |\n\nThis list is complete (`CustomerDemographicController.java:72-82`).\n**Source:** `customer/…/CustomerDemographicController.java` `submitKyc()`",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "nidFront",
+                  "type": "file",
+                  "src": "/path/to/nid_front.jpg",
+                  "description": "Pick a file in Postman before sending"
+                },
+                {
+                  "key": "nidBack",
+                  "type": "file",
+                  "src": "/path/to/nid_back.jpg",
+                  "description": "Pick a file in Postman before sending"
+                },
+                {
+                  "key": "signature",
+                  "type": "file",
+                  "src": "/path/to/signature.png",
+                  "description": "Pick a file in Postman before sending"
+                },
+                {
+                  "key": "occupation",
+                  "type": "text",
+                  "value": "{{occupation}}"
+                },
+                {
+                  "key": "sourceOfFund",
+                  "type": "text",
+                  "value": "{{sourceOfFund}}"
+                },
+                {
+                  "key": "monthlyIncome",
+                  "type": "text",
+                  "value": "{{monthlyIncome}}"
+                },
+                {
+                  "key": "expectedMonthlyTurnover",
+                  "type": "text",
+                  "value": "{{expectedMonthlyTurnover}}"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "7.10 · My contacts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customer/v1/me/contacts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "customer",
+                "v1",
+                "me",
+                "contacts"
+              ]
+            },
+            "description": "**Purpose:** List the customer's registered contacts (phones/emails). Its IDs feed 7.13.\n**Method:** GET — **CONFIRMED**\n**Endpoint:** `customer/v1/me/contacts`\n**Source:** `customer/…/CustomerSelfController.java` `contacts()`"
+          },
+          "response": []
+        },
+        {
+          "name": "7.11 · Profile change — submit request",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/service-request/v1/profile-changes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "service-request",
+                "v1",
+                "profile-changes"
+              ]
+            },
+            "description": "**Purpose:** Request a change to a KYC-controlled field (maker-checker).\n**Method:** POST — **CONFIRMED**\n**Endpoint:** `service-request/v1/profile-changes`\n**Body (`RegisterProfileChangeRequest`):**\n\n| Field | Type | Required | Notes |\n|---|---|---|---|\n| `fieldName` | enum | ✅ | `MOBILE` \\| `EMAIL` \\| `NID` \\| `LEGAL_NAME` \\| `DOB` |\n| `requestedValue` | String | ✅ | |\n| `reason` | String | ✅ | |\n| `otpType` | enum | ✅ | `SMS` \\| `EMAIL` |\n| `verificationToken` | String | ✅ | |\n\n**Source:** `service-request/…/ProfileChangeController.java` `submit()`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"fieldName\": \"LEGAL_NAME\",\n    \"requestedValue\": \"{{newValue}}\",\n    \"reason\": \"{{reason}}\",\n    \"otpType\": \"SMS\",\n    \"verificationToken\": \"{{verificationToken}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "7.12 · Profile change — list my requests",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/service-request/v1/profile-changes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "service-request",
+                "v1",
+                "profile-changes"
+              ]
+            },
+            "description": "**Method:** GET — **CONFIRMED** · no params\n**Source:** `service-request/…/ProfileChangeController.java` `getOwnRequests()`"
+          },
+          "response": []
+        },
+        {
+          "name": "7.13 · Contact priority — submit request",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/service-request/v1/contact-priority",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "service-request",
+                "v1",
+                "contact-priority"
+              ]
+            },
+            "description": "**Purpose:** Make one of the customer's contacts the primary one.\n**Method:** POST — **CONFIRMED**\n**Endpoint:** `service-request/v1/contact-priority`\n**Body (`RegisterContactPriorityRequest`):** `contactId` (Long, ✅, from 7.10), `reason` (✅), `otpType` (✅, `SMS` \\| `EMAIL`), `verificationToken` (✅)\n**Source:** `service-request/…/ContactPriorityController.java` `submit()`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"contactId\": {{contactId}},\n    \"reason\": \"{{reason}}\",\n    \"otpType\": \"SMS\",\n    \"verificationToken\": \"{{verificationToken}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "7.14 · Contact priority — list my requests",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/service-request/v1/contact-priority",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "service-request",
+                "v1",
+                "contact-priority"
+              ]
+            },
+            "description": "**Method:** GET — **CONFIRMED** · no params"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "08 · Failed Transfer  (partial)",
+      "description": "**Intent:** `FAILED_TRANSFER`\n\n\n**PARTIAL INTENT.** There is **no API to look up, re-check or retry one specific transfer** by ID. The bot has to\n**borrow** the transaction list (to find the transfer and read its status) from MINI_STATEMENT, plus disputes\n(service-request) and complaints (support).\n\n",
+      "item": [
+        {
+          "name": "8.1 · Transaction history (read transfer status)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transfer/v1/accounting/transaction-list?accountNumber={{accountNumber}}&page=0&size=10&isDownload=false&start=2026-09-01&end=2026-09-29",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transfer",
+                "v1",
+                "accounting",
+                "transaction-list"
+              ],
+              "query": [
+                {
+                  "key": "accountNumber",
+                  "value": "{{accountNumber}}"
+                },
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "10"
+                },
+                {
+                  "key": "isDownload",
+                  "value": "false"
+                },
+                {
+                  "key": "start",
+                  "value": "2026-09-01"
+                },
+                {
+                  "key": "end",
+                  "value": "2026-09-29"
+                }
+              ]
+            },
+            "description": "**Method:** GET — **CONFIRMED**\n**Endpoint:** `transfer/v1/accounting/transaction-list`\n**Query params:**\n\n| Param | Type | Required | Default | Notes |\n|---|---|---|---|---|\n| `accountNumber` | String | ✅ | — | account or card number |\n| `page` | int | — | `0` | |\n| `size` | int | — | `10` | |\n| `start` | String | — | — | `yyyy-MM-dd` |\n| `end` | String | — | — | `yyyy-MM-dd` |\n| `isDownload` | boolean | — | `false` | `true` returns a file (PDF) instead of JSON |\n\n**Source:** `fund-transfer/…/AccountingController.java` `getTransactionListPdf()`"
+          },
+          "response": []
+        },
+        {
+          "name": "8.2 · Raise dispute",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/service-request/v1/disputes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "service-request",
+                "v1",
+                "disputes"
+              ]
+            },
+            "description": "**Method:** POST — **CONFIRMED** (contract in 2.2)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"accountNumber\": \"{{accountNumber}}\",\n    \"transactionReferenceNo\": \"{{transactionReferenceNo}}\",\n    \"category\": \"AMOUNT_MISMATCH\",\n    \"remarks\": \"Transfer debited but not received by beneficiary\",\n    \"otpType\": \"SMS\",\n    \"verificationToken\": \"{{verificationToken}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "8.3 · List disputes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/service-request/v1/disputes?accountNumber={{accountNumber}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "service-request",
+                "v1",
+                "disputes"
+              ],
+              "query": [
+                {
+                  "key": "accountNumber",
+                  "value": "{{accountNumber}}"
+                }
+              ]
+            },
+            "description": "**Method:** GET — **CONFIRMED** (`accountNumber` required)"
+          },
+          "response": []
+        },
+        {
+          "name": "8.4 · Submit complaint",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/support/v1/complaints",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "support",
+                "v1",
+                "complaints"
+              ]
+            },
+            "description": "**Method:** POST — **CONFIRMED** (contract in 3.5)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"category\": \"TRANSACTION\",\n    \"description\": \"{{description}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "8.5 · My complaints",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/support/v1/complaints",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "support",
+                "v1",
+                "complaints"
+              ]
+            },
+            "description": "**Method:** GET — **CONFIRMED**"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "09 · Fallback (AI · FAQ · Complaint)",
+      "description": "**Intent:** `FALLBACK`\n\n\n",
+      "item": [
+        {
+          "name": "9.1 · Polygon AI chat (logged in)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "text/event-stream"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/support/v1/ai/chat",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "support",
+                "v1",
+                "ai",
+                "chat"
+              ]
+            },
+            "description": "**Purpose:** RAG-backed AI assistant. It streams its answer as **Server-Sent Events**.\n**Method:** POST — **CONFIRMED** (`produces = text/event-stream`)\n**Endpoint:** `support/v1/ai/chat`\n**Headers:** `Authorization`, `Content-Type: application/json`, `Accept: text/event-stream`. The controller reads `Authorization` itself (`required = false`), and Kong's JWT plugin still applies on `support-api`.\n**Body (`AiChatRequest`):**\n\n| Field | Type | Required | Notes |\n|---|---|---|---|\n| `message` | String | ✅ | max 2000 |\n| `sessionKey` | String | — | reuse it to continue a conversation |\n| `topK` | Integer | — | 1–20 |\n| `category`, `service`, `subservice` | String | — | max 100 each |\n| `payload` | object | — | free-form map |\n\n**Source:** `support/…/AiChatController.java` `chat()`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"message\": \"How do I block my card?\",\n    \"sessionKey\": \"{{sessionKey}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "9.2 · Polygon AI chat (before login)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "text/event-stream"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/support/v1/ai/public/chat",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "support",
+                "v1",
+                "ai",
+                "public",
+                "chat"
+              ]
+            },
+            "description": "**Method:** POST — **CONFIRMED** (SSE)\n**Endpoint:** `support/v1/ai/public/chat`\n**Auth:** **none**. Kong route `support-ai-public` has no JWT and is rate-limited to 10 req/min per IP.\n**Body:** `AiChatRequest` (same as 9.1)\n**Source:** `support/…/PublicAiChatController.java` `chat()`",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"message\": \"What are your branch hours?\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "9.3 · Polygon AI status (logged in)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/support/v1/ai/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "support",
+                "v1",
+                "ai",
+                "status"
+              ]
+            },
+            "description": "**Method:** GET — **CONFIRMED**\n**Endpoint:** `support/v1/ai/status`\n**Source:** `support/…/AiChatController.java` `status()`"
+          },
+          "response": []
+        },
+        {
+          "name": "9.4 · Polygon AI status (public)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/support/v1/ai/public/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "support",
+                "v1",
+                "ai",
+                "public",
+                "status"
+              ]
+            },
+            "description": "**Method:** GET — **CONFIRMED** · **no auth**\n**Endpoint:** `support/v1/ai/public/status`\n**Source:** `support/…/PublicAiChatController.java` `status()`",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "9.5 · FAQ categories",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/support/v1/faq-categories",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "support",
+                "v1",
+                "faq-categories"
+              ]
+            },
+            "description": "**Method:** GET — **CONFIRMED**\n**Endpoint:** `support/v1/faq-categories` · no params\n**Source:** `support/…/FaqController.java`"
+          },
+          "response": []
+        },
+        {
+          "name": "9.6 · FAQs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/support/v1/faqs?categoryId={{categoryId}}&search={{searchText}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "support",
+                "v1",
+                "faqs"
+              ],
+              "query": [
+                {
+                  "key": "categoryId",
+                  "value": "{{categoryId}}"
+                },
+                {
+                  "key": "search",
+                  "value": "{{searchText}}"
+                }
+              ]
+            },
+            "description": "**Method:** GET — **CONFIRMED**\n**Endpoint:** `support/v1/faqs`\n**Query params (optional):** `categoryId` (Long), `search` (String)\n**Source:** `support/…/FaqController.java`"
+          },
+          "response": []
+        },
+        {
+          "name": "9.7 · Submit complaint",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/support/v1/complaints",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "support",
+                "v1",
+                "complaints"
+              ]
+            },
+            "description": "**Method:** POST — **CONFIRMED** (contract in 3.5)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"category\": \"OTHER\",\n    \"description\": \"{{description}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "10 · Fees",
+      "description": "**Intent:** `FEES`\n\n\n",
+      "item": [
+        {
+          "name": "10.1 · Transaction charge quote by type and amount",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transfer/v1/transaction-type/charge-with-amount?appSettingsId={{transactionTypeId}}&amount=100000",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transfer",
+                "v1",
+                "transaction-type",
+                "charge-with-amount"
+              ],
+              "query": [
+                {
+                  "key": "appSettingsId",
+                  "value": "{{transactionTypeId}}"
+                },
+                {
+                  "key": "amount",
+                  "value": "100000"
+                }
+              ]
+            },
+            "description": "**Purpose:** Calculate the total fee/charge for a transaction type and amount before the user confirms.\n**Method:** GET — **CONFIRMED**\n**Endpoint:** `transfer/v1/transaction-type/charge-with-amount`\n**Query params:**\n\n| Param | Type | Required | Notes |\n|---|---|---|---|\n| `appSettingsId` | String | ✅ | the same admin-configured ID used as `transactionTypeId` in transfer bodies |\n| `amount` | Long | ✅ | **poisha** (the app sends `amount.inPoisha`) |\n\n**Source:** `fund-transfer/…/TransactionTypeController.java` `getTotalFeeByTransactionCode()`"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "11 · Greeting",
+      "description": "**Intent:** `GREETING`\n\n\n**No API / No cURL required.** The chatbot handles greetings directly in conversation.\n\n\n",
+      "item": []
+    },
+    {
+      "name": "12 · Lost or Stolen Card",
+      "description": "**Intent:** `LOST_OR_STOLEN_CARD`\n\n\n",
+      "item": [
+        {
+          "name": "12.1 · Report lost/stolen card",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/card/v1/cards/:cardId/replacement-requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "card",
+                "v1",
+                "cards",
+                ":cardId",
+                "replacement-requests"
+              ],
+              "variable": [
+                {
+                  "key": "cardId",
+                  "value": "{{cardId}}"
+                }
+              ]
+            },
+            "description": "**Purpose:** Report a card lost or stolen and open a replacement request.\n**Method:** POST — **CONFIRMED** (`201 Created`)\n**Endpoint:** `card/v1/cards/{id}/replacement-requests`\n**Path params:** `id` → backend `cardId` (Long)\n**Body (`ReportLostStolenCardRequest`):**\n\n| Field | Type | Required | Notes |\n|---|---|---|---|\n| `reasonCode` | enum | ✅ | `LOST` \\| `STOLEN` \\| `DAMAGED` \\| `EXPIRED` \\| `OTHER` |\n| `verificationToken` | String | ✅ | |\n| `pin` / `password` | String | — | see 3.1 ASSUMPTION |\n\n**Source:** `card/…/CardReplacementController.java` `report()`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"reasonCode\": \"STOLEN\",\n    \"pin\": \"{{transactionPin}}\",\n    \"verificationToken\": \"{{verificationToken}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "12.2 · Freeze card immediately",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/card/v1/cards/:cardId/freeze",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "card",
+                "v1",
+                "cards",
+                ":cardId",
+                "freeze"
+              ],
+              "variable": [
+                {
+                  "key": "cardId",
+                  "value": "{{cardId}}"
+                }
+              ]
+            },
+            "description": "**Method:** PATCH — **CONFIRMED** (contract in 4.1)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"reasonCode\": \"OTHER\",\n    \"pin\": \"{{transactionPin}}\",\n    \"verificationToken\": \"{{verificationToken}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "13 · Mini Statement",
+      "description": "**Intent:** `MINI_STATEMENT`\n\n\n",
+      "item": [
+        {
+          "name": "13.1 · Transaction list (paginated, date range)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transfer/v1/accounting/transaction-list?accountNumber={{accountNumber}}&page=0&size=10&isDownload=false&start=<YYYY-MM-DD>&end=<YYYY-MM-DD>",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transfer",
+                "v1",
+                "accounting",
+                "transaction-list"
+              ],
+              "query": [
+                {
+                  "key": "accountNumber",
+                  "value": "{{accountNumber}}"
+                },
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "10"
+                },
+                {
+                  "key": "isDownload",
+                  "value": "false"
+                },
+                {
+                  "key": "start",
+                  "value": "<YYYY-MM-DD>"
+                },
+                {
+                  "key": "end",
+                  "value": "<YYYY-MM-DD>"
+                }
+              ]
+            },
+            "description": "**Method:** GET — **CONFIRMED** (full parameter table in 8.1)"
+          },
+          "response": []
+        },
+        {
+          "name": "13.2 · Account transactions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/polygon-bank/v1/accounts/:accountId/transactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "polygon-bank",
+                "v1",
+                "accounts",
+                ":accountId",
+                "transactions"
+              ],
+              "variable": [
+                {
+                  "key": "accountId",
+                  "value": "{{accountId}}"
+                }
+              ]
+            },
+            "description": "**Method:** GET — **CONFIRMED**\n**Endpoint:** `polygon-bank/v1/accounts/{id}/transactions`\n**Path params:** `id` (Long, internal account ID)\n**Query params:** **none**. The controller takes no paging or date-range params.\n**Source:** `polygon-bank/…/AccountController.java` `getTransactions()`"
+          },
+          "response": []
+        },
+        {
+          "name": "13.3 · Credit card statement (billed/unbilled)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/card/v1/cards/:cardId/statements?isBilled=true&month=2026-09",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "card",
+                "v1",
+                "cards",
+                ":cardId",
+                "statements"
+              ],
+              "query": [
+                {
+                  "key": "isBilled",
+                  "value": "true"
+                },
+                {
+                  "key": "month",
+                  "value": "2026-09"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "cardId",
+                  "value": "{{cardId}}"
+                }
+              ]
+            },
+            "description": "**Method:** GET — **CONFIRMED**\n**Endpoint:** `card/v1/cards/{id}/statements`\n**Query params:** `isBilled` (boolean, **required**), `month` (String `yyyy-MM`, **required**)\n**Source:** `card/…/CardController.java` `getStatement()`"
+          },
+          "response": []
+        },
+        {
+          "name": "13.4 · Expense tracker — category transactions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/report/v1/expense-tracker/categories/:categoryRef/transactions?month=2026-09",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "report",
+                "v1",
+                "expense-tracker",
+                "categories",
+                ":categoryRef",
+                "transactions"
+              ],
+              "query": [
+                {
+                  "key": "month",
+                  "value": "2026-09"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "categoryRef",
+                  "value": "{{categoryRef}}"
+                }
+              ]
+            },
+            "description": "**Method:** GET — **CONFIRMED**\n**Endpoint:** `report/v1/expense-tracker/categories/{ref}/transactions`\n**Path params:** `ref` → backend name `categoryId` (String; the app calls it `categoryRef`)\n**Query params:** `month` (String, **required**; `yyyy-MM` is an ASSUMPTION based on the app and the rest of the expense tracker)\n**Source:** `report/…/ExpenseTrackerController.java` `getCategoryTransactions()`"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "14 · Transfer",
+      "description": "**Intent:** `TRANSFER`\n\n\nAll money-moving bodies below share these fields: `fromAccount` (✅), `transactionTypeId` (✅), `amount` (Long poisha, ✅, > 0),\n`verificationToken` (✅), `pin` (✅), and the optional `referenceNo`, `note`, `categoryId` (Long), `customCategoryId`\n(expense-tracker tagging).\n\n",
+      "item": [
+        {
+          "name": "14.1 · Own account transfer",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transfer/v1/bank-transfer/own-account",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transfer",
+                "v1",
+                "bank-transfer",
+                "own-account"
+              ]
+            },
+            "description": "**Method:** POST — **CONFIRMED**\n**Endpoint:** `transfer/v1/bank-transfer/own-account`\n**Body (`OwnAccountTransferRequest`):** common fields + `toAccount` (✅)\n**Source:** `fund-transfer/…/OwnAccountTransferController.java`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"fromAccount\": \"{{fromAccountNumber}}\",\n    \"toAccount\": \"{{toAccountNumber}}\",\n    \"transactionTypeId\": \"{{transactionTypeId}}\",\n    \"amount\": 100000,\n    \"note\": \"{{note}}\",\n    \"verificationToken\": \"{{verificationToken}}\",\n    \"pin\": \"{{transactionPin}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "14.2 · City Bank transfer",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transfer/v1/bank-transfer/city-bank",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transfer",
+                "v1",
+                "bank-transfer",
+                "city-bank"
+              ]
+            },
+            "description": "**Method:** POST — **CONFIRMED**\n**Endpoint:** `transfer/v1/bank-transfer/city-bank`\n**Body (`CityBankTransferRequest`):** common fields + `sendToType` (✅, `ACCOUNT` \\| `MOBILE`) + `toAccount` (✅)\n**Source:** `fund-transfer/…/CityBankTransferController.java`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"fromAccount\": \"{{fromAccountNumber}}\",\n    \"sendToType\": \"ACCOUNT\",\n    \"toAccount\": \"{{toAccountNumber}}\",\n    \"transactionTypeId\": \"{{transactionTypeId}}\",\n    \"amount\": 100000,\n    \"verificationToken\": \"{{verificationToken}}\",\n    \"pin\": \"{{transactionPin}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "14.3 · Other bank transfer",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transfer/v1/bank-transfer/other-bank",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transfer",
+                "v1",
+                "bank-transfer",
+                "other-bank"
+              ]
+            },
+            "description": "**Method:** POST — **CONFIRMED**\n**Endpoint:** `transfer/v1/bank-transfer/other-bank`\n**Body (`OtherBankTransferRequest`):** common fields plus:\n\n| Field | Type | Required | Notes |\n|---|---|---|---|\n| `transferType` | enum | ✅ | `BEFTN` \\| `NPSB` \\| `RTGS` |\n| `beneficiaryName` | String | ✅ | |\n| `toAccount` | String | ✅ | |\n| `bankName` | String | ✅ | |\n| `district`, `branchName`, `routingNumber` | String | — | ASSUMPTION: routing is required by BEFTN/RTGS in practice; the DTO doesn't enforce it |\n\n**Source:** `fund-transfer/…/OtherBankTransferController.java`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"fromAccount\": \"{{fromAccountNumber}}\",\n    \"transferType\": \"NPSB\",\n    \"beneficiaryName\": \"{{beneficiaryName}}\",\n    \"toAccount\": \"{{toAccountNumber}}\",\n    \"bankName\": \"{{bankName}}\",\n    \"district\": \"{{district}}\",\n    \"branchName\": \"{{branchName}}\",\n    \"routingNumber\": \"{{routingNumber}}\",\n    \"transactionTypeId\": \"{{transactionTypeId}}\",\n    \"amount\": 100000,\n    \"verificationToken\": \"{{verificationToken}}\",\n    \"pin\": \"{{transactionPin}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "14.4 · ⚠️ Other banks list",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transfer/v1/other-banks",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transfer",
+                "v1",
+                "other-banks"
+              ]
+            },
+            "description": "**Method:** GET (from the app's `bank_transfer_http_impl.dart`)\n**Endpoint:** `transfer/v1/other-banks`\n**Status:** No controller in `fund-transfer/` (or anywhere else) maps `/transfer/v1/other-banks`. The request will 404 until it is built."
+          },
+          "response": []
+        },
+        {
+          "name": "14.5 · Gift transfer",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transfer/v1/bank-transfer/gift",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transfer",
+                "v1",
+                "bank-transfer",
+                "gift"
+              ]
+            },
+            "description": "**Method:** POST — **CONFIRMED**\n**Endpoint:** `transfer/v1/bank-transfer/gift`\n**Body (`GiftTransferRequest`):** common fields (**no `note`**) + `sendToType` (✅, `ACCOUNT` \\| `MOBILE`), `toAccount` (✅), `giftTemplateId` (≤ 50 chars), `wishMessage` (≤ 500 chars)\n**Source:** `fund-transfer/…/GiftTransferController.java` `transfer()`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"fromAccount\": \"{{fromAccountNumber}}\",\n    \"sendToType\": \"MOBILE\",\n    \"toAccount\": \"01712345678\",\n    \"giftTemplateId\": \"{{giftTemplateId}}\",\n    \"wishMessage\": \"Happy birthday!\",\n    \"transactionTypeId\": \"{{transactionTypeId}}\",\n    \"amount\": 50000,\n    \"verificationToken\": \"{{verificationToken}}\",\n    \"pin\": \"{{transactionPin}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "14.6 · Gifts received",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transfer/v1/bank-transfer/gift/received?page=0&size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transfer",
+                "v1",
+                "bank-transfer",
+                "gift",
+                "received"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "**Method:** GET — **CONFIRMED**\n**Endpoint:** `transfer/v1/bank-transfer/gift/received`\n**Query params:** `page` (default 0), `size` (default 10; the app sends 20)\n**Source:** `fund-transfer/…/GiftTransferController.java` `received()`"
+          },
+          "response": []
+        },
+        {
+          "name": "14.7 · Generic transaction",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transfer/v1/transactions/do-transaction",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transfer",
+                "v1",
+                "transactions",
+                "do-transaction"
+              ]
+            },
+            "description": "**Purpose:** Post a transaction of any configured type directly.\n**Method:** POST — **CONFIRMED**\n**Endpoint:** `transfer/v1/transactions/do-transaction`\n**Body (`TransactionRequest`):**\n\n| Field | Type | Required |\n|---|---|---|\n| `transactionTypeCode` | String | ✅ |\n| `fromAccount` | String | ✅ |\n| `toAccount` | String | ✅ |\n| `amount` | Long (poisha) | ✅ |\n| `referenceNo`, `note`, `transactionId`, `eventName`, `providedTrxnID` | String | — |\n\n**Note:** unlike every other transfer here, this DTO has **no `verificationToken` or `pin`**. The controller wasn't\nfully read for role restrictions, so confirm whether a USER token is allowed (**requires confirmation**).\n**Source:** `fund-transfer/…/TransactionsController.java` `doTransaction()`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"transactionTypeCode\": \"{{transactionTypeCode}}\",\n    \"fromAccount\": \"{{fromAccountNumber}}\",\n    \"toAccount\": \"{{toAccountNumber}}\",\n    \"amount\": 100000,\n    \"note\": \"{{note}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "14.8 · Linked account check",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transfer/v1/accounting/linked-account",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transfer",
+                "v1",
+                "accounting",
+                "linked-account"
+              ]
+            },
+            "description": "**Method:** POST — **CONFIRMED**\n**Endpoint:** `transfer/v1/accounting/linked-account`\n**Body (`CheckLinkedAccountRequest`):** `accountNumber` (✅)\n**Source:** `fund-transfer/…/BankTransferController.java` `checkLinkedAccount()`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"accountNumber\": \"{{accountNumber}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "14.9 · Email transfer — create",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transfer/v1/email-transfer",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transfer",
+                "v1",
+                "email-transfer"
+              ]
+            },
+            "description": "**Method:** POST — **CONFIRMED**\n**Endpoint:** `transfer/v1/email-transfer`\n**Body (`EmailTransferRequest`):** common fields + `recipientEmail` (✅, email), `securityQuestion` (✅), `securityAnswer` (✅)\n**Source:** `fund-transfer/…/EmailTransferController.java` `transfer()`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"fromAccount\": \"{{fromAccountNumber}}\",\n    \"recipientEmail\": \"recipient@example.com\",\n    \"securityQuestion\": \"{{securityQuestion}}\",\n    \"securityAnswer\": \"{{securityAnswer}}\",\n    \"transactionTypeId\": \"{{transactionTypeId}}\",\n    \"amount\": 100000,\n    \"verificationToken\": \"{{verificationToken}}\",\n    \"pin\": \"{{transactionPin}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "14.10 · Email transfer — list",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transfer/v1/email-transfer?tab=pending&page=0&size=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transfer",
+                "v1",
+                "email-transfer"
+              ],
+              "query": [
+                {
+                  "key": "tab",
+                  "value": "pending"
+                },
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "**Method:** GET — **CONFIRMED**\n**Endpoint:** `transfer/v1/email-transfer`\n**Query params:** `tab` (String, default `pending`; other allowed values not enumerated in the controller, **requires confirmation**), `page` (default 0), `size` (default 10)"
+          },
+          "response": []
+        },
+        {
+          "name": "14.11 · Email transfer — details",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transfer/v1/email-transfer/:emailTransferId",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transfer",
+                "v1",
+                "email-transfer",
+                ":emailTransferId"
+              ],
+              "variable": [
+                {
+                  "key": "emailTransferId",
+                  "value": "{{emailTransferId}}"
+                }
+              ]
+            },
+            "description": "**Method:** GET — **CONFIRMED**\n**Endpoint:** `transfer/v1/email-transfer/{id}` (`id` Long)"
+          },
+          "response": []
+        },
+        {
+          "name": "14.12 · Email transfer — cancel",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transfer/v1/email-transfer/:emailTransferId/cancel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transfer",
+                "v1",
+                "email-transfer",
+                ":emailTransferId",
+                "cancel"
+              ],
+              "variable": [
+                {
+                  "key": "emailTransferId",
+                  "value": "{{emailTransferId}}"
+                }
+              ]
+            },
+            "description": "**Method:** POST — **CONFIRMED**. It is POST, not DELETE.\n**Endpoint:** `transfer/v1/email-transfer/{id}/cancel` · no body"
+          },
+          "response": []
+        },
+        {
+          "name": "14.13 · Email transfer — resend notification",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transfer/v1/email-transfer/:emailTransferId/resend-notification",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transfer",
+                "v1",
+                "email-transfer",
+                ":emailTransferId",
+                "resend-notification"
+              ],
+              "variable": [
+                {
+                  "key": "emailTransferId",
+                  "value": "{{emailTransferId}}"
+                }
+              ]
+            },
+            "description": "**Method:** POST — **CONFIRMED**\n**Endpoint:** `transfer/v1/email-transfer/{id}/resend-notification` · no body"
+          },
+          "response": []
+        },
+        {
+          "name": "14.14 · Wallet/MFS transfer",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transfer/v1/wallet-transfer",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transfer",
+                "v1",
+                "wallet-transfer"
+              ]
+            },
+            "description": "**Method:** POST — **CONFIRMED**\n**Endpoint:** `transfer/v1/wallet-transfer`\n**Body (`WalletTransferRequest`):** common fields + `walletNumber` (✅, `^01[3-9]\\d{8}$`), `walletName` (optional), `walletTransferType` (optional, `DIRECT` \\| `NPSB`)\n**Source:** `fund-transfer/…/WalletTransferController.java` `transfer()`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"fromAccount\": \"{{fromAccountNumber}}\",\n    \"walletNumber\": \"01712345678\",\n    \"walletName\": \"{{walletHolderName}}\",\n    \"walletTransferType\": \"DIRECT\",\n    \"transactionTypeId\": \"{{transactionTypeId}}\",\n    \"amount\": 100000,\n    \"verificationToken\": \"{{verificationToken}}\",\n    \"pin\": \"{{transactionPin}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "14.15 · Wallet verify",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transfer/v1/wallet-transfer/verify?walletNumber=01712345678",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transfer",
+                "v1",
+                "wallet-transfer",
+                "verify"
+              ],
+              "query": [
+                {
+                  "key": "walletNumber",
+                  "value": "01712345678"
+                }
+              ]
+            },
+            "description": "**Method:** GET — **CONFIRMED**\n**Endpoint:** `transfer/v1/wallet-transfer/verify`\n**Query params:** `walletNumber` (String, **required**)\n**Source:** `fund-transfer/…/WalletTransferController.java` `verify()`"
+          },
+          "response": []
+        },
+        {
+          "name": "14.16 · QR pay",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/merchant/v1/qr/pay",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "merchant",
+                "v1",
+                "qr",
+                "pay"
+              ]
+            },
+            "description": "**Method:** POST — **CONFIRMED**\n**Endpoint:** `merchant/v1/qr/pay`\n**Body (`QrPayRequest`):**\n\n| Field | Type | Required | Notes |\n|---|---|---|---|\n| `referenceId` | String | ✅ | from the 14.17 parse response |\n| `fromAccountId` | String | ✅ | |\n| `amount` | BigDecimal | ✅ | **taka**, ≥ 0.01. The app sends a string such as `\"500.00\"`. This is the one exception to the poisha rule |\n| `remarks` | String | — | |\n| `pin` | String | ✅ | |\n| `verificationToken` | String | ✅ | |\n\n**Source:** `merchant/…/QrController.java` `payByQr()`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"referenceId\": \"{{qrReferenceId}}\",\n    \"fromAccountId\": \"{{fromAccountId}}\",\n    \"amount\": \"500.00\",\n    \"remarks\": \"{{remarks}}\",\n    \"pin\": \"{{transactionPin}}\",\n    \"verificationToken\": \"{{verificationToken}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "14.17 · QR parse",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/merchant/v1/qr/parse",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "merchant",
+                "v1",
+                "qr",
+                "parse"
+              ]
+            },
+            "description": "**Method:** POST — **CONFIRMED**\n**Endpoint:** `merchant/v1/qr/parse`\n**Body (`ParseQrRequest`):** `rawData` (String, ✅, the raw EMV/Bangla QR payload that was scanned)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"rawData\": \"{{rawQrString}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "14.18 · QR payment history",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/merchant/v1/qr/history?page=0&size=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "merchant",
+                "v1",
+                "qr",
+                "history"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "**Method:** GET — **CONFIRMED**\n**Endpoint:** `merchant/v1/qr/history` · **Query:** `page` (default 0), `size` (default 20)"
+          },
+          "response": []
+        },
+        {
+          "name": "14.19 · Beneficiary — list",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/beneficiary/v1/beneficiaries?serviceType=OTHER_BANK",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "beneficiary",
+                "v1",
+                "beneficiaries"
+              ],
+              "query": [
+                {
+                  "key": "serviceType",
+                  "value": "OTHER_BANK"
+                }
+              ]
+            },
+            "description": "**Method:** GET — **CONFIRMED**\n**Endpoint:** `beneficiary/v1/beneficiaries`\n**Query params:** `serviceType` (optional enum: `OWN_BANK` \\| `OTHER_BANK` \\| `MFS` \\| `CLUB_FEE` \\| `DONATION` \\| `EDUCATION_FEE` \\| `INSURANCE` \\| `UNIVERSAL_PENSION` \\| `ZAKAT` \\| `MOBILE_RECHARGE` \\| `CARD_PAYMENT`)\n**Source:** `beneficiary/…/BeneficiaryController.java` `list()`"
+          },
+          "response": []
+        },
+        {
+          "name": "14.20 · Beneficiary — add",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/beneficiary/v1/beneficiaries",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "beneficiary",
+                "v1",
+                "beneficiaries"
+              ]
+            },
+            "description": "**Method:** POST — **CONFIRMED** (`201 Created`)\n**Endpoint:** `beneficiary/v1/beneficiaries`\n**Body (`CreateBeneficiaryRequest`):**\n\n| Field | Type | Required | Notes |\n|---|---|---|---|\n| `serviceType` | enum | ✅ | see 14.19 |\n| `nickname` | String | ✅ | |\n| `identifierType` | enum | — | `CIF_NUMBER` \\| `NID` \\| `PASSPORT` \\| `MOBILE` \\| `EMAIL` \\| `ACCOUNT_NUMBER` \\| `CARD_NUMBER` \\| `LOAN_ACCOUNT` |\n| `accountNumber`, `accountHolderName` | String | — | |\n| `bankName`, `branchName`, `district`, `routingNumber` | String | — | OTHER_BANK |\n| `mfsProvider` | enum | — | MFS: `BKASH` \\| `NAGAD` \\| `ROCKET` \\| `MYCASH` \\| `SURECASH` \\| `TELECASH` \\| `OKWALLET` \\| `UPAY` |\n| `providerId` | String | — | biller-style types |\n\nWhich fields are required for each `serviceType` is checked in the service layer, not the DTO (**requires confirmation per type**).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"serviceType\": \"OTHER_BANK\",\n    \"nickname\": \"{{nickname}}\",\n    \"identifierType\": \"ACCOUNT_NUMBER\",\n    \"accountNumber\": \"{{accountNumber}}\",\n    \"accountHolderName\": \"{{accountHolderName}}\",\n    \"bankName\": \"{{bankName}}\",\n    \"branchName\": \"{{branchName}}\",\n    \"district\": \"{{district}}\",\n    \"routingNumber\": \"{{routingNumber}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "14.21 · Beneficiary — edit",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/beneficiary/v1/beneficiaries/:beneficiaryId",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "beneficiary",
+                "v1",
+                "beneficiaries",
+                ":beneficiaryId"
+              ],
+              "variable": [
+                {
+                  "key": "beneficiaryId",
+                  "value": "{{beneficiaryId}}"
+                }
+              ]
+            },
+            "description": "**Method:** PATCH — **CONFIRMED**\n**Endpoint:** `beneficiary/v1/beneficiaries/{id}` (`id` Long)\n**Body (`UpdateBeneficiaryRequest`):** `nickname` (✅). **Only the nickname can be edited.**",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"nickname\": \"{{newNickname}}\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "14.22 · Beneficiary — delete",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/beneficiary/v1/beneficiaries/:beneficiaryId",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "beneficiary",
+                "v1",
+                "beneficiaries",
+                ":beneficiaryId"
+              ],
+              "variable": [
+                {
+                  "key": "beneficiaryId",
+                  "value": "{{beneficiaryId}}"
+                }
+              ]
+            },
+            "description": "**Method:** DELETE — **CONFIRMED** (a soft delete, per `CLAUDE.md`)\n**Endpoint:** `beneficiary/v1/beneficiaries/{id}`"
+          },
+          "response": []
+        },
+        {
+          "name": "14.23 · Beneficiary — upload/change photo",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/beneficiary/v1/beneficiaries/:beneficiaryId/photo",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "beneficiary",
+                "v1",
+                "beneficiaries",
+                ":beneficiaryId",
+                "photo"
+              ],
+              "variable": [
+                {
+                  "key": "beneficiaryId",
+                  "value": "{{beneficiaryId}}"
+                }
+              ]
+            },
+            "description": "**Method:** PATCH — **CONFIRMED** (`consumes = multipart/form-data`)\n**Endpoint:** `beneficiary/v1/beneficiaries/{id}/photo`\n**Part:** `file`",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "/path/to/photo.jpg",
+                  "description": "Pick a file in Postman before sending"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "14.24 · Beneficiary — remove photo",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/beneficiary/v1/beneficiaries/:beneficiaryId/photo",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "beneficiary",
+                "v1",
+                "beneficiaries",
+                ":beneficiaryId",
+                "photo"
+              ],
+              "variable": [
+                {
+                  "key": "beneficiaryId",
+                  "value": "{{beneficiaryId}}"
+                }
+              ]
+            },
+            "description": "**Method:** DELETE — **CONFIRMED**\n**Endpoint:** `beneficiary/v1/beneficiaries/{id}/photo`"
+          },
+          "response": []
+        },
+        {
+          "name": "14.25 · Beneficiary — pin/unpin",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/beneficiary/v1/beneficiaries/:beneficiaryId/pin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "beneficiary",
+                "v1",
+                "beneficiaries",
+                ":beneficiaryId",
+                "pin"
+              ],
+              "variable": [
+                {
+                  "key": "beneficiaryId",
+                  "value": "{{beneficiaryId}}"
+                }
+              ]
+            },
+            "description": "**Purpose:** Pin a beneficiary to the top of the list. \"PIN\" here means **pinning**, not a security PIN.\n**Method:** PATCH — **CONFIRMED**\n**Endpoint:** `beneficiary/v1/beneficiaries/{id}/pin`\n**Body (`SetPinnedRequest`):** `pinned` (Boolean, ✅)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"pinned\": true\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "14.26 · Recipient lookup by account number",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/polygon-bank/v1/accounts/by-number/:accountNumber",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "polygon-bank",
+                "v1",
+                "accounts",
+                "by-number",
+                ":accountNumber"
+              ],
+              "variable": [
+                {
+                  "key": "accountNumber",
+                  "value": "{{accountNumber}}"
+                }
+              ]
+            },
+            "description": "**Method:** GET — **CONFIRMED**. This is the same endpoint as 1.3. The mapping writes the param as `{id}`, but the backend names it `{number}`, and it is a String account/card number.\n**Endpoint:** `polygon-bank/v1/accounts/by-number/{id}`"
+          },
+          "response": []
+        },
+        {
+          "name": "14.27 · My transfer limit — get",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transfer/v1/my-limit/:accountIdentifier",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transfer",
+                "v1",
+                "my-limit",
+                ":accountIdentifier"
+              ],
+              "variable": [
+                {
+                  "key": "accountIdentifier",
+                  "value": "{{accountIdentifier}}"
+                }
+              ]
+            },
+            "description": "**Method:** GET — **CONFIRMED**\n**Endpoint:** `transfer/v1/my-limit/{account}` → backend name `accountIdentifier` (String)\n**Source:** `fund-transfer/…/CustomerLimitController.java` `getMyLimit()`"
+          },
+          "response": []
+        },
+        {
+          "name": "14.28 · My transfer limit — request change",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transfer/v1/my-limit/:accountIdentifier",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transfer",
+                "v1",
+                "my-limit",
+                ":accountIdentifier"
+              ],
+              "variable": [
+                {
+                  "key": "accountIdentifier",
+                  "value": "{{accountIdentifier}}"
+                }
+              ]
+            },
+            "description": "**Method:** PUT — **CONFIRMED**. It uses the same path as 14.27; per rule 13 it is listed as a separate operation.\n**Endpoint:** `transfer/v1/my-limit/{account}`\n**Body (`ChangeLimitRequest`):** fields **not read** during verification (**requires confirmation**). Per `CLAUDE.md` (F-093), the request is risk-capped through a gRPC call to `customer-service`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"<field>\": \"<value>\"\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "14.29 · My transfer limit — cancel pending change",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/transfer/v1/my-limit/pending/:requestId",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transfer",
+                "v1",
+                "my-limit",
+                "pending",
+                ":requestId"
+              ],
+              "variable": [
+                {
+                  "key": "requestId",
+                  "value": "{{requestId}}"
+                }
+              ]
+            },
+            "description": "**Method:** DELETE — **CONFIRMED**\n**Endpoint:** `transfer/v1/my-limit/pending/{id}` (`id` Long, the pending request ID from the 14.27 response)\n**Source:** `fund-transfer/…/CustomerLimitController.java` `cancelPendingChange()`"
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
