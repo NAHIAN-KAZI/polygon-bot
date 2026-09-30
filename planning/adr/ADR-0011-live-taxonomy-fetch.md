@@ -50,5 +50,31 @@ catalog remains the sole source for every navigable service; only these 4 fixed,
 account features are ever added synthetically, and they're documented here precisely so this
 doesn't grow into an uncontrolled parallel taxonomy later.
 
+## Amendment 2026-09-29 (T-41): extending the exception to the fee-quote endpoint
+
+The bank's API team supplied a full endpoint mapping for 14 new chatbot intents
+(`planning/input/Internet Banking API cURL Reference.md` + the companion "API
+Intent Mapping" reference), being implemented one at a time starting with
+`FEES`. Its real endpoint, `GET transfer/v1/transaction-type/charge-with-amount`,
+is confirmed live to return a real fee/charge quote for a transaction type +
+amount — but, like the 2026-09-01 amendment's 4 account features, it is never
+surfaced through `support/v1/services` or `support/v1/pay-transfer`: it's a
+standalone utility endpoint the app calls directly for a fee preview before a
+customer confirms a transaction, not a navigation-grid item. Confirmed by
+inspecting both live taxonomy responses directly — no `fees`-shaped category or
+service id exists in either.
+
+Same reasoning as the 2026-09-01 amendment, so the same narrow exception
+applies: append one more synthetic category, `fees` (service: `fee_quote`), to
+`_SYNTHETIC_CATEGORIES`. This amendment is what authorizes that addition —
+the "closed exception" language in `app/banking/taxonomy.py` and the
+banking-service-catalog agent's own rules were correctly enforced by
+refusing to extend the set without this amendment first.
+
+As the remaining 13 new intents get implemented, each one that similarly
+turns out to have no navigable-catalog entry (rather than being a genuine gap
+needing a fresh bank-side confirmation) will need its own dated amendment
+here, named per task — not a silent, unbounded extension of this exception.
+
 ## Related
 FR-CATALOG-01, FR-CATALOG-03, FR-CATALOG-05, FR-CATALOG-06, FR-CATALOG-07, NFR-MAINT-01, NFR-REL-02, F-02

@@ -103,7 +103,19 @@ def build_system_prompt(taxonomy: dict) -> str:
         '- "transfer 500 taka to Dipu" -> route_banking_service(category="polygon_services", '
         'service="beneficiary", payload={"nameQuery": "Dipu", "amount": 500})\n'
         '  (same pattern as above, plus the message also mentions an amount — include both '
-        'nameQuery and amount together in the same payload)'
+        'nameQuery and amount together in the same payload)\n'
+        '- "what\'s the fee for a bank transfer" -> route_banking_service(category="fees", '
+        'service="fee_quote", payload={"transactionType": "other_bank"})\n'
+        '- "how much does it cost to send money via bKash" -> route_banking_service('
+        'category="fees", service="fee_quote", payload={"transactionType": "bkash"})\n'
+        '  (put whatever transaction type the customer said verbatim into '
+        'payload.transactionType — do not normalize or guess a different id for it — and '
+        'include payload.amount too if an amount in taka was mentioned)\n'
+        '- "what are your fees" -> ask_clarification(question="Sure — which transaction type '
+        'would you like a fee quote for, and for what amount? For example, a bank transfer, '
+        'bKash, or another wallet?")\n'
+        '  (no transaction type or amount was named — this is vague like the card-help example '
+        'above, so ASK rather than guessing which fee they mean)'
     )
 
 
@@ -240,13 +252,15 @@ async def classify(
         if retry_name == "answer_kb_question":
             return KbQuestion()
         if retry_name == "ask_clarification":
-            return Clarification(question=retry_arguments["question"])
+            return Clarification(question=retry_arguments.get("question") or _CLARIFICATION_FALLBACK)
         if retry_name == "route_banking_service":
-            retry_category = retry_arguments["category"]
-            retry_service = retry_arguments["service"]
+            retry_category = retry_arguments.get("category")
+            retry_service = retry_arguments.get("service")
             retry_subservice = retry_arguments.get("subservice") or None
             retry_payload = retry_arguments.get("payload") or None
-            if is_valid_path(retry_category, retry_service, retry_subservice):
+            if retry_category and retry_service and is_valid_path(
+                retry_category, retry_service, retry_subservice
+            ):
                 return BankingService(
                     category=retry_category,
                     service=retry_service,
@@ -264,13 +278,13 @@ async def classify(
     if name == "answer_kb_question":
         return KbQuestion()
     if name == "ask_clarification":
-        return Clarification(question=arguments["question"])
+        return Clarification(question=arguments.get("question") or _CLARIFICATION_FALLBACK)
     if name == "route_banking_service":
-        category = arguments["category"]
-        service = arguments["service"]
+        category = arguments.get("category")
+        service = arguments.get("service")
         subservice = arguments.get("subservice") or None
         payload = arguments.get("payload") or None
-        if is_valid_path(category, service, subservice):
+        if category and service and is_valid_path(category, service, subservice):
             return BankingService(
                 category=category, service=service, subservice=subservice, payload=payload
             )
@@ -301,13 +315,15 @@ async def classify(
         if retry_name == "answer_kb_question":
             return KbQuestion()
         if retry_name == "ask_clarification":
-            return Clarification(question=retry_arguments["question"])
+            return Clarification(question=retry_arguments.get("question") or _CLARIFICATION_FALLBACK)
         if retry_name == "route_banking_service":
-            retry_category = retry_arguments["category"]
-            retry_service = retry_arguments["service"]
+            retry_category = retry_arguments.get("category")
+            retry_service = retry_arguments.get("service")
             retry_subservice = retry_arguments.get("subservice") or None
             retry_payload = retry_arguments.get("payload") or None
-            if is_valid_path(retry_category, retry_service, retry_subservice):
+            if retry_category and retry_service and is_valid_path(
+                retry_category, retry_service, retry_subservice
+            ):
                 return BankingService(
                     category=retry_category,
                     service=retry_service,

@@ -288,12 +288,39 @@ class BeneficiaryAdapter:
         return AdapterResult(data={"beneficiaries": body})
 
 
+class FeesAdapter:
+    async def fulfill(
+        self,
+        customer_identity: CustomerIdentity,
+        jwt: str | None,
+        subservice: str,
+        payload: dict | None,
+    ) -> AdapterResult:
+        payload = payload or {}
+        transaction_type = payload.get("transactionType")
+        amount_taka = payload.get("amount")
+        if not transaction_type or amount_taka is None:
+            raise AdapterUnavailableError(
+                "fee_quote requires payload.transactionType and payload.amount"
+            )
+
+        amount_poisha = round(float(amount_taka) * 100)
+        body = await _call(
+            "GET",
+            "/transfer/v1/transaction-type/charge-with-amount",
+            jwt,
+            params={"appSettingsId": transaction_type, "amount": amount_poisha},
+        )
+        return AdapterResult(data=body)
+
+
 balance_adapter = BalanceAdapter()
 transaction_history_adapter = TransactionHistoryAdapter()
 accounts_adapter = AccountsAdapter()
 device_history_adapter = DeviceHistoryAdapter()
 login_history_adapter = LoginHistoryAdapter()
 beneficiary_adapter = BeneficiaryAdapter()
+fees_adapter = FeesAdapter()
 
 REAL_ADAPTERS = {
     "real:balance": balance_adapter,
@@ -302,4 +329,5 @@ REAL_ADAPTERS = {
     "real:device_history": device_history_adapter,
     "real:login_history": login_history_adapter,
     "real:beneficiary": beneficiary_adapter,
+    "real:fee_quote": fees_adapter,
 }

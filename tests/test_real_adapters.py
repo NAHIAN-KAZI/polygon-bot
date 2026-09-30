@@ -485,7 +485,8 @@ def test_call_constructs_asyncclient_with_timeout_above_httpx_default(monkeypatc
     assert captured_kwargs["timeout"] > 5.0  # httpx.AsyncClient's own default
 
 
-def test_real_adapters_dict_has_exactly_the_six_expected_keys():
+def test_real_adapters_dict_has_exactly_the_seven_expected_keys():
+    # T-41: fee_quote added as the 7th real adapter.
     assert set(real.REAL_ADAPTERS.keys()) == {
         "real:balance",
         "real:transaction_history",
@@ -493,6 +494,7 @@ def test_real_adapters_dict_has_exactly_the_six_expected_keys():
         "real:device_history",
         "real:login_history",
         "real:beneficiary",
+        "real:fee_quote",
     }
     assert real.REAL_ADAPTERS["real:balance"] is real.balance_adapter
     assert real.REAL_ADAPTERS["real:transaction_history"] is real.transaction_history_adapter
@@ -500,6 +502,7 @@ def test_real_adapters_dict_has_exactly_the_six_expected_keys():
     assert real.REAL_ADAPTERS["real:device_history"] is real.device_history_adapter
     assert real.REAL_ADAPTERS["real:login_history"] is real.login_history_adapter
     assert real.REAL_ADAPTERS["real:beneficiary"] is real.beneficiary_adapter
+    assert real.REAL_ADAPTERS["real:fee_quote"] is real.fees_adapter
 
 
 # --- T-37/T-38: BeneficiaryAdapter -------------------------------------------
@@ -879,3 +882,69 @@ def test_login_history_adapter_date_range_failure_falls_back_to_single_page(monk
     assert calls[0]["params"] == {"page": 0, "size": 50}
     assert calls[1]["params"] == {"page": 0, "size": 20}
     assert result == AdapterResult(data=fallback_body)
+
+
+# --- T-41: FeesAdapter --------------------------------------------------------
+
+
+def test_fees_adapter_valid_payload_converts_taka_to_poisha_and_forwards_params(monkeypatch):
+    body = {"data": {"charge": "5.75"}}
+    calls = _install_request(monkeypatch, response=FakeResponse(json_data=body))
+
+    result = asyncio.run(
+        real.fees_adapter.fulfill(
+            _IDENTITY, _JWT, "fee_quote", {"transactionType": "bkash", "amount": 500}
+        )
+    )
+
+    assert len(calls) == 1
+    assert calls[0]["method"] == "GET"
+    assert calls[0]["path"] == "/transfer/v1/transaction-type/charge-with-amount"
+    assert calls[0]["params"] == {"appSettingsId": "bkash", "amount": 50000}
+    assert result == AdapterResult(data=body)
+
+
+def test_fees_adapter_missing_transaction_type_raises_without_http_call(monkeypatch):
+    calls = _install_request(monkeypatch, response=FakeResponse(json_data={}))
+
+    with pytest.raises(AdapterUnavailableError):
+        asyncio.run(real.fees_adapter.fulfill(_IDENTITY, _JWT, "fee_quote", {"amount": 500}))
+
+    assert calls == []
+
+
+def test_fees_adapter_missing_amount_raises_without_http_call(monkeypatch):
+    calls = _install_request(monkeypatch, response=FakeResponse(json_data={}))
+
+    with pytest.raises(AdapterUnavailableError):
+        asyncio.run(
+            real.fees_adapter.fulfill(_IDENTITY, _JWT, "fee_quote", {"transactionType": "bkash"})
+        )
+
+    assert calls == []
+
+
+def test_fees_adapter_none_payload_raises_without_http_call(monkeypatch):
+    calls = _install_request(monkeypatch, response=FakeResponse(json_data={}))
+
+    with pytest.raises(AdapterUnavailableError):
+        asyncio.run(real.fees_adapter.fulfill(_IDENTITY, _JWT, "fee_quote", None))
+
+    assert calls == []
+
+
+def test_fees_adapter_404_propagates_as_adapter_unavailable_error(monkeypatch):
+    # FeesAdapter has no special-cased error handling of its own -- this
+    # confirms _call()'s existing generic non-2xx behavior (see the
+    # test_500_raises_adapter_unavailable_error parametrized test above)
+    # already covers it.
+    calls = _install_request(monkeypatch, response=FakeResponse(status_code=404))
+
+    with pytest.raises(AdapterUnavailableError):
+        asyncio.run(
+            real.fees_adapter.fulfill(
+                _IDENTITY, _JWT, "fee_quote", {"transactionType": "bkash", "amount": 500}
+            )
+        )
+
+    assert len(calls) == 1

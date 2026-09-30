@@ -91,10 +91,11 @@ def test_refresh_merges_both_endpoints_preserving_ids(monkeypatch):
 
     result = taxonomy.get_taxonomy()
     category_ids = {c["id"] for c in result["categories"]}
-    # account_info is a synthetic category unconditionally appended by
-    # _fetch_and_build() on every build, in addition to whatever the fetch
-    # returns (T-19), so both fetched ids and the synthetic id must appear.
-    assert category_ids == {"banking", "transfers", "account_info"}
+    # account_info and fees are synthetic categories unconditionally appended
+    # by _fetch_and_build() on every build, in addition to whatever the fetch
+    # returns (T-19, T-41), so both fetched ids and the synthetic ids must
+    # appear.
+    assert category_ids == {"banking", "transfers", "account_info", "fees"}
 
     banking = next(c for c in result["categories"] if c["id"] == "banking")
     assert banking["services"][0]["id"] == "accounts"
@@ -248,6 +249,33 @@ def test_synthetic_account_info_category_has_expected_services(monkeypatch):
     assert len(account_info["services"]) == 4
 
 
+def test_synthetic_fees_category_has_expected_services(monkeypatch):
+    services_categories = [_category("banking", "accounts", ("checking",))]
+    _install_responses(monkeypatch, {
+        SERVICES_PATH: _ok(services_categories),
+        PAY_TRANSFER_PATH: _ok([]),
+    })
+
+    asyncio.run(taxonomy.refresh_taxonomy())
+
+    result = taxonomy.get_taxonomy()
+    fees = next(c for c in result["categories"] if c["id"] == "fees")
+    service_ids = {s["id"] for s in fees["services"]}
+    assert service_ids == {"fee_quote"}
+    assert len(fees["services"]) == 1
+
+
+def test_synthetic_fees_path_is_valid(monkeypatch):
+    _install_responses(monkeypatch, {
+        SERVICES_PATH: _ok([]),
+        PAY_TRANSFER_PATH: _ok([]),
+    })
+
+    asyncio.run(taxonomy.refresh_taxonomy())
+
+    assert taxonomy.is_valid_path("fees", "fee_quote") is True
+
+
 def test_synthetic_account_info_paths_are_valid(monkeypatch):
     _install_responses(monkeypatch, {
         SERVICES_PATH: _ok([]),
@@ -283,4 +311,4 @@ def test_synthetic_account_info_present_even_when_live_fetch_is_empty(monkeypatc
 
     result = taxonomy.get_taxonomy()
     category_ids = {c["id"] for c in result["categories"]}
-    assert category_ids == {"account_info"}
+    assert category_ids == {"account_info", "fees"}

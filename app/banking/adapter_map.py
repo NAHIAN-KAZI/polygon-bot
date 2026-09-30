@@ -5,6 +5,7 @@ REAL_ADAPTER_SUBSERVICE_IDS = {
     "device_history",
     "login_history",
     "beneficiary",
+    "fee_quote",
 }
 
 

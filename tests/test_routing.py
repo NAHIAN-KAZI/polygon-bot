@@ -532,3 +532,196 @@ def test_classify_zero_tool_calls_then_invalid_route_on_retry_falls_back_no_thir
 
     assert result == Clarification(question=_CLARIFICATION_FALLBACK)
     assert len(captured_calls) == 2
+
+
+# --- classify: T-42 crash fix -- missing category/service/question fields --
+#
+# route_banking_service used to do unguarded arguments["category"] /
+# ["service"], and ask_clarification unguarded arguments["question"], in
+# three places: the first-attempt handling below, the nested invalid-path
+# retry inside it, and T-40's zero-tool-calls retry. A live retry was
+# confirmed to omit "category", which raised an unhandled KeyError and
+# crashed the /chat SSE stream (500) instead of returning a clarification.
+# These tests cover all three call sites for each missing field.
+
+
+def _spy_is_valid_path(monkeypatch, return_value):
+    """Installs a spy for is_valid_path that records every call's arguments
+    and returns return_value. Used to confirm the fix's guarantee: a missing
+    category/service short-circuits before is_valid_path is ever called with
+    a None category or service."""
+    calls = []
+
+    def fake(category, service, subservice=None):
+        calls.append((category, service, subservice))
+        return return_value
+
+    monkeypatch.setattr(routing, "is_valid_path", fake)
+    return calls
+
+
+# Block 1: first-attempt route_banking_service handling
+
+
+def test_classify_first_attempt_missing_category_returns_clarification_without_crash(
+    monkeypatch,
+):
+    calls = _spy_is_valid_path(monkeypatch, return_value=False)
+    _install_post_response_sequence(
+        monkeypatch,
+        [
+            _ollama_response([_tool_call("route_banking_service", {"service": "accounts"})]),
+            {"message": {}},
+        ],
+    )
+
+    result = asyncio.run(classify("missing category on first attempt"))
+
+    assert result == Clarification(question=_CLARIFICATION_FALLBACK)
+    assert all(category is not None for category, service, subservice in calls)
+
+
+def test_classify_first_attempt_missing_service_returns_clarification_without_crash(
+    monkeypatch,
+):
+    calls = _spy_is_valid_path(monkeypatch, return_value=False)
+    _install_post_response_sequence(
+        monkeypatch,
+        [
+            _ollama_response([_tool_call("route_banking_service", {"category": "banking"})]),
+            {"message": {}},
+        ],
+    )
+
+    result = asyncio.run(classify("missing service on first attempt"))
+
+    assert result == Clarification(question=_CLARIFICATION_FALLBACK)
+    assert all(service is not None for category, service, subservice in calls)
+
+
+def test_classify_first_attempt_missing_question_returns_fallback_clarification(monkeypatch):
+    _install_post_response(
+        monkeypatch,
+        _ollama_response([_tool_call("ask_clarification", {})]),
+    )
+
+    result = asyncio.run(classify("vague message"))
+
+    assert result == Clarification(question=_CLARIFICATION_FALLBACK)
+
+
+# Block 2: the nested invalid-path retry inside the first-attempt block
+
+
+def test_classify_invalid_path_retry_missing_category_returns_clarification_without_crash(
+    monkeypatch,
+):
+    calls = _spy_is_valid_path(monkeypatch, return_value=False)
+    _install_post_response_sequence(
+        monkeypatch,
+        [
+            _ollama_response(
+                [_tool_call("route_banking_service", {"category": "banking", "service": "made-up"})]
+            ),
+            _ollama_response([_tool_call("route_banking_service", {"service": "accounts"})]),
+        ],
+    )
+
+    result = asyncio.run(classify("do the made up thing"))
+
+    assert result == Clarification(question=_CLARIFICATION_FALLBACK)
+    assert all(category is not None for category, service, subservice in calls)
+
+
+def test_classify_invalid_path_retry_missing_service_returns_clarification_without_crash(
+    monkeypatch,
+):
+    calls = _spy_is_valid_path(monkeypatch, return_value=False)
+    _install_post_response_sequence(
+        monkeypatch,
+        [
+            _ollama_response(
+                [_tool_call("route_banking_service", {"category": "banking", "service": "made-up"})]
+            ),
+            _ollama_response([_tool_call("route_banking_service", {"category": "banking"})]),
+        ],
+    )
+
+    result = asyncio.run(classify("do the made up thing"))
+
+    assert result == Clarification(question=_CLARIFICATION_FALLBACK)
+    assert all(service is not None for category, service, subservice in calls)
+
+
+def test_classify_invalid_path_retry_missing_question_returns_fallback_clarification(
+    monkeypatch,
+):
+    monkeypatch.setattr(routing, "is_valid_path", lambda *a, **k: False)
+    _install_post_response_sequence(
+        monkeypatch,
+        [
+            _ollama_response(
+                [_tool_call("route_banking_service", {"category": "banking", "service": "made-up"})]
+            ),
+            _ollama_response([_tool_call("ask_clarification", {})]),
+        ],
+    )
+
+    result = asyncio.run(classify("do the made up thing"))
+
+    assert result == Clarification(question=_CLARIFICATION_FALLBACK)
+
+
+# Block 3: T-40's zero-tool-calls retry
+
+
+def test_classify_zero_tool_calls_retry_missing_category_returns_clarification_without_crash(
+    monkeypatch,
+):
+    calls = _spy_is_valid_path(monkeypatch, return_value=False)
+    _install_post_response_sequence(
+        monkeypatch,
+        [
+            {"message": {}},
+            _ollama_response([_tool_call("route_banking_service", {"service": "accounts"})]),
+        ],
+    )
+
+    result = asyncio.run(classify("how much money do I have in my account?"))
+
+    assert result == Clarification(question=_CLARIFICATION_FALLBACK)
+    assert all(category is not None for category, service, subservice in calls)
+
+
+def test_classify_zero_tool_calls_retry_missing_service_returns_clarification_without_crash(
+    monkeypatch,
+):
+    calls = _spy_is_valid_path(monkeypatch, return_value=False)
+    _install_post_response_sequence(
+        monkeypatch,
+        [
+            {"message": {}},
+            _ollama_response([_tool_call("route_banking_service", {"category": "banking"})]),
+        ],
+    )
+
+    result = asyncio.run(classify("how much money do I have in my account?"))
+
+    assert result == Clarification(question=_CLARIFICATION_FALLBACK)
+    assert all(service is not None for category, service, subservice in calls)
+
+
+def test_classify_zero_tool_calls_retry_missing_question_returns_fallback_clarification(
+    monkeypatch,
+):
+    _install_post_response_sequence(
+        monkeypatch,
+        [
+            {"message": {}},
+            _ollama_response([_tool_call("ask_clarification", {})]),
+        ],
+    )
+
+    result = asyncio.run(classify("how much money do I have in my account?"))
+
+    assert result == Clarification(question=_CLARIFICATION_FALLBACK)

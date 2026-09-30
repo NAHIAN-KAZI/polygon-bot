@@ -57,6 +57,17 @@ def test_get_adapter_name_returns_real_for_beneficiary_subservice_id():
     )
 
 
+def test_get_adapter_name_returns_real_for_fee_quote_service_id():
+    assert get_adapter_name("fees", "fee_quote") == "real:fee_quote"
+
+
+def test_get_adapter_name_returns_real_for_fee_quote_subservice_id():
+    assert (
+        get_adapter_name("fees", "some_other_service", "fee_quote")
+        == "real:fee_quote"
+    )
+
+
 def test_requires_identity_always_true():
     assert requires_identity("accounts", "transaction_history") is True
     assert requires_identity("payments", "mobile_recharge", "beneficiary") is True

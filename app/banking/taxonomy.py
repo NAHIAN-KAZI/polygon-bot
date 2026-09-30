@@ -25,7 +25,18 @@ _SYNTHETIC_CATEGORIES = [
             {"id": "device_history", "name": "Device History", "isActive": True},
             {"id": "login_history", "name": "Login History", "isActive": True},
         ],
-    }
+    },
+    # ADR-0011 Amendment 2026-09-29 (T-41): fee-quote is a standalone utility
+    # endpoint the app calls directly for a fee preview, never surfaced via the
+    # navigation grid, so it can never appear in a live fetch either.
+    {
+        "id": "fees",
+        "name": "Fees",
+        "isActive": True,
+        "services": [
+            {"id": "fee_quote", "name": "Fee Quote", "isActive": True},
+        ],
+    },
 ]
 
 
