@@ -66,6 +66,60 @@ that don't mention a clear transaction type + amount correctly get a
   the same masking/formatting pass as accounts/transactions (there's no
   account/card number in this response to mask anyway).
 
+## Frontend integration
+
+**Detecting this result** in your SSE handler:
+```js
+if (event === "result" && data.type === "BANKING_SERVICE" && data.service === "fee_quote") {
+  // real fee quote — render below
+} else if (event === "result" && data.type === "CLARIFICATION_REQUIRED") {
+  // show the preceding `token` text as a normal chat bubble — same as any
+  // other clarification, nothing fee_quote-specific here
+} else if (event === "result" && data.type === "SERVICE_UNAVAILABLE" && data.service === "fee_quote") {
+  // show the preceding `token` text as a normal chat bubble; this also
+  // fires for an unrecognized transactionType (bank endpoint 404s cleanly)
+}
+```
+
+**What to render on success**: a single small breakdown card, not a table —
+this is one quote, not a list. Suggested layout:
+
+```
+┌─────────────────────────────┐
+│  Fee Quote                  │
+│  Principal Amount   ৳500    │
+│  Charge              ৳0     │
+│  VAT                  ৳0    │
+│  ─────────────────────────  │
+│  Total                ৳500  │
+└─────────────────────────────┘
+```
+
+```js
+function renderFeeQuote(payload) {
+  const toTaka = (poisha) => (poisha / 100).toLocaleString("en-BD");
+  return {
+    principal: toTaka(payload.principalAmount),
+    charge: toTaka(payload.fees.charge * 100), // fees.* are already in taka-scale floats, not poisha — see note below
+    vat: toTaka(payload.fees.vat * 100),
+    total: toTaka(payload.totalAmount),
+  };
+}
+```
+**Unit note**: `principalAmount`/`totalAmount` are poisha (divide by 100 for
+taka). `fees.charge`/`fees.vat`/`fees.total` come back as plain floats from
+the bank endpoint — in every case tested so far they were `0.0`, so the
+correct taka-scale interpretation hasn't been distinguishable from a poisha
+one yet. Confirm the actual unit with the bank team once a non-zero fee is
+observed, before shipping the conversion above as-is.
+
+**Action buttons**: none needed. This is informational only — `routing.action`
+is always the generic `"redirect"` value here (not a specific navigation
+target like `BENEFICIARY_MATCH` gets). If your flow wants a "proceed to
+transfer" button after showing the quote, that's your own app's existing
+navigation (same transfer screens as always) — we don't provide a routing
+hint for it since we never initiate the transfer ourselves.
+
 ## Live-verified (2026-09-30)
 
 - `"how much does it cost to send 500 taka via bKash"` → `BANKING_SERVICE`,
