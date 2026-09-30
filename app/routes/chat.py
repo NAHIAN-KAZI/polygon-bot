@@ -574,7 +574,13 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
     if isinstance(result, Clarification):
         yield _sse("token", {"token": result.question})
         yield _result_event("CLARIFICATION_REQUIRED", None, None, None)
-        turn_classification = {"type": "CLARIFICATION_REQUIRED", "category": None, "service": None, "subservice": None}
+        turn_classification = {
+            "type": "CLARIFICATION_REQUIRED",
+            "category": None,
+            "service": None,
+            "subservice": None,
+            "question": result.question,
+        }
         logger.info(json.dumps({"request_id": request_id, "type": "CLARIFICATION_REQUIRED", "token": result.question}))
         audit.log_banking_turn(
             customer_identity,
@@ -659,6 +665,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                     "category": category,
                     "service": service,
                     "subservice": subservice,
+                    "question": account_selection_token,
                 }
                 logger.info(json.dumps({
                     "request_id": request_id,
@@ -722,6 +729,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                             "category": None,
                             "service": None,
                             "subservice": None,
+                            "question": beneficiary_reply_token,
                         }
                     elif len(matches) == 1:
                         matched = matches[0]

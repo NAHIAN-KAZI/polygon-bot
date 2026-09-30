@@ -606,6 +606,10 @@ def test_record_turn_called_for_account_selection_required_with_identity(client,
         "category": "account_info",
         "service": "balance",
         "subservice": None,
+        "question": (
+            "You have multiple accounts — which one did you mean? "
+            "Savings account ending 111, Current account ending 222."
+        ),
     }
 
 
@@ -677,6 +681,23 @@ def test_audit_called_once_for_clarification(client, monkeypatch):
     identity, turn_classification = args
     assert identity is None
     assert turn_classification["type"] == "CLARIFICATION_REQUIRED"
+
+
+def test_audit_called_once_for_clarification_includes_question(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return Clarification(question="Which account would you like to check?")
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    _install_session_fakes(monkeypatch)
+    audit_spy = _install_audit_spy(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "check my thing"}, headers=AUTH_HEADERS)
+
+    assert resp.status_code == 200
+    assert len(audit_spy.calls) == 1
+    args, kwargs = audit_spy.calls[0]
+    _, turn_classification = args
+    assert turn_classification["question"] == "Which account would you like to check?"
 
 
 def test_audit_called_once_for_unknown_service(client, monkeypatch):

@@ -229,8 +229,21 @@ async def classify(
     message: str, recent_turns: list[ChatTurn] | None = None
 ) -> ClassificationResult:
     messages = [{"role": "system", "content": build_system_prompt(get_taxonomy())}]
-    for turn in recent_turns or []:
-        messages.append({"role": "user", "content": turn.message})
+    if recent_turns:
+        last_turn = recent_turns[-1]
+        pending_question = (last_turn.classification or {}).get("question") or "a clarifying question"
+        messages.append({
+            "role": "system",
+            "content": (
+                f'Context: the customer\'s previous message was "{last_turn.message}", and we '
+                f'asked them: "{pending_question}" — still unanswered. Only use this context if '
+                "the NEW message below is clearly answering that specific question (e.g. a bare "
+                "amount, an account type, yes/no, or a short direct reply to it). If the new "
+                "message is about something else entirely — a different topic, a new banking "
+                "request, or anything unrelated to that question — ignore this context "
+                "completely and classify the new message independently."
+            ),
+        })
     messages.append({"role": "user", "content": message})
 
     tool_calls = await _post_classification(messages)

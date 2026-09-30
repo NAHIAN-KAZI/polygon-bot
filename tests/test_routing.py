@@ -258,7 +258,7 @@ def test_classify_normalizes_empty_string_subservice_to_none(monkeypatch):
     assert result.subservice is None
 
 
-def test_classify_includes_recent_turns_as_prior_user_messages(monkeypatch):
+def test_classify_includes_last_recent_turn_as_labeled_system_context(monkeypatch):
     captured_calls = []
     _install_post_response(
         monkeypatch,
@@ -266,21 +266,64 @@ def test_classify_includes_recent_turns_as_prior_user_messages(monkeypatch):
         captured_calls=captured_calls,
     )
     recent_turns = [
-        ChatTurn(timestamp=datetime.now(timezone.utc), message="what are your hours?"),
-        ChatTurn(timestamp=datetime.now(timezone.utc), message="do you have a mobile app?"),
+        ChatTurn(
+            timestamp=datetime.now(timezone.utc),
+            message="I want to transfer money",
+            classification={"type": "CLARIFICATION_REQUIRED", "question": "Which transfer type?"},
+        ),
     ]
 
     asyncio.run(classify("thanks, one more question", recent_turns=recent_turns))
 
     assert len(captured_calls) == 1
     sent_messages = captured_calls[0]["kwargs"]["json"]["messages"]
+    # the prior turn is never injected as a literal user message
     user_texts = [m["content"] for m in sent_messages if m["role"] == "user"]
-    assert "what are your hours?" in user_texts
-    assert "do you have a mobile app?" in user_texts
-    assert "thanks, one more question" in user_texts
-    # prior turns precede the new message
-    assert user_texts.index("what are your hours?") < user_texts.index("thanks, one more question")
-    assert user_texts.index("do you have a mobile app?") < user_texts.index("thanks, one more question")
+    assert user_texts == ["thanks, one more question"]
+    # it appears instead as a labeled, disregardable system-level context note
+    system_texts = [m["content"] for m in sent_messages if m["role"] == "system"]
+    assert any("I want to transfer money" in text and "Which transfer type?" in text for text in system_texts)
+    assert any("ignore this context" in text for text in system_texts)
+
+
+def test_classify_uses_only_last_of_multiple_recent_turns(monkeypatch):
+    captured_calls = []
+    _install_post_response(
+        monkeypatch,
+        _ollama_response([_tool_call("answer_kb_question", {})]),
+        captured_calls=captured_calls,
+    )
+    recent_turns = [
+        ChatTurn(timestamp=datetime.now(timezone.utc), message="what are your hours?", classification=None),
+        ChatTurn(
+            timestamp=datetime.now(timezone.utc),
+            message="I want to transfer money",
+            classification={"type": "CLARIFICATION_REQUIRED", "question": "Which transfer type?"},
+        ),
+    ]
+
+    asyncio.run(classify("thanks, one more question", recent_turns=recent_turns))
+
+    sent_messages = captured_calls[0]["kwargs"]["json"]["messages"]
+    system_texts = [m["content"] for m in sent_messages if m["role"] == "system"]
+    assert not any("what are your hours?" in text for text in system_texts)
+    assert any("I want to transfer money" in text for text in system_texts)
+
+
+def test_classify_with_no_recent_turns_adds_no_context_note(monkeypatch):
+    captured_calls = []
+    _install_post_response(
+        monkeypatch,
+        _ollama_response([_tool_call("answer_kb_question", {})]),
+        captured_calls=captured_calls,
+    )
+
+    asyncio.run(classify("what are your hours?", recent_turns=[]))
+
+    sent_messages = captured_calls[0]["kwargs"]["json"]["messages"]
+    assert len(sent_messages) == 2
+    assert sent_messages[0]["role"] == "system"
+    assert sent_messages[1] == {"role": "user", "content": "what are your hours?"}
 
 
 # --- classify: T-23 retry-once-then-clarify --------------------------------

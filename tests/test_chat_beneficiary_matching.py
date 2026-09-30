@@ -342,6 +342,22 @@ def test_e2e_name_query_zero_matches_returns_clarification_required(client, monk
     assert result_event["payload"] is None
 
 
+def test_e2e_name_query_zero_matches_audit_includes_question(client, monkeypatch):
+    message = _install_beneficiary_fixture(
+        monkeypatch, [ASHANUR, BIKASH_MOM], message="send money to Zubair", payload={"nameQuery": "Zubair"}
+    )
+    audit_spy = _install_audit_spy(monkeypatch)
+
+    resp = client.post("/chat", json={"message": message}, headers=JWT_HEADERS)
+
+    assert resp.status_code == 200
+    assert len(audit_spy) == 1
+    args, kwargs = audit_spy[0]
+    _, turn_classification = args
+    assert turn_classification["type"] == "CLARIFICATION_REQUIRED"
+    assert turn_classification["question"] == "I couldn't find a beneficiary named Zubair."
+
+
 def test_e2e_name_query_multiple_matches_returns_beneficiary_selection_required(client, monkeypatch):
     message = _install_beneficiary_fixture(
         monkeypatch, [ASHAN, ASHANUR], message="send money to Ash", payload={"nameQuery": "Ash"}
