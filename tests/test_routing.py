@@ -990,3 +990,77 @@ def test_classify_route_banking_service_coerces_json_string_payload_to_dict(monk
         payload={"transactionType": "bkash", "amount": 1000},
     )
     assert isinstance(result.payload, dict)
+
+
+# --- build_system_prompt: T-50 fees-are-never-a-KB-topic exception ----------
+#
+# Rule 1 now carves out an exception -- any message clearly asking about fees,
+# even informationally-phrased ones, must never resolve to answer_kb_question.
+# These lock in the exception clause and its new few-shot example verbatim so
+# a future prompt edit can't silently drop or reword them.
+
+
+def test_build_system_prompt_rule_1_includes_fees_never_a_kb_topic_exception():
+    prompt = build_system_prompt(FAKE_TAXONOMY)
+
+    assert (
+        "Exception: any message that is clearly asking about transaction "
+        "fees/charges/costs — however it's phrased, including informational-sounding wording "
+        'like "what do you know about...", "tell me about...", or "can you explain..." — '
+        "is NEVER a KB topic."
+    ) in prompt
+    assert (
+        "Fees are a live, quotable real-time service, not static "
+        "background info, so always resolve fee questions via route_banking_service("
+        'category="fees", service="fee_quote", ...) when the transaction type and amount '
+        "are both known, or ask_clarification otherwise — never answer_kb_question."
+    ) in prompt
+
+
+def test_build_system_prompt_includes_what_do_you_know_about_fees_example():
+    prompt = build_system_prompt(FAKE_TAXONOMY)
+
+    assert (
+        '- "what do you know about fees?" -> ask_clarification(question="Sure — which '
+        'transaction type would you like a fee quote for, and for what amount? For example, a '
+        'bank transfer, bKash, or another wallet?")'
+    ) in prompt
+    assert (
+        '  (phrased informationally, like a KB question, but fees are always live-quotable via '
+        'route_banking_service/ask_clarification, never a KB topic — same handling and same '
+        'question as the "what are your fees" example above, never answer_kb_question)'
+    ) in prompt
+
+
+def test_classify_informational_fees_question_returns_clarification_not_kb_question(monkeypatch):
+    # T-50: "what do you know about fees?" is phrased like a KB question, but
+    # per the new rule-1 exception the model must call ask_clarification
+    # (since neither transaction type nor amount is known), never
+    # answer_kb_question.
+    _install_post_response(
+        monkeypatch,
+        _ollama_response(
+            [
+                _tool_call(
+                    "ask_clarification",
+                    {
+                        "question": (
+                            "Sure — which transaction type would you like a fee quote for, and "
+                            "for what amount? For example, a bank transfer, bKash, or another "
+                            "wallet?"
+                        )
+                    },
+                )
+            ]
+        ),
+    )
+
+    result = asyncio.run(classify("what do you know about fees?"))
+
+    assert result == Clarification(
+        question=(
+            "Sure — which transaction type would you like a fee quote for, and for what "
+            "amount? For example, a bank transfer, bKash, or another wallet?"
+        )
+    )
+    assert not isinstance(result, KbQuestion)

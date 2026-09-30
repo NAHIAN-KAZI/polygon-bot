@@ -126,7 +126,7 @@ architecture:
       test_command: "docker compose exec -T backend python -m pytest -q -k audit"
     - name: "kb-chat-preserved"
       description: "Existing knowledge-base upload/retrieval/chat behavior and demo frontend, kept intact."
-      owns_paths: ["app/routes/documents.py", "app/chunking.py", "app/embeddings.py", "app/vectorstore.py", "app/catalog.py", "app/auth.py", "frontend/"]
+      owns_paths: ["app/routes/documents.py", "app/chunking.py", "app/embeddings.py", "app/vectorstore.py", "app/catalog.py", "app/auth.py", "app/llm.py", "frontend/"]
       agent: kb-chat-preserved
       trigger: "KB upload, RAG retrieval, existing chat behavior regression, demo frontend"
       test_command: "docker compose exec -T backend python -m pytest -q -k \"kb or documents or regression\""

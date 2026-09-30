@@ -46,7 +46,8 @@ Optional header: `Authorization: Bearer <jwt>`. Without it (or with a token that
 any banking-service request comes back as `AUTH_REQUIRED` instead of being fulfilled — a plain
 knowledge-base question still works with no `Authorization` header at all.
 
-Response: `text/event-stream`. For a plain knowledge-base question, unchanged from before:
+Response: `text/event-stream`. For a plain knowledge-base question, one or more `token`
+events, then a single `result` event (`type: "KB_ANSWER"`), then `done`:
 ```
 event: token
 data: {"token": "The"}
@@ -55,6 +56,11 @@ event: token
 data: {"token": " refund"}
 
 ...
+
+event: result
+data: {"type": "KB_ANSWER", "category": null, "service": null, "subservice": null,
+       "payload": {"grounded": true, "hitCount": 5, "sources": ["handbook.pdf"]},
+       "routing": null, "version": "1.0"}
 
 event: done
 data: {}
@@ -96,7 +102,12 @@ data: {}
   (`device_history`, `login_history`) and mock results (`payload.mock === true`) are unaffected.
 - `CLARIFICATION_REQUIRED` — the message was too vague to route; the preceding `token` event is
   the full clarifying question (not a live token stream, just one event). `category`/`service`/
-  `subservice`/`payload`/`routing` are all `null`.
+  `subservice`/`payload`/`routing` are all `null`. This also covers a routed-but-incomplete
+  banking-service request: `category="fees"`/`service="fee_quote"` requires
+  `payload.transactionType` and `payload.amount`, and if either is missing (whether the message
+  was routed here directly or via classification) the response is a `CLARIFICATION_REQUIRED`
+  asking specifically for whichever piece is missing, rather than a `SERVICE_UNAVAILABLE` — this
+  is checked deterministically before the downstream fee-quote call is ever attempted.
 - `AUTH_REQUIRED` — the message maps to a real banking service but no valid customer identity was
   presented (missing/invalid `Authorization`, or the downstream service rejected it).
   `category`/`service`/`subservice` are populated, `payload`/`routing` are `null`.
@@ -118,9 +129,17 @@ data: {}
   account's full `accountNumber`. No new request field or endpoint. Free-text follow-ups like "the
   savings one" are not resolved automatically in this version — only a structured resubmit with an
   explicit `accountNumber` is supported.
+- `KB_ANSWER` — a plain knowledge-base question (including an off-topic/vulgar message that gets a
+  banking-only decline instead of a real answer — both are this same type, distinguished only by
+  `payload.grounded`). `category`/`service`/`subservice`/`routing` are all `null`. `payload` is
+  `{"grounded": bool, "hitCount": int, "sources": [<filenames>] | null}` — `grounded` is true iff
+  at least one knowledge-base chunk was retrieved for the question; `hitCount` is how many;
+  `sources` is a deduplicated, order-preserving list of the source document filenames those chunks
+  came from when `grounded` is true, or `null` (never `[]`) when it's false.
 
-`result` is never sent for a pure knowledge-base answer — its absence is how a client tells the
-two response shapes apart.
+`result` is sent exactly once for every outcome above, including `KB_ANSWER` — a client no longer
+needs to infer the response shape from whether a `result` event showed up; every stream that
+reaches `done` carries exactly one `result` event first.
 
 - `token` repeats — concatenate `.token` in order to build the reply. Answer text is plain prose,
   no markdown, no `[filename]`-style citations or page numbers — there is no separate sources/

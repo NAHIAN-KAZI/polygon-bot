@@ -1,7 +1,8 @@
 """Regression tests for the pre-banking-extension behavior of POST /chat.
 
-These pin down the documented contract in INTEGRATION.md: a token/done SSE
-stream with no sources event (removed) and no result event (not yet added).
+These pin down the documented contract in INTEGRATION.md: a token/result/done
+SSE stream with no sources event (removed). As of T-52, the KB path emits a
+"result" event (type "KB_ANSWER") before "done", same as every other branch.
 Ollama (embedding + generation) and Qdrant are mocked at the call sites used
 by app/routes/chat.py so these run fast and deterministically without a live
 GPU/vector-store stack.
@@ -53,7 +54,7 @@ def _parse_sse(body: str) -> list[tuple[str, dict]]:
     return events
 
 
-def test_chat_success_streams_tokens_then_done_with_no_sources_or_result(client, monkeypatch):
+def test_chat_success_streams_tokens_then_result_then_done_with_no_sources(client, monkeypatch):
     _install_fakes(monkeypatch)
 
     resp = client.post("/chat", json={"message": "What is the refund policy?"}, headers=AUTH_HEADERS)
@@ -65,12 +66,16 @@ def test_chat_success_streams_tokens_then_done_with_no_sources_or_result(client,
     event_names = [name for name, _ in events]
 
     assert event_names.count("token") == 2
+    assert event_names[-2] == "result"
     assert event_names[-1] == "done"
     assert "sources" not in event_names
-    assert "result" not in event_names
 
     tokens = "".join(data["token"] for name, data in events if name == "token")
     assert tokens == "Hello world"
+
+    result_event = next(data for name, data in events if name == "result")
+    assert result_event["type"] == "KB_ANSWER"
+    assert result_event["payload"] == {"grounded": False, "hitCount": 0, "sources": None}
 
 
 def test_chat_without_api_key_returns_401(client, monkeypatch):

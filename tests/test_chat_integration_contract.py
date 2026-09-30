@@ -88,7 +88,10 @@ def _parse_sse(body: str) -> list[tuple[str, dict]]:
 # --- 1. plain KB question: token...done, `result` NEVER sent ----------------
 
 
-def test_plain_kb_question_never_emits_result_event(client, monkeypatch):
+def test_plain_kb_question_emits_kb_answer_result_event(client, monkeypatch):
+    # T-52: KB path now emits a "result" event (type "KB_ANSWER") before "done",
+    # same as every other branch -- superseding the earlier "never emits result"
+    # contract. _fake_search returns [] (ungrounded).
     async def fake_classify(message, recent_turns=None):
         return KbQuestion()
 
@@ -106,8 +109,10 @@ def test_plain_kb_question_never_emits_result_event(client, monkeypatch):
     events = _parse_sse(resp.text)
     event_names = [name for name, _ in events]
 
-    assert event_names == ["token", "token", "done"]
-    assert "result" not in event_names
+    assert event_names == ["token", "token", "result", "done"]
+    result_event = next(data for name, data in events if name == "result")
+    assert result_event["type"] == "KB_ANSWER"
+    assert result_event["payload"] == {"grounded": False, "hitCount": 0, "sources": None}
 
 
 # --- 2. all 5 result.type values, exact field-population rules --------------
@@ -352,7 +357,7 @@ def test_session_id_does_not_affect_kb_path(client, monkeypatch):
     events_a = [name for name, _ in _parse_sse(resp_a.text)]
     events_b = [name for name, _ in _parse_sse(resp_b.text)]
 
-    assert events_a == events_b == ["token", "token", "done"]
+    assert events_a == events_b == ["token", "token", "result", "done"]
 
 
 # --- 4. category+service present skips classify() (FR-ROUTE-04) ------------

@@ -627,7 +627,10 @@ def test_record_turn_not_called_without_identity(client, monkeypatch):
     assert record_turn_spy.calls == []
 
 
-def test_kb_path_matches_pre_t15_contract(client, monkeypatch):
+def test_kb_path_emits_kb_answer_result(client, monkeypatch):
+    # T-52: the KB path now emits a "result" event (type "KB_ANSWER") after all
+    # token events and before "done", same convention as every other branch.
+    # _fake_search returns [] (ungrounded), so this covers the ungrounded shape.
     async def fake_classify(message, recent_turns=None):
         return KbQuestion()
 
@@ -641,9 +644,125 @@ def test_kb_path_matches_pre_t15_contract(client, monkeypatch):
     events = _parse_sse(resp.text)
     event_names = [name for name, _ in events]
 
-    assert "result" not in event_names
     assert event_names.count("token") == 2
+    assert event_names[-2] == "result"
     assert event_names[-1] == "done"
+
+    result_event = next(data for name, data in events if name == "result")
+    assert result_event["type"] == "KB_ANSWER"
+    assert result_event["category"] is None
+    assert result_event["service"] is None
+    assert result_event["subservice"] is None
+    assert result_event["routing"] is None
+    assert result_event["payload"] == {"grounded": False, "hitCount": 0, "sources": None}
+
+
+# --- KB path (_kb_stream) KB_ANSWER payload contract -- independent -----------
+# --- coverage for TASKS.md T-52, written separately from the implementer's ---
+# --- own 4 updated tests above: dedup-vs-raw-count, explicit None-vs-[] on ---
+# --- sources, event ordering, and that the generation-failure branch still ---
+# --- short-circuits before any result event is emitted. ----------------------
+
+
+def test_kb_stream_result_grounded_dedupes_sources_but_hitcount_stays_raw(client, monkeypatch):
+    # Two of three hits share a filename ("policy.pdf"). sources must dedupe
+    # to one entry while preserving first-seen order (["policy.pdf", "faq.pdf"],
+    # not ["faq.pdf", "policy.pdf"]), while hitCount must remain the raw hit
+    # count (3), not the deduped source count (2).
+    async def fake_classify(message, recent_turns=None):
+        return KbQuestion()
+
+    hits = [
+        {"id": "c1", "score": 0.9, "text": "t1", "filename": "policy.pdf"},
+        {"id": "c2", "score": 0.8, "text": "t2", "filename": "faq.pdf"},
+        {"id": "c3", "score": 0.7, "text": "t3", "filename": "policy.pdf"},
+    ]
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "embed_text", _fake_embed_text)
+    monkeypatch.setattr(chat_module, "search", lambda vector, top_k: hits)
+    monkeypatch.setattr(chat_module, "stream_generate", _fake_stream_generate)
+    _install_session_fakes(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "what is the refund policy?"}, headers=AUTH_HEADERS)
+
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    result_event = next(data for name, data in events if name == "result")
+    assert result_event["payload"]["grounded"] is True
+    assert result_event["payload"]["hitCount"] == 3
+    assert result_event["payload"]["sources"] == ["policy.pdf", "faq.pdf"]
+
+
+def test_kb_stream_result_ungrounded_sources_is_none_not_empty_list(client, monkeypatch):
+    # Must be `is None`, not merely falsy: an empty list would satisfy a loose
+    # "no sources" check but is a different JSON shape (`[]` vs `null`) on the
+    # wire, and frontend code may branch on which one it got.
+    async def fake_classify(message, recent_turns=None):
+        return KbQuestion()
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    _install_kb_fakes(monkeypatch)  # _fake_search returns []
+    _install_session_fakes(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "what is the refund policy?"}, headers=AUTH_HEADERS)
+
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    result_event = next(data for name, data in events if name == "result")
+    assert result_event["payload"]["grounded"] is False
+    assert result_event["payload"]["hitCount"] == 0
+    assert result_event["payload"]["sources"] is None
+
+
+def test_kb_stream_result_event_ordering_grounded_and_ungrounded(client, monkeypatch):
+    # In both the grounded and ungrounded case, "result" must be the
+    # second-to-last SSE event, immediately followed by "done".
+    async def fake_classify(message, recent_turns=None):
+        return KbQuestion()
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "embed_text", _fake_embed_text)
+    monkeypatch.setattr(chat_module, "stream_generate", _fake_stream_generate)
+    _install_session_fakes(monkeypatch)
+
+    monkeypatch.setattr(chat_module, "search", lambda vector, top_k: [_kb_hit(0.9)])
+    grounded_resp = client.post("/chat", json={"message": "what is the refund policy?"}, headers=AUTH_HEADERS)
+    grounded_names = [name for name, _ in _parse_sse(grounded_resp.text)]
+    assert grounded_names[-2:] == ["result", "done"]
+
+    monkeypatch.setattr(chat_module, "search", lambda vector, top_k: [])
+    ungrounded_resp = client.post("/chat", json={"message": "what is the refund policy?"}, headers=AUTH_HEADERS)
+    ungrounded_names = [name for name, _ in _parse_sse(ungrounded_resp.text)]
+    assert ungrounded_names[-2:] == ["result", "done"]
+
+
+def test_kb_stream_generation_failure_never_emits_result_event(client, monkeypatch):
+    # T-52 added a "result" event to the success path of _kb_stream, but the
+    # pre-existing generation-failure branch (httpx.HTTPError mid-stream)
+    # returns before reaching the grounded/sources computation -- it must
+    # keep emitting only "error" (and never reach "done" either).
+    async def fake_classify(message, recent_turns=None):
+        return KbQuestion()
+
+    async def fake_stream_generate_fails(prompt):
+        yield "partial"
+        raise httpx.ReadTimeout("boom")
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "embed_text", _fake_embed_text)
+    monkeypatch.setattr(chat_module, "search", _fake_search)
+    monkeypatch.setattr(chat_module, "stream_generate", fake_stream_generate_fails)
+    _install_session_fakes(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "what is the refund policy?"}, headers=AUTH_HEADERS)
+
+    assert resp.status_code == 200
+    event_names = [name for name, _ in _parse_sse(resp.text)]
+
+    assert "result" not in event_names
+    assert "done" not in event_names
+    assert event_names[-1] == "error"
 
 
 # --- audit logging (TASKS.md T-16): audit.log_banking_turn must fire on ------
@@ -1923,3 +2042,225 @@ def test_audit_request_id_correlates_with_chat_requests_log_for_same_turn(client
 
     assert len(audit_calls) == 1
     assert audit_calls[0] == entry_log["request_id"] == branch_log["request_id"]
+
+
+# --- payload-completeness guard (TASKS.md T-49): a fees/fee_quote --------
+# --- BankingService result with an incomplete payload must get a --------
+# --- deterministic CLARIFICATION_REQUIRED, and fulfill_banking_service ---
+# --- must never be invoked -- previously this fell through to the -------
+# --- adapter and surfaced as a generic SERVICE_UNAVAILABLE. --------------
+
+
+def _never_call_fulfill(*args, **kwargs):
+    raise AssertionError("fulfill_banking_service must not be called for an incomplete fees/fee_quote payload")
+
+
+def test_missing_payload_fields_empty_for_unrelated_pair():
+    assert chat_module._missing_payload_fields("account_info", "balance", None) == []
+    assert chat_module._missing_payload_fields("account_info", "balance", {"anything": "x"}) == []
+
+
+def test_missing_payload_fields_fees_fee_quote_none_payload_returns_both():
+    assert chat_module._missing_payload_fields("fees", "fee_quote", None) == ["transactionType", "amount"]
+
+
+def test_missing_payload_fields_fees_fee_quote_complete_payload_returns_empty():
+    payload = {"transactionType": "bkash", "amount": 1000}
+    assert chat_module._missing_payload_fields("fees", "fee_quote", payload) == []
+
+
+def test_fee_quote_clarification_question_both_missing():
+    question = chat_module._fee_quote_clarification_question(None)
+    assert question == (
+        "Sure — which transaction type would you like a fee quote for, and for what "
+        "amount? For example, a bank transfer, bKash, or another wallet?"
+    )
+
+
+def test_fee_quote_clarification_question_amount_missing_names_transaction_type():
+    question = chat_module._fee_quote_clarification_question({"transactionType": "other_bank"})
+    assert question == (
+        "Sure — how much would you like to send via other bank? I can give you "
+        "the exact fee once I know the amount."
+    )
+
+
+def test_fee_quote_clarification_question_transaction_type_missing_mentions_formatted_amount():
+    question = chat_module._fee_quote_clarification_question({"amount": 5000})
+    assert question == (
+        "Sure — you'd like a fee quote for ৳5,000. Which transaction type "
+        "would you like that for? For example, a bank transfer, bKash, or another wallet?"
+    )
+
+
+def test_payload_clarification_question_unmapped_pair_uses_generic_fallback():
+    question = chat_module._payload_clarification_question("account_info", "balance", None)
+    assert question == "Could you share a few more details so I can help with that?"
+
+
+def test_fees_fee_quote_payload_none_yields_clarification_without_calling_adapter(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return BankingService(category="fees", service="fee_quote", subservice=None, payload=None)
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", _never_call_fulfill)
+    _install_session_fakes(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "what are your fees"}, headers=JWT_HEADERS)
+
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    assert [name for name, _ in events] == ["token", "result", "done"]
+
+    token_event = next(data for name, data in events if name == "token")
+    assert token_event["token"] == (
+        "Sure — which transaction type would you like a fee quote for, and for what "
+        "amount? For example, a bank transfer, bKash, or another wallet?"
+    )
+
+    result_event = next(data for name, data in events if name == "result")
+    assert result_event["type"] == "CLARIFICATION_REQUIRED"
+    assert result_event["category"] is None
+    assert result_event["service"] is None
+    assert result_event["subservice"] is None
+    assert result_event["payload"] is None
+    assert result_event["routing"] is None
+
+
+def test_fees_fee_quote_payload_missing_amount_asks_for_amount_naming_transaction_type(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return BankingService(
+            category="fees", service="fee_quote", subservice=None, payload={"transactionType": "other_bank"}
+        )
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", _never_call_fulfill)
+    _install_session_fakes(monkeypatch)
+
+    resp = client.post(
+        "/chat", json={"message": "how much fees for sending to other bank accounts?"}, headers=JWT_HEADERS
+    )
+
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    assert [name for name, _ in events] == ["token", "result", "done"]
+
+    token_event = next(data for name, data in events if name == "token")
+    assert token_event["token"] == (
+        "Sure — how much would you like to send via other bank? I can give you "
+        "the exact fee once I know the amount."
+    )
+
+    result_event = next(data for name, data in events if name == "result")
+    assert result_event["type"] == "CLARIFICATION_REQUIRED"
+
+
+def test_fees_fee_quote_payload_missing_transaction_type_asks_which_type_mentioning_formatted_amount(
+    client, monkeypatch
+):
+    async def fake_classify(message, recent_turns=None):
+        return BankingService(category="fees", service="fee_quote", subservice=None, payload={"amount": 5000})
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", _never_call_fulfill)
+    _install_session_fakes(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "fee for sending 5000 taka"}, headers=JWT_HEADERS)
+
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    assert [name for name, _ in events] == ["token", "result", "done"]
+
+    token_event = next(data for name, data in events if name == "token")
+    assert token_event["token"] == (
+        "Sure — you'd like a fee quote for ৳5,000. Which transaction type "
+        "would you like that for? For example, a bank transfer, bKash, or another wallet?"
+    )
+
+    result_event = next(data for name, data in events if name == "result")
+    assert result_event["type"] == "CLARIFICATION_REQUIRED"
+
+
+def test_fees_fee_quote_complete_payload_calls_adapter_normally(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return BankingService(
+            category="fees",
+            service="fee_quote",
+            subservice=None,
+            payload={"transactionType": "bkash", "amount": 1000},
+        )
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    fulfill_calls = []
+    mock_data = {"mock": True, "note": "synthetic fee quote"}
+
+    async def fake_fulfill(customer_identity, jwt, category, service, subservice, payload):
+        fulfill_calls.append((category, service, subservice, payload))
+        return AdapterResult(data=mock_data)
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", fake_fulfill)
+    _install_session_fakes(monkeypatch)
+
+    resp = client.post(
+        "/chat", json={"message": "how much does it cost to send money via bKash"}, headers=JWT_HEADERS
+    )
+
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    assert [name for name, _ in events] == ["token", "result", "done"]
+
+    result_event = next(data for name, data in events if name == "result")
+    assert result_event["type"] == "BANKING_SERVICE"
+    assert result_event["payload"] == mock_data
+
+    assert len(fulfill_calls) == 1
+    assert fulfill_calls[0] == ("fees", "fee_quote", None, {"transactionType": "bkash", "amount": 1000})
+
+
+def test_non_fees_service_balance_unaffected_by_payload_guard(client, monkeypatch):
+    """Confirms no other (category, service) pair is caught by the guard --
+    a normal account_info/balance request with no payload at all still
+    proceeds straight to the adapter, with no clarification detour."""
+
+    async def fake_classify(message, recent_turns=None):
+        return BankingService(category="account_info", service="balance", subservice=None, payload=None)
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    fulfill_calls = []
+
+    async def fake_fulfill(customer_identity, jwt, category, service, subservice, payload):
+        fulfill_calls.append((category, service, subservice, payload))
+        return AdapterResult(data={"balance": "500.00"})
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", fake_fulfill)
+    _install_session_fakes(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "what's my balance"}, headers=JWT_HEADERS)
+
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    assert [name for name, _ in events] == ["token", "result", "done"]
+
+    result_event = next(data for name, data in events if name == "result")
+    assert result_event["type"] == "BANKING_SERVICE"
+    assert len(fulfill_calls) == 1

@@ -6,6 +6,7 @@ import re
 import time
 import uuid
 from datetime import datetime, timezone
+from typing import Callable
 
 import httpx
 from fastapi import APIRouter, Depends, Header
@@ -46,6 +47,68 @@ class ChatRequest(BaseModel):
         if not v:
             raise ValueError("message must not be blank")
         return v
+
+
+# T-49: deterministic, code-level payload-completeness check for banking services whose
+# adapter requires specific payload fields — pre-empts (does not replace) each adapter's
+# own guard (e.g. FeesAdapter.fulfill in app/banking/adapters/real.py:299-305), so an
+# incomplete payload gets a clarifying question instead of hitting the adapter and
+# surfacing as a generic SERVICE_UNAVAILABLE. Adding a future required-payload service is
+# a one-line addition here (plus a question builder in _PAYLOAD_CLARIFICATION_BUILDERS
+# below) — not new branching logic in _chat_stream.
+_REQUIRED_PAYLOAD_FIELDS: dict[tuple[str, str], tuple[str, ...]] = {
+    ("fees", "fee_quote"): ("transactionType", "amount"),
+}
+
+
+def _missing_payload_fields(category: str, service: str, payload: dict | None) -> list[str]:
+    """Returns the required fields (per _REQUIRED_PAYLOAD_FIELDS) missing or falsy from
+    `payload` for this (category, service) pair. Empty list if this pair has no required
+    fields, or if all required fields are present. `payload=None` is treated as `{}`."""
+    required = _REQUIRED_PAYLOAD_FIELDS.get((category, service))
+    if not required:
+        return []
+    payload = payload or {}
+    return [field for field in required if not payload.get(field)]
+
+
+def _fee_quote_clarification_question(payload: dict | None) -> str:
+    """Customer-friendly clarifying question for an incomplete fees/fee_quote payload,
+    mirroring the tone/wording of the fee_quote few-shot examples in
+    app/banking/routing.py's build_system_prompt() so this code-level guard's question is
+    indistinguishable in style from one the classifier itself would ask."""
+    payload = payload or {}
+    transaction_type = payload.get("transactionType")
+    amount = payload.get("amount")
+
+    if transaction_type and not amount:
+        friendly_type = str(transaction_type).replace("_", " ")
+        return (
+            f"Sure — how much would you like to send via {friendly_type}? I can give you "
+            "the exact fee once I know the amount."
+        )
+    if amount and not transaction_type:
+        amount_formatted = _format_bdt(amount) or str(amount)
+        return (
+            f"Sure — you'd like a fee quote for {amount_formatted}. Which transaction type "
+            "would you like that for? For example, a bank transfer, bKash, or another wallet?"
+        )
+    return (
+        "Sure — which transaction type would you like a fee quote for, and for what "
+        "amount? For example, a bank transfer, bKash, or another wallet?"
+    )
+
+
+_PAYLOAD_CLARIFICATION_BUILDERS: dict[tuple[str, str], Callable[[dict | None], str]] = {
+    ("fees", "fee_quote"): _fee_quote_clarification_question,
+}
+
+
+def _payload_clarification_question(category: str, service: str, payload: dict | None) -> str:
+    builder = _PAYLOAD_CLARIFICATION_BUILDERS.get((category, service))
+    if builder:
+        return builder(payload)
+    return "Could you share a few more details so I can help with that?"
 
 
 def _sse(event: str, data: dict) -> str:
@@ -514,6 +577,22 @@ async def _kb_stream(req: ChatRequest, request_id: str):
 
     logger.info(json.dumps({"request_id": request_id, "answer": "".join(answer_parts)}))
 
+    grounded = len(hits) > 0
+    sources: list[str] | None = None
+    if grounded:
+        sources = []
+        for c in hits:
+            filename = c.get("filename")
+            if filename and filename not in sources:
+                sources.append(filename)
+    yield _result_event(
+        "KB_ANSWER",
+        None,
+        None,
+        None,
+        payload={"grounded": grounded, "hitCount": len(hits), "sources": sources},
+    )
+
     yield _sse("done", {})
 
 
@@ -633,65 +712,22 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                 request_id=request_id,
             )
         else:
-            try:
-                adapter_result = await fulfill_banking_service(
-                    customer_identity, token, category, service, subservice, payload
-                )
-            except AdapterAuthError:
-                adapter_auth_error_token = "Please log in to continue with this request."
-                yield _sse("token", {"token": adapter_auth_error_token})
-                yield _result_event("AUTH_REQUIRED", category, service, subservice)
+            missing_fields = _missing_payload_fields(category, service, payload)
+            if missing_fields:
+                clarification_question = _payload_clarification_question(category, service, payload)
+                yield _sse("token", {"token": clarification_question})
+                yield _result_event("CLARIFICATION_REQUIRED", None, None, None)
                 turn_classification = {
-                    "type": "AUTH_REQUIRED",
-                    "category": category,
-                    "service": service,
-                    "subservice": subservice,
-                }
-                logger.info(json.dumps({"request_id": request_id, "type": "AUTH_REQUIRED", "token": adapter_auth_error_token}))
-                audit.log_banking_turn(
-                    customer_identity,
-                    turn_classification,
-                    latency_ms=(time.monotonic() - turn_started_at) * 1000,
-                    request_id=request_id,
-                )
-            except AdapterAccountSelectionRequiredError as exc:
-                account_selection_token = _account_selection_reply(exc.accounts)
-                yield _sse("token", {"token": account_selection_token})
-                yield _result_event(
-                    "ACCOUNT_SELECTION_REQUIRED", category, service, subservice, payload={"accounts": exc.accounts}
-                )
-                turn_classification = {
-                    "type": "ACCOUNT_SELECTION_REQUIRED",
-                    "category": category,
-                    "service": service,
-                    "subservice": subservice,
-                    "question": account_selection_token,
+                    "type": "CLARIFICATION_REQUIRED",
+                    "category": None,
+                    "service": None,
+                    "subservice": None,
+                    "question": clarification_question,
                 }
                 logger.info(json.dumps({
                     "request_id": request_id,
-                    "type": "ACCOUNT_SELECTION_REQUIRED",
-                    "token": account_selection_token,
-                }))
-                audit.log_banking_turn(
-                    customer_identity,
-                    turn_classification,
-                    latency_ms=(time.monotonic() - turn_started_at) * 1000,
-                    request_id=request_id,
-                )
-            except AdapterUnavailableError:
-                service_unavailable_token = "That service isn't available right now. Please try again shortly."
-                yield _sse("token", {"token": service_unavailable_token})
-                yield _result_event("SERVICE_UNAVAILABLE", category, service, subservice)
-                turn_classification = {
-                    "type": "SERVICE_UNAVAILABLE",
-                    "category": category,
-                    "service": service,
-                    "subservice": subservice,
-                }
-                logger.info(json.dumps({
-                    "request_id": request_id,
-                    "type": "SERVICE_UNAVAILABLE",
-                    "token": service_unavailable_token,
+                    "type": "CLARIFICATION_REQUIRED",
+                    "token": clarification_question,
                 }))
                 audit.log_banking_turn(
                     customer_identity,
@@ -700,83 +736,65 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                     request_id=request_id,
                 )
             else:
-                data = adapter_result.data
-                if (
-                    service == "beneficiary"
-                    and isinstance(payload, dict)
-                    and (payload.get("nameQuery") or payload.get("beneficiaryId"))
-                ):
-                    beneficiaries_raw = data.get("beneficiaries") if isinstance(data, dict) else None
-                    beneficiaries = beneficiaries_raw if isinstance(beneficiaries_raw, list) else []
-
-                    beneficiary_id = payload.get("beneficiaryId")
-                    if beneficiary_id is not None:
-                        matches = [
-                            b for b in beneficiaries
-                            if isinstance(b, dict) and b.get("id") == beneficiary_id
-                        ]
-                    else:
-                        matches = _match_beneficiaries(payload.get("nameQuery", ""), beneficiaries)
-
-                    if len(matches) == 0:
-                        beneficiary_reply_token = _beneficiary_not_found_reply(
-                            payload.get("nameQuery") or "that beneficiary"
-                        )
-                        yield _sse("token", {"token": beneficiary_reply_token})
-                        yield _result_event("CLARIFICATION_REQUIRED", None, None, None)
-                        turn_classification = {
-                            "type": "CLARIFICATION_REQUIRED",
-                            "category": None,
-                            "service": None,
-                            "subservice": None,
-                            "question": beneficiary_reply_token,
-                        }
-                    elif len(matches) == 1:
-                        matched = matches[0]
-                        destination = _resolve_beneficiary_destination(matched)
-                        beneficiary_reply_token = _beneficiary_match_reply(matched, destination)
-                        yield _sse("token", {"token": beneficiary_reply_token})
-                        routing_action = destination["action"] if destination else "manual"
-                        yield _result_event(
-                            "BENEFICIARY_MATCH",
-                            category,
-                            service,
-                            subservice,
-                            payload={"beneficiary": matched, "destination": destination},
-                            routing={
-                                "category": category,
-                                "service": service,
-                                "subservice": subservice,
-                                "action": routing_action,
-                            },
-                        )
-                        turn_classification = {
-                            "type": "BENEFICIARY_MATCH",
-                            "category": category,
-                            "service": service,
-                            "subservice": subservice,
-                        }
-                    else:
-                        beneficiary_reply_token = _beneficiary_selection_reply(matches)
-                        yield _sse("token", {"token": beneficiary_reply_token})
-                        yield _result_event(
-                            "BENEFICIARY_SELECTION_REQUIRED",
-                            category,
-                            service,
-                            subservice,
-                            payload={"beneficiaries": [_trim_beneficiary(b) for b in matches]},
-                        )
-                        turn_classification = {
-                            "type": "BENEFICIARY_SELECTION_REQUIRED",
-                            "category": category,
-                            "service": service,
-                            "subservice": subservice,
-                        }
-
+                try:
+                    adapter_result = await fulfill_banking_service(
+                        customer_identity, token, category, service, subservice, payload
+                    )
+                except AdapterAuthError:
+                    adapter_auth_error_token = "Please log in to continue with this request."
+                    yield _sse("token", {"token": adapter_auth_error_token})
+                    yield _result_event("AUTH_REQUIRED", category, service, subservice)
+                    turn_classification = {
+                        "type": "AUTH_REQUIRED",
+                        "category": category,
+                        "service": service,
+                        "subservice": subservice,
+                    }
+                    logger.info(json.dumps({"request_id": request_id, "type": "AUTH_REQUIRED", "token": adapter_auth_error_token}))
+                    audit.log_banking_turn(
+                        customer_identity,
+                        turn_classification,
+                        latency_ms=(time.monotonic() - turn_started_at) * 1000,
+                        request_id=request_id,
+                    )
+                except AdapterAccountSelectionRequiredError as exc:
+                    account_selection_token = _account_selection_reply(exc.accounts)
+                    yield _sse("token", {"token": account_selection_token})
+                    yield _result_event(
+                        "ACCOUNT_SELECTION_REQUIRED", category, service, subservice, payload={"accounts": exc.accounts}
+                    )
+                    turn_classification = {
+                        "type": "ACCOUNT_SELECTION_REQUIRED",
+                        "category": category,
+                        "service": service,
+                        "subservice": subservice,
+                        "question": account_selection_token,
+                    }
                     logger.info(json.dumps({
                         "request_id": request_id,
-                        "type": turn_classification["type"],
-                        "token": beneficiary_reply_token,
+                        "type": "ACCOUNT_SELECTION_REQUIRED",
+                        "token": account_selection_token,
+                    }))
+                    audit.log_banking_turn(
+                        customer_identity,
+                        turn_classification,
+                        latency_ms=(time.monotonic() - turn_started_at) * 1000,
+                        request_id=request_id,
+                    )
+                except AdapterUnavailableError:
+                    service_unavailable_token = "That service isn't available right now. Please try again shortly."
+                    yield _sse("token", {"token": service_unavailable_token})
+                    yield _result_event("SERVICE_UNAVAILABLE", category, service, subservice)
+                    turn_classification = {
+                        "type": "SERVICE_UNAVAILABLE",
+                        "category": category,
+                        "service": service,
+                        "subservice": subservice,
+                    }
+                    logger.info(json.dumps({
+                        "request_id": request_id,
+                        "type": "SERVICE_UNAVAILABLE",
+                        "token": service_unavailable_token,
                     }))
                     audit.log_banking_turn(
                         customer_identity,
@@ -785,38 +803,123 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                         request_id=request_id,
                     )
                 else:
-                    if data.get("mock") is True:
-                        banking_service_token = f"Sure — here's information about {service.replace('_', ' ')}."
+                    data = adapter_result.data
+                    if (
+                        service == "beneficiary"
+                        and isinstance(payload, dict)
+                        and (payload.get("nameQuery") or payload.get("beneficiaryId"))
+                    ):
+                        beneficiaries_raw = data.get("beneficiaries") if isinstance(data, dict) else None
+                        beneficiaries = beneficiaries_raw if isinstance(beneficiaries_raw, list) else []
+
+                        beneficiary_id = payload.get("beneficiaryId")
+                        if beneficiary_id is not None:
+                            matches = [
+                                b for b in beneficiaries
+                                if isinstance(b, dict) and b.get("id") == beneficiary_id
+                            ]
+                        else:
+                            matches = _match_beneficiaries(payload.get("nameQuery", ""), beneficiaries)
+
+                        if len(matches) == 0:
+                            beneficiary_reply_token = _beneficiary_not_found_reply(
+                                payload.get("nameQuery") or "that beneficiary"
+                            )
+                            yield _sse("token", {"token": beneficiary_reply_token})
+                            yield _result_event("CLARIFICATION_REQUIRED", None, None, None)
+                            turn_classification = {
+                                "type": "CLARIFICATION_REQUIRED",
+                                "category": None,
+                                "service": None,
+                                "subservice": None,
+                                "question": beneficiary_reply_token,
+                            }
+                        elif len(matches) == 1:
+                            matched = matches[0]
+                            destination = _resolve_beneficiary_destination(matched)
+                            beneficiary_reply_token = _beneficiary_match_reply(matched, destination)
+                            yield _sse("token", {"token": beneficiary_reply_token})
+                            routing_action = destination["action"] if destination else "manual"
+                            yield _result_event(
+                                "BENEFICIARY_MATCH",
+                                category,
+                                service,
+                                subservice,
+                                payload={"beneficiary": matched, "destination": destination},
+                                routing={
+                                    "category": category,
+                                    "service": service,
+                                    "subservice": subservice,
+                                    "action": routing_action,
+                                },
+                            )
+                            turn_classification = {
+                                "type": "BENEFICIARY_MATCH",
+                                "category": category,
+                                "service": service,
+                                "subservice": subservice,
+                            }
+                        else:
+                            beneficiary_reply_token = _beneficiary_selection_reply(matches)
+                            yield _sse("token", {"token": beneficiary_reply_token})
+                            yield _result_event(
+                                "BENEFICIARY_SELECTION_REQUIRED",
+                                category,
+                                service,
+                                subservice,
+                                payload={"beneficiaries": [_trim_beneficiary(b) for b in matches]},
+                            )
+                            turn_classification = {
+                                "type": "BENEFICIARY_SELECTION_REQUIRED",
+                                "category": category,
+                                "service": service,
+                                "subservice": subservice,
+                            }
+
+                        logger.info(json.dumps({
+                            "request_id": request_id,
+                            "type": turn_classification["type"],
+                            "token": beneficiary_reply_token,
+                        }))
+                        audit.log_banking_turn(
+                            customer_identity,
+                            turn_classification,
+                            latency_ms=(time.monotonic() - turn_started_at) * 1000,
+                            request_id=request_id,
+                        )
                     else:
-                        data = _enrich_payload(service, subservice, data)
-                        banking_service_token = await _synthesize_reply(req.message, service, subservice, data)
-                    yield _sse("token", {"token": banking_service_token})
-                    yield _result_event(
-                        "BANKING_SERVICE",
-                        category,
-                        service,
-                        subservice,
-                        payload=data,
-                        routing={"category": category, "service": service, "subservice": subservice, "action": "redirect"},
-                    )
-                    turn_classification = {
-                        "type": "BANKING_SERVICE",
-                        "category": category,
-                        "service": service,
-                        "subservice": subservice,
-                    }
-                    logger.info(json.dumps({
-                        "request_id": request_id,
-                        "type": "BANKING_SERVICE",
-                        "token": banking_service_token,
-                        "payload": data,
-                    }, default=str))
-                    audit.log_banking_turn(
-                        customer_identity,
-                        turn_classification,
-                        latency_ms=(time.monotonic() - turn_started_at) * 1000,
-                        request_id=request_id,
-                    )
+                        if data.get("mock") is True:
+                            banking_service_token = f"Sure — here's information about {service.replace('_', ' ')}."
+                        else:
+                            data = _enrich_payload(service, subservice, data)
+                            banking_service_token = await _synthesize_reply(req.message, service, subservice, data)
+                        yield _sse("token", {"token": banking_service_token})
+                        yield _result_event(
+                            "BANKING_SERVICE",
+                            category,
+                            service,
+                            subservice,
+                            payload=data,
+                            routing={"category": category, "service": service, "subservice": subservice, "action": "redirect"},
+                        )
+                        turn_classification = {
+                            "type": "BANKING_SERVICE",
+                            "category": category,
+                            "service": service,
+                            "subservice": subservice,
+                        }
+                        logger.info(json.dumps({
+                            "request_id": request_id,
+                            "type": "BANKING_SERVICE",
+                            "token": banking_service_token,
+                            "payload": data,
+                        }, default=str))
+                        audit.log_banking_turn(
+                            customer_identity,
+                            turn_classification,
+                            latency_ms=(time.monotonic() - turn_started_at) * 1000,
+                            request_id=request_id,
+                        )
 
     yield _sse("done", {})
 

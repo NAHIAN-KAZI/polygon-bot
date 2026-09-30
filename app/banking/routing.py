@@ -86,7 +86,13 @@ def build_system_prompt(taxonomy: dict) -> str:
         "Decision rules, in order:\n"
         "1. If the message asks for general information, explanation, or \"how does X work\" — "
         "NOT a request to perform an action on the customer's own account — call "
-        "answer_kb_question.\n"
+        "answer_kb_question. Exception: any message that is clearly asking about transaction "
+        "fees/charges/costs — however it's phrased, including informational-sounding wording "
+        "like \"what do you know about...\", \"tell me about...\", or \"can you explain...\" — "
+        "is NEVER a KB topic. Fees are a live, quotable real-time service, not static "
+        "background info, so always resolve fee questions via route_banking_service("
+        "category=\"fees\", service=\"fee_quote\", ...) when the transaction type and amount "
+        "are both known, or ask_clarification otherwise — never answer_kb_question.\n"
         "2. If the message clearly names a specific action the customer wants performed or "
         "checked on their own account, call route_banking_service with the category/service/"
         "subservice ids from the list below that best match. Only use ids that appear in this "
@@ -154,6 +160,12 @@ def build_system_prompt(taxonomy: dict) -> str:
         'bKash, or another wallet?")\n'
         '  (no transaction type or amount was named — this is vague like the card-help example '
         'above, so ASK rather than guessing which fee they mean)\n'
+        '- "what do you know about fees?" -> ask_clarification(question="Sure — which '
+        'transaction type would you like a fee quote for, and for what amount? For example, a '
+        'bank transfer, bKash, or another wallet?")\n'
+        '  (phrased informationally, like a KB question, but fees are always live-quotable via '
+        'route_banking_service/ask_clarification, never a KB topic — same handling and same '
+        'question as the "what are your fees" example above, never answer_kb_question)\n'
         '- "If i transfer 1000 from my account to bkash what is the fee?" -> '
         'route_banking_service(category="fees", service="fee_quote", payload='
         '{"transactionType": "bkash", "amount": 1000})\n'
