@@ -8,6 +8,7 @@ without real taxonomy values reliably guesses a banking-service route instead
 of asking for clarification.
 """
 
+import json
 from dataclasses import dataclass
 
 import httpx
@@ -45,6 +46,28 @@ class UnknownService:
 ClassificationResult = KbQuestion | BankingService | Clarification | UnknownService
 
 
+def _coerce_payload(raw: object) -> dict | None:
+    """Normalize a tool-call `payload` argument into a dict or None.
+
+    Ollama tool-calling (observed with qwen3:8b) can sometimes serialize the
+    nested `payload` object as a JSON-encoded string instead of a real nested
+    object. Downstream code (BankingService adapters) expects payload to be a
+    dict or None, so coerce a JSON string into its parsed dict here rather
+    than letting a `str` flow through and crash with `.get()` on a string
+    later. Anything that isn't a dict (already, or after parsing) collapses
+    to None instead of raising.
+    """
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+        except (ValueError, TypeError):
+            return None
+        return parsed if isinstance(parsed, dict) else None
+    return None
+
+
 def _render_taxonomy(taxonomy: dict) -> str:
     lines = []
     for category in taxonomy.get("categories", []):
@@ -67,7 +90,13 @@ def build_system_prompt(taxonomy: dict) -> str:
         "2. If the message clearly names a specific action the customer wants performed or "
         "checked on their own account, call route_banking_service with the category/service/"
         "subservice ids from the list below that best match. Only use ids that appear in this "
-        "list — never invent one.\n"
+        "list — never invent one. Exception: if the message BOTH describes performing an "
+        "action (transfer/send/withdraw/pay/replace/etc.) AND asks about its cost/fee/charge "
+        "(e.g. \"what is the fee\", \"how much would it cost\", \"what will I be charged\"), "
+        "classify by the cost question, not the action verb — route to category=\"fees\", "
+        "service=\"fee_quote\" instead. The action mention is context for the fee lookup (it "
+        "supplies transactionType/amount for the payload), not a request to execute the "
+        "action itself.\n"
         "3. If the message is vague or does not name a specific action or service, call "
         "ask_clarification with a specific question asking what the customer wants to do. Do "
         "NOT guess a service or subservice in this case.\n\n"
@@ -124,7 +153,24 @@ def build_system_prompt(taxonomy: dict) -> str:
         'would you like a fee quote for, and for what amount? For example, a bank transfer, '
         'bKash, or another wallet?")\n'
         '  (no transaction type or amount was named — this is vague like the card-help example '
-        'above, so ASK rather than guessing which fee they mean)'
+        'above, so ASK rather than guessing which fee they mean)\n'
+        '- "If i transfer 1000 from my account to bkash what is the fee?" -> '
+        'route_banking_service(category="fees", service="fee_quote", payload='
+        '{"transactionType": "bkash", "amount": 1000})\n'
+        '  (this names an action verb — "transfer" — but the actual ask is the cost of doing '
+        'it, not a request to execute the transfer. Classify by the cost question: route to '
+        'fees/fee_quote and extract the transaction type and amount into payload, exactly as '
+        'in the fee examples above)\n'
+        '- "if I send 5000 taka to another bank account, how much would it cost?" -> '
+        'route_banking_service(category="fees", service="fee_quote", payload='
+        '{"transactionType": "other_bank", "amount": 5000})\n'
+        '  (same pattern — "send" is an action verb, but "how much would it cost" is the real '
+        'question, so this is a fee lookup, not a transfer request)\n'
+        '- "what will I be charged if I withdraw 2000 from an ATM?" -> route_banking_service('
+        'category="fees", service="fee_quote", payload={"transactionType": "atm_withdrawal", '
+        '"amount": 2000})\n'
+        '  (same pattern with a different action verb — "withdraw" — and cost phrasing "what '
+        'will I be charged"; still a fee_quote, not an ATM withdrawal request)\n'
     )
 
 
@@ -279,7 +325,7 @@ async def classify(
             retry_category = retry_arguments.get("category")
             retry_service = retry_arguments.get("service")
             retry_subservice = retry_arguments.get("subservice") or None
-            retry_payload = retry_arguments.get("payload") or None
+            retry_payload = _coerce_payload(retry_arguments.get("payload"))
             if retry_category and retry_service and is_valid_path(
                 retry_category, retry_service, retry_subservice
             ):
@@ -305,7 +351,7 @@ async def classify(
         category = arguments.get("category")
         service = arguments.get("service")
         subservice = arguments.get("subservice") or None
-        payload = arguments.get("payload") or None
+        payload = _coerce_payload(arguments.get("payload"))
         if category and service and is_valid_path(category, service, subservice):
             return BankingService(
                 category=category, service=service, subservice=subservice, payload=payload
@@ -342,7 +388,7 @@ async def classify(
             retry_category = retry_arguments.get("category")
             retry_service = retry_arguments.get("service")
             retry_subservice = retry_arguments.get("subservice") or None
-            retry_payload = retry_arguments.get("payload") or None
+            retry_payload = _coerce_payload(retry_arguments.get("payload"))
             if retry_category and retry_service and is_valid_path(
                 retry_category, retry_service, retry_subservice
             ):

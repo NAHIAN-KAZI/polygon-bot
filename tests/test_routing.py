@@ -21,6 +21,7 @@ from app.banking.routing import (
     Clarification,
     KbQuestion,
     UnknownService,
+    _coerce_payload,
     _render_taxonomy,
     build_system_prompt,
     build_tools,
@@ -129,6 +130,67 @@ def test_build_system_prompt_embeds_rendered_taxonomy():
 
     assert "- banking (Banking)" in prompt
     assert "    - checking (Checking)" in prompt
+
+
+def test_build_system_prompt_rule_2_includes_action_plus_cost_exception_clause():
+    prompt = build_system_prompt(FAKE_TAXONOMY)
+
+    # T-47: an action verb (transfer/send/withdraw/pay/etc.) combined with a
+    # cost question (fee/charge/cost) must be classified by the cost question,
+    # not the action verb -- this locks in rule 2's amended clause so the fix
+    # can't be silently reverted or lost in a future prompt edit.
+    assert (
+        "Exception: if the message BOTH describes performing an action "
+        "(transfer/send/withdraw/pay/replace/etc.) AND asks about its cost/fee/charge"
+    ) in prompt
+    assert (
+        'classify by the cost question, not the action verb — route to category="fees", '
+        'service="fee_quote" instead.'
+    ) in prompt
+    assert (
+        "The action mention is context for the fee lookup (it supplies "
+        "transactionType/amount for the payload), not a request to execute the action "
+        "itself."
+    ) in prompt
+
+
+def test_build_system_prompt_includes_three_new_action_plus_fee_examples():
+    prompt = build_system_prompt(FAKE_TAXONOMY)
+
+    # T-47: the three new few-shot examples added to fix the misrouting bug --
+    # each pairs an action verb with a cost question and must resolve to
+    # fees/fee_quote, not the action's own category. Asserting the full
+    # example strings (message + resulting tool call) so a future prompt edit
+    # can't quietly drop or reword one of them.
+    assert (
+        '- "If i transfer 1000 from my account to bkash what is the fee?" -> '
+        'route_banking_service(category="fees", service="fee_quote", payload='
+        '{"transactionType": "bkash", "amount": 1000})'
+    ) in prompt
+    assert (
+        '- "if I send 5000 taka to another bank account, how much would it cost?" -> '
+        'route_banking_service(category="fees", service="fee_quote", payload='
+        '{"transactionType": "other_bank", "amount": 5000})'
+    ) in prompt
+    assert (
+        '- "what will I be charged if I withdraw 2000 from an ATM?" -> route_banking_service('
+        'category="fees", service="fee_quote", payload={"transactionType": "atm_withdrawal", '
+        '"amount": 2000})'
+    ) in prompt
+
+
+def test_build_system_prompt_new_examples_precede_unrelated_vulgar_example_block():
+    prompt = build_system_prompt(FAKE_TAXONOMY)
+
+    # The 3 new examples must land right after the existing "what are your
+    # fees" example and before the untouched T-46 vulgar-example block --
+    # guards against a future edit accidentally interleaving or reordering
+    # these two unrelated example groups.
+    fees_idx = prompt.index('- "what are your fees"')
+    new_example_idx = prompt.index('- "If i transfer 1000 from my account to bkash what is the fee?"')
+    vulgar_idx = prompt.index("you're a useless bot, screw this")
+
+    assert fees_idx < new_example_idx < vulgar_idx
 
 
 # --- build_tools --------------------------------------------------------------
@@ -768,3 +830,163 @@ def test_classify_zero_tool_calls_retry_missing_question_returns_fallback_clarif
     result = asyncio.run(classify("how much money do I have in my account?"))
 
     assert result == Clarification(question=_CLARIFICATION_FALLBACK)
+
+
+# --- classify: T-47 action-verb + cost-question routes to fees/fee_quote ---
+#
+# These don't test the model's own judgment (already live-verified 8/8
+# separately) -- they test classify()'s handling of the tool call the model
+# is now expected to make: category="fees", service="fee_quote" with a
+# payload carrying the action's transactionType/amount, for a message that
+# combines an action verb with a cost question.
+
+
+def test_classify_action_plus_cost_question_returns_fee_quote_banking_service(monkeypatch):
+    monkeypatch.setattr(routing, "is_valid_path", lambda *a, **k: True)
+    _install_post_response(
+        monkeypatch,
+        _ollama_response(
+            [
+                _tool_call(
+                    "route_banking_service",
+                    {
+                        "category": "fees",
+                        "service": "fee_quote",
+                        "payload": {"transactionType": "bkash", "amount": 1000},
+                    },
+                )
+            ]
+        ),
+    )
+
+    result = asyncio.run(
+        classify("If i transfer 1000 from my account to bkash what is the fee?")
+    )
+
+    assert result == BankingService(
+        category="fees",
+        service="fee_quote",
+        subservice=None,
+        payload={"transactionType": "bkash", "amount": 1000},
+    )
+    # must NOT have been misrouted to the action's own category (e.g. transfers)
+    assert result.category != "polygon_services"
+
+
+def test_classify_withdraw_plus_cost_question_returns_fee_quote_banking_service(monkeypatch):
+    monkeypatch.setattr(routing, "is_valid_path", lambda *a, **k: True)
+    _install_post_response(
+        monkeypatch,
+        _ollama_response(
+            [
+                _tool_call(
+                    "route_banking_service",
+                    {
+                        "category": "fees",
+                        "service": "fee_quote",
+                        "payload": {"transactionType": "atm_withdrawal", "amount": 2000},
+                    },
+                )
+            ]
+        ),
+    )
+
+    result = asyncio.run(classify("what will I be charged if I withdraw 2000 from an ATM?"))
+
+    assert result == BankingService(
+        category="fees",
+        service="fee_quote",
+        subservice=None,
+        payload={"transactionType": "atm_withdrawal", "amount": 2000},
+    )
+
+
+# --- _coerce_payload (T-48) --------------------------------------------------
+#
+# Ollama tool-calling (observed with qwen3:8b) can return `payload` as a
+# JSON-encoded string instead of a real nested object, which used to crash
+# downstream adapters with `AttributeError: 'str' object has no attribute
+# 'get'`. These lock in _coerce_payload's contract in isolation: dicts pass
+# through unchanged, JSON-object strings parse to dicts, and everything else
+# (non-dict JSON, malformed JSON, other types) collapses to None instead of
+# raising.
+
+
+def test_coerce_payload_dict_passthrough_unchanged():
+    payload = {"transactionType": "bkash", "amount": 1000}
+
+    assert _coerce_payload(payload) is payload
+
+
+def test_coerce_payload_json_object_string_parses_to_dict():
+    result = _coerce_payload('{"transactionType": "bkash", "amount": 1000}')
+
+    assert result == {"transactionType": "bkash", "amount": 1000}
+
+
+def test_coerce_payload_json_array_string_returns_none():
+    assert _coerce_payload("[1, 2, 3]") is None
+
+
+def test_coerce_payload_json_scalar_string_returns_none():
+    # a JSON string that parses to a JSON string (i.e. a quoted string)
+    assert _coerce_payload('"just a string"') is None
+
+
+def test_coerce_payload_json_number_string_returns_none():
+    assert _coerce_payload("42") is None
+
+
+def test_coerce_payload_malformed_json_string_returns_none_not_raises():
+    # unterminated object -- must not raise, just collapse to None
+    assert _coerce_payload('{"transactionType": "bkash"') is None
+
+
+def test_coerce_payload_none_returns_none():
+    assert _coerce_payload(None) is None
+
+
+def test_coerce_payload_int_returns_none():
+    assert _coerce_payload(42) is None
+
+
+def test_coerce_payload_list_returns_none():
+    assert _coerce_payload([{"transactionType": "bkash"}]) is None
+
+
+# --- classify: T-48 payload-as-JSON-string crash fix -------------------------
+
+
+def test_classify_route_banking_service_coerces_json_string_payload_to_dict(monkeypatch):
+    # Reproduces the live crash: Ollama's tool call returned `payload` as a
+    # JSON-encoded string rather than a nested object, which used to flow
+    # straight into BankingService.payload and later blow up in
+    # app/banking/adapters/real.py with `AttributeError: 'str' object has no
+    # attribute 'get'`. classify() must now coerce it to a real dict end to
+    # end, with no crash.
+    monkeypatch.setattr(routing, "is_valid_path", lambda *a, **k: True)
+    _install_post_response(
+        monkeypatch,
+        _ollama_response(
+            [
+                _tool_call(
+                    "route_banking_service",
+                    {
+                        "category": "fees",
+                        "service": "fee_quote",
+                        "payload": '{"transactionType": "bkash", "amount": 1000}',
+                    },
+                )
+            ]
+        ),
+    )
+
+    result = asyncio.run(classify("how much does it cost to send money via bKash"))
+
+    assert result == BankingService(
+        category="fees",
+        service="fee_quote",
+        subservice=None,
+        payload={"transactionType": "bkash", "amount": 1000},
+    )
+    assert isinstance(result.payload, dict)
