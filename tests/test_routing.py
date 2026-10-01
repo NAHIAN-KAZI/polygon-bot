@@ -345,7 +345,10 @@ def test_classify_includes_last_recent_turn_as_labeled_system_context(monkeypatc
     # it appears instead as a labeled, disregardable system-level context note
     system_texts = [m["content"] for m in sent_messages if m["role"] == "system"]
     assert any("I want to transfer money" in text and "Which transfer type?" in text for text in system_texts)
-    assert any("ignore this context" in text for text in system_texts)
+    # T-53: broadened from a strict "ignore this context" narrow-match instruction to a
+    # general rule that still lets the classifier disregard the pending context on a
+    # genuine subject change — assert the equivalent escape-hatch phrasing instead.
+    assert any("genuine subject change" in text for text in system_texts)
 
 
 def test_classify_uses_only_last_of_multiple_recent_turns(monkeypatch):

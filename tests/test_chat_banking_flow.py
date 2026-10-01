@@ -2264,3 +2264,265 @@ def test_non_fees_service_balance_unaffected_by_payload_guard(client, monkeypatc
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "BANKING_SERVICE"
     assert len(fulfill_calls) == 1
+
+
+# --- deterministic bare-amount completion of a pending T-49 payload ----------
+# --- guard (TASKS.md T-55): _extract_single_amount, --------------------------
+# --- _DETERMINISTIC_FIELD_EXTRACTORS, _try_deterministic_payload_completion, -
+# --- and their wiring into _chat_stream's implicit-classification path -------
+# --- (bypassing classify() when -- and only when -- the last turn was -------
+# --- specifically T-49's known-category/service guard, not a genuine --------
+# --- ambiguous Clarification). ------------------------------------------------
+
+
+# --- _extract_single_amount ---------------------------------------------------
+
+
+def test_extract_single_amount_plain_number():
+    assert chat_module._extract_single_amount("2000") == 2000
+
+
+def test_extract_single_amount_ignores_trailing_unit_word():
+    assert chat_module._extract_single_amount("2000 taka") == 2000
+    assert chat_module._extract_single_amount("5000 tk") == 5000
+
+
+def test_extract_single_amount_comma_separated_thousands():
+    assert chat_module._extract_single_amount("5,000") == 5000
+    assert chat_module._extract_single_amount("5,000 tk") == 5000
+
+
+def test_extract_single_amount_decimal():
+    assert chat_module._extract_single_amount("2000.50") == 2000.5
+
+
+def test_extract_single_amount_zero_numeric_substrings_returns_none():
+    assert chat_module._extract_single_amount("hello") is None
+
+
+def test_extract_single_amount_multiple_numeric_substrings_returns_none():
+    assert chat_module._extract_single_amount("2000 or 3000") is None
+
+
+# --- _try_deterministic_payload_completion ------------------------------------
+
+
+def _deterministic_guard_turn(**classification_overrides):
+    """A ChatTurn shaped like the T-49 guard's stored turn_classification: a
+    CLARIFICATION_REQUIRED with known, non-null category/service/missingFields
+    (as opposed to a genuine ambiguous Clarification, which stores
+    category=None/service=None)."""
+    classification = {
+        "type": "CLARIFICATION_REQUIRED",
+        "category": "fees",
+        "service": "fee_quote",
+        "subservice": None,
+        "payload": {"transactionType": "bkash"},
+        "question": "Sure — how much would you like to send via bkash?",
+        "missingFields": ["amount"],
+    }
+    classification.update(classification_overrides)
+    return chat_module.ChatTurn(
+        timestamp=datetime.now(timezone.utc),
+        message="send via bkash",
+        classification=classification,
+    )
+
+
+def test_try_deterministic_payload_completion_resolves_amount_from_bare_reply():
+    result = chat_module._try_deterministic_payload_completion([_deterministic_guard_turn()], "2000")
+    assert result == BankingService(
+        category="fees",
+        service="fee_quote",
+        subservice=None,
+        payload={"transactionType": "bkash", "amount": 2000},
+    )
+
+
+def test_try_deterministic_payload_completion_none_for_genuine_ambiguous_clarification():
+    ambiguous_turn = chat_module.ChatTurn(
+        timestamp=datetime.now(timezone.utc),
+        message="check my thing",
+        classification={
+            "type": "CLARIFICATION_REQUIRED",
+            "category": None,
+            "service": None,
+            "subservice": None,
+            "question": "Which account would you like to check?",
+        },
+    )
+    assert chat_module._try_deterministic_payload_completion([ambiguous_turn], "2000") is None
+    assert chat_module._try_deterministic_payload_completion([ambiguous_turn], "anything at all") is None
+
+
+def test_try_deterministic_payload_completion_none_when_missing_field_has_no_extractor():
+    turn = _deterministic_guard_turn(missingFields=["transactionType"], payload={"amount": 5000})
+    assert chat_module._try_deterministic_payload_completion([turn], "bkash") is None
+
+
+def test_try_deterministic_payload_completion_none_when_message_has_no_extractable_number():
+    turn = _deterministic_guard_turn()
+    assert chat_module._try_deterministic_payload_completion([turn], "not sure") is None
+    assert chat_module._try_deterministic_payload_completion([turn], "2000 or 3000") is None
+
+
+def test_try_deterministic_payload_completion_none_when_last_turn_not_clarification_required():
+    turn = chat_module.ChatTurn(
+        timestamp=datetime.now(timezone.utc),
+        message="what's my balance",
+        classification={"type": "BANKING_SERVICE", "category": "account_info", "service": "balance"},
+    )
+    assert chat_module._try_deterministic_payload_completion([turn], "2000") is None
+
+
+def test_try_deterministic_payload_completion_none_for_empty_recent_turns():
+    assert chat_module._try_deterministic_payload_completion([], "2000") is None
+
+
+# --- full /chat SSE flow: deterministic completion wired into _chat_stream ---
+
+
+def test_chat_stream_bare_amount_reply_bypasses_classify_and_completes_payload(client, monkeypatch):
+    """First call: an incomplete fees/fee_quote BankingService (as classify()
+    would return) trips the T-49 guard and asks for the amount; its
+    turn_classification (with missingFields) is what record_turn stores.
+    Second call: a bare-amount reply, with that stored turn now returned by
+    get_classification_context, must resolve deterministically -- classify()
+    must not be called again -- and the merged, now-complete payload must
+    reach fulfill_banking_service directly."""
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    classify_calls = []
+
+    async def fake_classify(message, recent_turns=None):
+        classify_calls.append(message)
+        return BankingService(
+            category="fees", service="fee_quote", subservice=None, payload={"transactionType": "bkash"}
+        )
+
+    recorded_turns = []
+
+    def fake_record_turn(customer_id, turn):
+        recorded_turns.append(turn)
+
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "get_classification_context", lambda customer_id: [])
+    monkeypatch.setattr(chat_module, "record_turn", fake_record_turn)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", _never_call_fulfill)
+
+    resp = client.post("/chat", json={"message": "how much to send via bkash"}, headers=JWT_HEADERS)
+
+    assert resp.status_code == 200
+    result_event = next(data for name, data in _parse_sse(resp.text) if name == "result")
+    assert result_event["type"] == "CLARIFICATION_REQUIRED"
+    assert len(classify_calls) == 1
+    assert len(recorded_turns) == 1
+
+    first_turn = recorded_turns[0]
+    assert first_turn.classification["missingFields"] == ["amount"]
+    assert first_turn.classification["category"] == "fees"
+    assert first_turn.classification["service"] == "fee_quote"
+
+    # Second call: bare-amount reply, session now returns the stored guard turn.
+    monkeypatch.setattr(chat_module, "get_classification_context", lambda customer_id: [first_turn])
+
+    fulfill_calls = []
+    mock_data = {"mock": True, "note": "synthetic fee quote"}
+
+    async def fake_fulfill(customer_identity, jwt, category, service, subservice, payload):
+        fulfill_calls.append((category, service, subservice, payload))
+        return AdapterResult(data=mock_data)
+
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", fake_fulfill)
+
+    resp2 = client.post("/chat", json={"message": "2000"}, headers=JWT_HEADERS)
+
+    assert resp2.status_code == 200
+    result_event2 = next(data for name, data in _parse_sse(resp2.text) if name == "result")
+    assert result_event2["type"] == "BANKING_SERVICE"
+    assert result_event2["payload"] == mock_data
+
+    # classify() was never called for the second turn -- the deterministic
+    # path resolved it entirely on its own.
+    assert len(classify_calls) == 1
+    assert len(fulfill_calls) == 1
+    assert fulfill_calls[0] == ("fees", "fee_quote", None, {"transactionType": "bkash", "amount": 2000})
+
+
+def test_chat_stream_unparseable_amount_reply_falls_through_to_classify(client, monkeypatch):
+    """A reply that doesn't unambiguously supply the missing amount (no
+    numbers at all here) must not be guessed at -- it falls through to a
+    normal, fresh classify() call, exactly as if no guard were pending."""
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    classify_calls = []
+
+    async def fake_classify(message, recent_turns=None):
+        classify_calls.append(message)
+        return BankingService(category="account_info", service="balance", subservice=None, payload=None)
+
+    stored_turn = _deterministic_guard_turn()
+
+    fulfill_calls = []
+
+    async def fake_fulfill(customer_identity, jwt, category, service, subservice, payload):
+        fulfill_calls.append((category, service, subservice, payload))
+        return AdapterResult(data={"balance": "500.00"})
+
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "get_classification_context", lambda customer_id: [stored_turn])
+    monkeypatch.setattr(chat_module, "record_turn", _spy())
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", fake_fulfill)
+
+    resp = client.post("/chat", json={"message": "not sure"}, headers=JWT_HEADERS)
+
+    assert resp.status_code == 200
+    result_event = next(data for name, data in _parse_sse(resp.text) if name == "result")
+    assert result_event["type"] == "BANKING_SERVICE"
+
+    assert classify_calls == ["not sure"]
+    assert len(fulfill_calls) == 1
+
+
+def test_chat_stream_genuine_ambiguous_clarification_never_uses_deterministic_path(client, monkeypatch):
+    """A genuinely ambiguous prior Clarification (category=None/service=None)
+    must always be resolved via classify(), regardless of what the follow-up
+    message looks like -- even a bare number, which would otherwise look
+    exactly like a valid deterministic-completion reply."""
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    classify_calls = []
+
+    async def fake_classify(message, recent_turns=None):
+        classify_calls.append(message)
+        return Clarification(question="Which account would you like to check?")
+
+    stored_turn = chat_module.ChatTurn(
+        timestamp=datetime.now(timezone.utc),
+        message="check my thing",
+        classification={
+            "type": "CLARIFICATION_REQUIRED",
+            "category": None,
+            "service": None,
+            "subservice": None,
+            "question": "Which account would you like to check?",
+        },
+    )
+
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "get_classification_context", lambda customer_id: [stored_turn])
+    monkeypatch.setattr(chat_module, "record_turn", _spy())
+
+    resp = client.post("/chat", json={"message": "2000"}, headers=JWT_HEADERS)
+
+    assert resp.status_code == 200
+    assert classify_calls == ["2000"]

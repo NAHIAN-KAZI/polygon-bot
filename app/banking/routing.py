@@ -290,17 +290,67 @@ async def classify(
     if recent_turns:
         last_turn = recent_turns[-1]
         pending_question = (last_turn.classification or {}).get("question") or "a clarifying question"
+        # T-53: broaden what counts as "answering" a pending clarification beyond bare
+        # nouns/amounts/yes-or-no — a full-sentence reply that names the missing piece the
+        # question asked for (e.g. "I want to transfer money to bkash" naming a transaction
+        # type) is still an answer, not a new unrelated request, even though it reads like
+        # one. This is a general context-continuity fix, not fees-specific: any pending
+        # clarification's genuine answer can be phrased as a full sentence of intent.
+        general_reasoning = (
+            f'PENDING CLARIFICATION (read first — overrides the general decision rules above '
+            f'for this one reply): you previously asked the customer "{pending_question}" in '
+            f'response to their message "{last_turn.message}", and got no clear answer yet. As '
+            "a general rule, treat the customer's new message below as the answer to THAT "
+            "pending question whenever it names or implies the missing piece the question "
+            "asked for (a transaction type, method, amount, account type, etc.) — even when "
+            "it's phrased as a full sentence describing an action/intent rather than a bare "
+            'word (e.g. "I want to transfer money to bkash" IS naming a transaction type, not '
+            "a subject change). Only treat the new message as a genuinely new, unrelated "
+            "request when it changes the subject to a different KIND of thing entirely (e.g. "
+            "the pending question was about fees, but the new message instead asks about "
+            "balance, account info, or login history)."
+        )
+        # The bulleted, imperative worked example below (naming the exact tool call to make)
+        # is dramatically more reliable in practice than reasoning/narrative prose alone —
+        # confirmed live (T-53) that qwen3:8b's tool-call choice needs a concrete grounded
+        # example, not just an abstract rule, to reliably resist matching the new message's
+        # surface wording (e.g. "transfer"/"bkash") to an unrelated taxonomy path. Only
+        # include it when the pending question we actually asked was itself a fee-quote
+        # question (detected from its own text) — never assert this fees/fee_quote-specific
+        # resolution for some other pending clarification (e.g. a card-help question), where
+        # it would be wrong.
+        if "fee quote" in pending_question.lower():
+            worked_example = (
+                "\n- If the new message names a transaction type/method (e.g. bKash, Nagad, "
+                "another bank, ATM, cash) — with or without an amount, and however it's "
+                'phrased (a bare word or a full sentence like "I want to transfer money from '
+                'bank to bkash") — call route_banking_service(category="fees", '
+                'service="fee_quote", payload={"transactionType": "<method named>", ...amount '
+                "if present}). This is the only acceptable route_banking_service call for this "
+                "reply — never beneficiary, never a transfer/wallet action, never any other "
+                "category/service, even though the message is phrased like an action "
+                "request.\n"
+                "- If the new message still gives no transaction type at all, call "
+                "ask_clarification repeating the same kind of question.\n"
+                "- Only classify independently per the general rules above if the new message "
+                "is a genuine subject change (different kind of thing entirely, not just a "
+                "different phrasing of the fee answer)."
+            )
+        else:
+            worked_example = (
+                "\n- If the new message supplies the missing piece, resolve it using the SAME "
+                "category/service the pending question was already about — do not switch to a "
+                "different, unrelated category/service just because the new message's wording "
+                "happens to overlap with another feature's vocabulary.\n"
+                "- If the new message still doesn't supply what the pending question needs, "
+                "call ask_clarification, repeating what's still missing.\n"
+                "- Only classify independently per the general rules above if the new message "
+                "is a genuine subject change (a different kind of thing entirely, not just a "
+                "different phrasing of the same answer)."
+            )
         messages.append({
             "role": "system",
-            "content": (
-                f'Context: the customer\'s previous message was "{last_turn.message}", and we '
-                f'asked them: "{pending_question}" — still unanswered. Only use this context if '
-                "the NEW message below is clearly answering that specific question (e.g. a bare "
-                "amount, an account type, yes/no, or a short direct reply to it). If the new "
-                "message is about something else entirely — a different topic, a new banking "
-                "request, or anything unrelated to that question — ignore this context "
-                "completely and classify the new message independently."
-            ),
+            "content": general_reasoning + worked_example,
         })
     messages.append({"role": "user", "content": message})
 

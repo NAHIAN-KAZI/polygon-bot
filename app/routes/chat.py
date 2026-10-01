@@ -111,6 +111,95 @@ def _payload_clarification_question(category: str, service: str, payload: dict |
     return "Could you share a few more details so I can help with that?"
 
 
+# T-55: deterministic completion of a still-pending T-49 payload-completeness guard,
+# without re-deriving category/service/payload from scratch via classify(). Live-tested
+# (llama3.1:8b) that asking the LLM to resolve a bare-amount reply like "2000 taka" to a
+# clarification it JUST asked is 0/3 reliable for this structural pattern -- unlike a
+# genuine ask_clarification() (real ambiguity), the T-49 guard fires when category/service
+# are already known for certain and only a payload field is missing, so that certainty
+# should never be thrown away and re-guessed from raw text. Only "amount" has an actual
+# extractor right now; any other missing field name simply has no entry below, so
+# _try_deterministic_payload_completion falls through to classify() unchanged for it --
+# this is intentionally generic (keyed off the missing field's name) so a future
+# required-payload service can plug in its own extractor here without new branching in
+# _chat_stream.
+_AMOUNT_RE = re.compile(r"\d+(?:,\d{3})*(?:\.\d+)?")
+
+
+def _extract_single_amount(message: str) -> float | int | None:
+    """Best-effort deterministic amount extraction for a bare-amount clarification
+    reply (e.g. "2000", "2000 taka", "5,000 tk"). Returns the parsed number only if
+    exactly one numeric substring is found in `message` -- multiple numbers make the
+    reply ambiguous (which one answers the pending question?), so callers should fall
+    back to the normal classify() path rather than guess. Never raises."""
+    matches = _AMOUNT_RE.findall(message)
+    if len(matches) != 1:
+        return None
+    try:
+        value = float(matches[0].replace(",", ""))
+    except ValueError:
+        return None
+    return int(value) if value.is_integer() else value
+
+
+_DETERMINISTIC_FIELD_EXTRACTORS: dict[str, Callable[[str], object | None]] = {
+    "amount": _extract_single_amount,
+}
+
+
+def _try_deterministic_payload_completion(
+    recent_turns: list[ChatTurn], message: str
+) -> BankingService | None:
+    """If the last turn was T-49's deterministic payload-completeness guard -- a
+    CLARIFICATION_REQUIRED with a known, non-null category/service/missingFields, as
+    opposed to a genuinely ambiguous Clarification (which always stores
+    category=None/service=None) -- attempts to resolve the still-missing payload
+    field(s) directly from `message`, without calling classify() at all.
+
+    Returns a BankingService (payload merged with whatever could be deterministically
+    resolved, possibly still incomplete) to be handled exactly like a fresh classify()
+    BankingService result -- the existing _missing_payload_fields guard downstream will
+    ask for whatever, if anything, is still missing. Returns None (meaning: fall through
+    to the normal classify() path unchanged) whenever nothing could be resolved -- e.g.
+    the last turn isn't this specific kind of pending clarification, or `message` doesn't
+    unambiguously supply any of the missing fields (a genuine subject change, an
+    unrelated full-sentence reply, or an ambiguous message with 0 or 2+ numbers) -- never
+    forces a guess.
+    """
+    if not recent_turns:
+        return None
+    last_classification = recent_turns[-1].classification or {}
+    if last_classification.get("type") != "CLARIFICATION_REQUIRED":
+        return None
+
+    category = last_classification.get("category")
+    service = last_classification.get("service")
+    missing_fields = last_classification.get("missingFields")
+    if not category or not service or not missing_fields:
+        return None
+
+    payload = dict(last_classification.get("payload") or {})
+    resolved_any = False
+    for field in missing_fields:
+        extractor = _DETERMINISTIC_FIELD_EXTRACTORS.get(field)
+        if extractor is None:
+            continue
+        value = extractor(message)
+        if value is not None:
+            payload[field] = value
+            resolved_any = True
+
+    if not resolved_any:
+        return None
+
+    return BankingService(
+        category=category,
+        service=service,
+        subservice=last_classification.get("subservice"),
+        payload=payload,
+    )
+
+
 def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
@@ -629,14 +718,16 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                 category=req.category, service=req.service, subservice=req.subservice
             )
     else:
-        result = await classify(req.message, recent_turns=recent_turns)
-        if isinstance(result, BankingService) and req.payload is not None:
-            result = BankingService(
-                category=result.category,
-                service=result.service,
-                subservice=result.subservice,
-                payload=req.payload,
-            )
+        result = _try_deterministic_payload_completion(recent_turns, req.message)
+        if result is None:
+            result = await classify(req.message, recent_turns=recent_turns)
+            if isinstance(result, BankingService) and req.payload is not None:
+                result = BankingService(
+                    category=result.category,
+                    service=result.service,
+                    subservice=result.subservice,
+                    payload=req.payload,
+                )
 
     turn_classification: dict | None = None
 
@@ -719,10 +810,12 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                 yield _result_event("CLARIFICATION_REQUIRED", None, None, None)
                 turn_classification = {
                     "type": "CLARIFICATION_REQUIRED",
-                    "category": None,
-                    "service": None,
-                    "subservice": None,
+                    "category": category,
+                    "service": service,
+                    "subservice": subservice,
+                    "payload": payload,
                     "question": clarification_question,
+                    "missingFields": missing_fields,
                 }
                 logger.info(json.dumps({
                     "request_id": request_id,

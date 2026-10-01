@@ -107,7 +107,18 @@ data: {}
   `payload.transactionType` and `payload.amount`, and if either is missing (whether the message
   was routed here directly or via classification) the response is a `CLARIFICATION_REQUIRED`
   asking specifically for whichever piece is missing, rather than a `SERVICE_UNAVAILABLE` — this
-  is checked deterministically before the downstream fee-quote call is ever attempted.
+  is checked deterministically before the downstream fee-quote call is ever attempted. The
+  customer's very next message is then also resolved deterministically (no LLM re-classification)
+  whenever it's a bare numeric reply to this specific kind of clarification (e.g. "2000", "2000
+  taka", "5,000 tk") — the still-missing `amount` is parsed straight out of that reply and merged
+  into the payload the guard already knew, rather than re-deriving category/service from scratch.
+  If the reply instead has zero or 2+ numbers in it, or answers a *different* still-missing field
+  (only `amount` has an extractor today), this deterministic step is skipped and the message is
+  classified normally, exactly as before. This only ever applies to a reply following *this*
+  guard's own `CLARIFICATION_REQUIRED` — a genuinely ambiguous `CLARIFICATION_REQUIRED` (freeform
+  `ask_clarification`, wire-identical: `category`/`service`/`subservice`/`payload`/`routing` all
+  `null`) is unaffected and always goes through the normal classification path for the next
+  message too.
 - `AUTH_REQUIRED` — the message maps to a real banking service but no valid customer identity was
   presented (missing/invalid `Authorization`, or the downstream service rejected it).
   `category`/`service`/`subservice` are populated, `payload`/`routing` are `null`.
