@@ -22,7 +22,11 @@ conventions) — these are narrow, intent-specific supplements.
    - What to render for `CLARIFICATION_REQUIRED`/`SERVICE_UNAVAILABLE` for
      this intent specifically, if it differs from the generic case.
    - A short code snippet showing the parse-and-render logic for this
-     specific payload shape.
+     specific payload shape — **in Dart**, since the bank's app (and its
+     screens referenced in `API_SCREEN_MAP.md`) is Flutter/Dart, not a JS
+     web frontend. Use the `http` package's streamed `Request`/`StreamedResponse`
+     and manual SSE line parsing (`event:`/`data:`) unless the team confirms
+     they already have an SSE client package in use.
    - Any action buttons/next-screen navigation this intent implies, or an
      explicit note that none apply.
 5. **Live-verified** — exact messages tested, dated, with real results.
@@ -32,3 +36,7 @@ conventions) — these are narrow, intent-specific supplements.
 ## Index
 
 - [FEES.md](FEES.md) — transaction fee/charge quote.
+- [ACCOUNT_INFO.md](ACCOUNT_INFO.md) — balance, accounts, device/login
+  history, cards, loans, FD/DPS profit history.
+- [ATM_SUPPORT.md](ATM_SUPPORT.md) — list disputes (read-only part only;
+  cash-by-code/raise-dispute remain blocked/gather-only, not covered here).
