@@ -193,6 +193,129 @@ def test_build_system_prompt_new_examples_precede_unrelated_vulgar_example_block
     assert fees_idx < new_example_idx < vulgar_idx
 
 
+# --- T-56: transfer-specific rule + its 4 new few-shot examples ---------------
+# --- (independent prompt-content regression coverage -- the implementing -----
+# --- agent live-verified behavior against a real model but did not add -------
+# --- these assertions, so a future prompt edit could silently drop/reword ----
+# --- the rule or an example without any test catching it). -------------------
+
+
+def test_build_system_prompt_includes_transfer_specific_rule():
+    prompt = build_system_prompt(FAKE_TAXONOMY)
+
+    # T-56: this bank never executes a transfer through chat -- once a
+    # destination TYPE is named, route immediately with whatever of
+    # accountNumber/walletNumber/amount is already known in the message,
+    # never ask_clarification merely because the account/wallet number or
+    # amount itself is still missing (a separate mechanism asks for that).
+    assert (
+        "Transfer-specific rule: this bank never executes a transfer through this chat — it "
+        "only gathers details and hands back a confirmation summary for the customer to "
+        "complete in the real app."
+    ) in prompt
+    assert (
+        'route immediately to route_banking_service with category="transfer", '
+        'service="bank_transfer" or "wallet_transfer" as appropriate, and the specific '
+        "subservice, even if the destination account/wallet number and/or amount are not yet "
+        "known."
+    ) in prompt
+    assert (
+        "do NOT call ask_clarification in this case; a separate "
+        "mechanism already asks the customer for whatever's still missing."
+    ) in prompt
+    assert (
+        "Only use "
+        'ask_clarification when the destination TYPE itself is still unknown (e.g. "I want to '
+        'transfer money" names no type at all).'
+    ) in prompt
+
+
+def test_build_system_prompt_transfer_rule_distinguishes_named_person_from_raw_account():
+    prompt = build_system_prompt(FAKE_TAXONOMY)
+
+    # T-56: this sentence is the ENTIRE mechanism that disambiguates "send
+    # money to Ashan" (polygon_services/beneficiary) from "send money to
+    # account 1234567890" (transfer/bank_transfer) -- there is no code-level
+    # disambiguation, so losing this text silently would leave the model's
+    # choice between the two paths undefined for a message naming both a
+    # person and a raw account/wallet number in the same breath.
+    assert (
+        "Important distinction: naming a specific "
+        'PERSON to send money to (e.g. "send money to Ashan") — not a raw account/wallet '
+        "number — is the separate polygon_services/beneficiary path below, not transfer/"
+        "bank_transfer or transfer/wallet_transfer; only use the transfer category when a raw "
+        "account number, wallet number, or \"own account\" is named, never a person's name."
+    ) in prompt
+
+
+def test_build_system_prompt_includes_four_new_transfer_examples():
+    prompt = build_system_prompt(FAKE_TAXONOMY)
+
+    # T-56's 4 new few-shot examples -- asserting the full example string
+    # (message + resulting tool call) so a future prompt edit can't quietly
+    # drop or reword one of them.
+    assert (
+        '- "transfer 5000 to account 1234567890 via other bank" -> route_banking_service('
+        'category="transfer", service="bank_transfer", subservice="other_bank", payload='
+        '{"accountNumber": "1234567890", "amount": 5000})'
+    ) in prompt
+    assert (
+        '- "send 2000 to my bkash 01812345678" -> route_banking_service(category="transfer", '
+        'service="wallet_transfer", subservice="bkash", payload={"walletNumber": '
+        '"01812345678", "amount": 2000})'
+    ) in prompt
+    assert (
+        '- "transfer money to my own account" -> route_banking_service(category="transfer", '
+        'service="bank_transfer", subservice="own_account", payload={})'
+    ) in prompt
+    assert (
+        '- "I want to send 5000 to another bank account" -> route_banking_service('
+        'category="transfer", service="bank_transfer", subservice="other_bank", payload='
+        '{"amount": 5000})'
+    ) in prompt
+
+
+def test_build_system_prompt_transfer_examples_follow_beneficiary_examples_precede_fee_examples():
+    prompt = build_system_prompt(FAKE_TAXONOMY)
+
+    # Ordering lock: the 4 new transfer examples must land right after the
+    # existing beneficiary (Ashan/Dipu) examples -- confirming that
+    # unaffected path is still present and unmoved -- and before the
+    # untouched fee_quote examples, not interleaved with either group.
+    ashan_idx = prompt.index('- "send money to Ashan"')
+    dipu_idx = prompt.index('- "transfer 500 taka to Dipu"')
+    transfer_account_idx = prompt.index('- "transfer 5000 to account 1234567890 via other bank"')
+    transfer_wallet_idx = prompt.index('- "send 2000 to my bkash 01812345678"')
+    transfer_own_idx = prompt.index('- "transfer money to my own account"')
+    transfer_partial_idx = prompt.index('- "I want to send 5000 to another bank account"')
+    fee_idx = prompt.index('- "what\'s the fee for a bank transfer"')
+
+    assert (
+        ashan_idx
+        < dipu_idx
+        < transfer_account_idx
+        < transfer_wallet_idx
+        < transfer_own_idx
+        < transfer_partial_idx
+        < fee_idx
+    )
+
+
+def test_build_system_prompt_pre_existing_transfer_ask_clarification_example_unaffected():
+    prompt = build_system_prompt(FAKE_TAXONOMY)
+
+    # Pre-existing (not part of T-56) example for a destination-TYPE-unknown
+    # transfer message -- the one case where ask_clarification remains
+    # correct for a transfer-shaped message -- must still be present
+    # verbatim, confirming the new "route immediately once type is known"
+    # rule didn't overwrite or contradict it.
+    assert (
+        '- "I want to transfer money" -> ask_clarification(question="Sure — how would you like '
+        'to transfer money? For example, to your own account, another bank, or a mobile wallet '
+        'like bKash?")'
+    ) in prompt
+
+
 # --- build_tools --------------------------------------------------------------
 
 

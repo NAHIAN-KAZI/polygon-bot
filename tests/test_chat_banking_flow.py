@@ -2098,6 +2098,33 @@ def test_payload_clarification_question_unmapped_pair_uses_generic_fallback():
     assert question == "Could you share a few more details so I can help with that?"
 
 
+def test_payload_clarification_question_fees_fee_quote_dispatch_byte_identical_with_and_without_subservice():
+    """T-56 extended _payload_clarification_question's and
+    _PAYLOAD_CLARIFICATION_BUILDERS' signatures to also pass a `subservice`
+    argument through to every builder (needed by the new transfer builders).
+    Confirms this signature change left fees/fee_quote's dispatch and output
+    completely byte-identical to _fee_quote_clarification_question's own
+    direct output -- both when subservice is omitted (its default, matching
+    every pre-T-56 call site) and when some subservice value is explicitly
+    passed through (fee_quote itself has no subservice in the real taxonomy,
+    so the builder must simply ignore it rather than erroring or changing
+    its wording)."""
+    payload = {"transactionType": "other_bank"}
+    expected = chat_module._fee_quote_clarification_question(payload)
+
+    assert chat_module._payload_clarification_question("fees", "fee_quote", payload) == expected
+    assert (
+        chat_module._payload_clarification_question("fees", "fee_quote", payload, subservice=None)
+        == expected
+    )
+    assert (
+        chat_module._payload_clarification_question(
+            "fees", "fee_quote", payload, subservice="some_subservice"
+        )
+        == expected
+    )
+
+
 def test_fees_fee_quote_payload_none_yields_clarification_without_calling_adapter(client, monkeypatch):
     async def fake_classify(message, recent_turns=None):
         return BankingService(category="fees", service="fee_quote", subservice=None, payload=None)
@@ -2263,6 +2290,565 @@ def test_non_fees_service_balance_unaffected_by_payload_guard(client, monkeypatc
 
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "BANKING_SERVICE"
+    assert len(fulfill_calls) == 1
+
+
+# --- TRANSFER intent, response side only (TASKS.md T-56): transfer/bank_transfer -----
+# --- and transfer/wallet_transfer extend the T-49 required-payload-fields guard, ----
+# --- but once the payload is complete there is NO real adapter call at all (ADR-0008 /
+# --- the standing GET-only policy -- a transfer is never executed from here) --------
+# --- -- instead a deterministic BANKING_SERVICE confirmation summary is built and ---
+# --- emitted directly. --------------------------------------------------------------
+
+
+def test_missing_payload_fields_transfer_bank_transfer_none_payload_returns_both():
+    assert chat_module._missing_payload_fields("transfer", "bank_transfer", None) == [
+        "accountNumber",
+        "amount",
+    ]
+
+
+def test_missing_payload_fields_transfer_bank_transfer_complete_payload_returns_empty():
+    payload = {"accountNumber": "1234567890", "amount": 5000}
+    assert chat_module._missing_payload_fields("transfer", "bank_transfer", payload) == []
+
+
+def test_missing_payload_fields_transfer_wallet_transfer_none_payload_returns_both():
+    assert chat_module._missing_payload_fields("transfer", "wallet_transfer", None) == [
+        "walletNumber",
+        "amount",
+    ]
+
+
+def test_missing_payload_fields_transfer_wallet_transfer_complete_payload_returns_empty():
+    payload = {"walletNumber": "01812345678", "amount": 2000}
+    assert chat_module._missing_payload_fields("transfer", "wallet_transfer", payload) == []
+
+
+# --- clarification-question builders --------------------------------------------------
+
+
+def test_bank_transfer_clarification_question_both_missing_names_subservice():
+    question = chat_module._bank_transfer_clarification_question(None, "other_bank")
+    assert question == (
+        "Sure — which account number would you like to send money to via Other Bank "
+        "Transfer, and how much?"
+    )
+
+
+def test_bank_transfer_clarification_question_amount_missing_names_account():
+    question = chat_module._bank_transfer_clarification_question(
+        {"accountNumber": "1234567890"}, "other_bank"
+    )
+    assert question == "Sure — how much would you like to send to account 1234567890?"
+
+
+def test_bank_transfer_clarification_question_account_missing_mentions_formatted_amount():
+    question = chat_module._bank_transfer_clarification_question({"amount": 5000}, "other_bank")
+    assert question == "Sure — which account number would you like to send ৳5,000 to?"
+
+
+def test_wallet_transfer_clarification_question_both_missing_names_provider():
+    question = chat_module._wallet_transfer_clarification_question(None, "bkash")
+    assert question == "Sure — to which bKash number would you like to send money, and how much?"
+
+
+def test_wallet_transfer_clarification_question_amount_missing_names_wallet_number():
+    question = chat_module._wallet_transfer_clarification_question(
+        {"walletNumber": "01812345678"}, "bkash"
+    )
+    assert question == (
+        "Sure — how much would you like to send to your bKash number 01812345678?"
+    )
+
+
+def test_wallet_transfer_clarification_question_wallet_number_missing_mentions_formatted_amount():
+    question = chat_module._wallet_transfer_clarification_question({"amount": 5000}, "bkash")
+    assert question == "Sure — which bKash number would you like to send ৳5,000 to?"
+
+
+# --- full _chat_stream wiring: incomplete payload -> CLARIFICATION_REQUIRED, --------
+# --- never touching fulfill_banking_service ------------------------------------------
+
+
+def test_transfer_bank_transfer_missing_amount_asks_for_amount_naming_account(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return BankingService(
+            category="transfer",
+            service="bank_transfer",
+            subservice="other_bank",
+            payload={"accountNumber": "1234567890"},
+        )
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", _never_call_fulfill)
+    _install_session_fakes(monkeypatch)
+
+    resp = client.post(
+        "/chat", json={"message": "send money to account 1234567890"}, headers=JWT_HEADERS
+    )
+
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    assert [name for name, _ in events] == ["token", "result", "done"]
+
+    token_event = next(data for name, data in events if name == "token")
+    assert token_event["token"] == "Sure — how much would you like to send to account 1234567890?"
+
+    result_event = next(data for name, data in events if name == "result")
+    assert result_event["type"] == "CLARIFICATION_REQUIRED"
+    assert result_event["payload"] is None
+    assert result_event["routing"] is None
+
+
+def test_transfer_bank_transfer_missing_account_number_asks_for_account(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return BankingService(
+            category="transfer",
+            service="bank_transfer",
+            subservice="other_bank",
+            payload={"amount": 5000},
+        )
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", _never_call_fulfill)
+    _install_session_fakes(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "send 5000 to other bank"}, headers=JWT_HEADERS)
+
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    token_event = next(data for name, data in events if name == "token")
+    assert token_event["token"] == "Sure — which account number would you like to send ৳5,000 to?"
+
+    result_event = next(data for name, data in events if name == "result")
+    assert result_event["type"] == "CLARIFICATION_REQUIRED"
+
+
+def test_transfer_bank_transfer_missing_both_asks_for_both_naming_subservice(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return BankingService(
+            category="transfer", service="bank_transfer", subservice="other_bank", payload=None
+        )
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", _never_call_fulfill)
+    _install_session_fakes(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "I want to send money"}, headers=JWT_HEADERS)
+
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    token_event = next(data for name, data in events if name == "token")
+    assert token_event["token"] == (
+        "Sure — which account number would you like to send money to via Other Bank "
+        "Transfer, and how much?"
+    )
+
+    result_event = next(data for name, data in events if name == "result")
+    assert result_event["type"] == "CLARIFICATION_REQUIRED"
+
+
+def test_transfer_wallet_transfer_missing_amount_asks_for_amount(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return BankingService(
+            category="transfer",
+            service="wallet_transfer",
+            subservice="bkash",
+            payload={"walletNumber": "01812345678"},
+        )
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", _never_call_fulfill)
+    _install_session_fakes(monkeypatch)
+
+    resp = client.post(
+        "/chat", json={"message": "send to my bkash 01812345678"}, headers=JWT_HEADERS
+    )
+
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    token_event = next(data for name, data in events if name == "token")
+    assert token_event["token"] == (
+        "Sure — how much would you like to send to your bKash number 01812345678?"
+    )
+
+    result_event = next(data for name, data in events if name == "result")
+    assert result_event["type"] == "CLARIFICATION_REQUIRED"
+
+
+def test_transfer_wallet_transfer_missing_both_asks_for_both_naming_provider(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return BankingService(
+            category="transfer", service="wallet_transfer", subservice="bkash", payload=None
+        )
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", _never_call_fulfill)
+    _install_session_fakes(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "send money via bkash"}, headers=JWT_HEADERS)
+
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    token_event = next(data for name, data in events if name == "token")
+    assert token_event["token"] == (
+        "Sure — to which bKash number would you like to send money, and how much?"
+    )
+
+    result_event = next(data for name, data in events if name == "result")
+    assert result_event["type"] == "CLARIFICATION_REQUIRED"
+
+
+# --- full _chat_stream wiring: complete payload -> deterministic BANKING_SERVICE -----
+# --- confirmation summary, no adapter call at all ------------------------------------
+
+
+def test_transfer_bank_transfer_complete_payload_builds_summary_without_calling_adapter(
+    client, monkeypatch
+):
+    async def fake_classify(message, recent_turns=None):
+        return BankingService(
+            category="transfer",
+            service="bank_transfer",
+            subservice="other_bank",
+            payload={"accountNumber": "1234567890", "amount": 5000},
+        )
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", _never_call_fulfill)
+    record_turn_spy = _install_session_fakes(monkeypatch)
+
+    resp = client.post(
+        "/chat",
+        json={"message": "send 5000 to account 1234567890 via other bank"},
+        headers=JWT_HEADERS,
+    )
+
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    assert [name for name, _ in events] == ["token", "result", "done"]
+
+    token_event = next(data for name, data in events if name == "token")
+    assert token_event["token"] == (
+        "Here's your transfer summary: ৳5,000 to account 1234567890 via Other Bank "
+        "Transfer. I can't complete this for you here — please confirm and finish it "
+        "in the app."
+    )
+
+    result_event = next(data for name, data in events if name == "result")
+    assert result_event["type"] == "BANKING_SERVICE"
+    assert result_event["category"] == "transfer"
+    assert result_event["service"] == "bank_transfer"
+    assert result_event["subservice"] == "other_bank"
+    assert result_event["payload"] == {
+        "accountNumber": "1234567890",
+        "amount": 5000,
+        "formattedAmount": "৳5,000",
+        "executed": False,
+    }
+    assert result_event["routing"] == {
+        "category": "transfer",
+        "service": "bank_transfer",
+        "subservice": "other_bank",
+        "action": "other_bank_transfer",
+    }
+
+    assert len(record_turn_spy.calls) == 1
+    recorded_turn = record_turn_spy.calls[0][0][1]
+    assert recorded_turn.classification == {
+        "type": "BANKING_SERVICE",
+        "category": "transfer",
+        "service": "bank_transfer",
+        "subservice": "other_bank",
+    }
+
+
+def test_transfer_wallet_transfer_complete_payload_builds_summary_without_calling_adapter(
+    client, monkeypatch
+):
+    async def fake_classify(message, recent_turns=None):
+        return BankingService(
+            category="transfer",
+            service="wallet_transfer",
+            subservice="bkash",
+            payload={"walletNumber": "01812345678", "amount": 2000},
+        )
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", _never_call_fulfill)
+    _install_session_fakes(monkeypatch)
+
+    resp = client.post(
+        "/chat", json={"message": "send 2000 to my bkash 01812345678"}, headers=JWT_HEADERS
+    )
+
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    assert [name for name, _ in events] == ["token", "result", "done"]
+
+    token_event = next(data for name, data in events if name == "token")
+    assert token_event["token"] == (
+        "Here's your transfer summary: ৳2,000 to your bKash number 01812345678. I "
+        "can't complete this for you here — please confirm and finish it in the app."
+    )
+
+    result_event = next(data for name, data in events if name == "result")
+    assert result_event["type"] == "BANKING_SERVICE"
+    assert result_event["payload"] == {
+        "walletNumber": "01812345678",
+        "amount": 2000,
+        "formattedAmount": "৳2,000",
+        "executed": False,
+    }
+    assert result_event["routing"] == {
+        "category": "transfer",
+        "service": "wallet_transfer",
+        "subservice": "bkash",
+        "action": "bkash_transfer",
+    }
+
+
+def test_transfer_direct_route_complete_payload_bypasses_classification(client, monkeypatch):
+    """Per T-56's verification instructions: the direct category/service/subservice/
+    payload route (ChatRequest fields, bypassing classify() entirely) must also hit the
+    no-adapter summary branch -- useful for live-verifying this behavior before
+    conversation-routing's part 1 (classify() extraction) has landed."""
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    monkeypatch.setattr(chat_module, "is_valid_path", lambda category, service, subservice=None: True)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", _never_call_fulfill)
+    _install_session_fakes(monkeypatch)
+
+    resp = client.post(
+        "/chat",
+        json={
+            "message": "send money",
+            "category": "transfer",
+            "service": "bank_transfer",
+            "subservice": "other_bank",
+            "payload": {"accountNumber": "1234567890", "amount": 5000},
+        },
+        headers=JWT_HEADERS,
+    )
+
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    result_event = next(data for name, data in events if name == "result")
+    assert result_event["type"] == "BANKING_SERVICE"
+    assert result_event["payload"]["executed"] is False
+    assert result_event["routing"]["action"] == "other_bank_transfer"
+
+
+def test_transfer_without_identity_still_requires_auth_before_summary(client, monkeypatch):
+    """The existing AUTH_REQUIRED gate (no customer_identity) must still take
+    precedence over the new no-adapter transfer branch -- a transfer summary is never
+    built for an unauthenticated request."""
+
+    async def fake_classify(message, recent_turns=None):
+        return BankingService(
+            category="transfer",
+            service="bank_transfer",
+            subservice="other_bank",
+            payload={"accountNumber": "1234567890", "amount": 5000},
+        )
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", _never_call_fulfill)
+    _install_session_fakes(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "send money"}, headers=AUTH_HEADERS)
+
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    result_event = next(data for name, data in events if name == "result")
+    assert result_event["type"] == "AUTH_REQUIRED"
+
+
+def test_transfer_summary_turn_recorded_as_banking_service_not_clarification_required(client, monkeypatch):
+    """TASKS.md T-56 focus: the no-adapter transfer branch's recorded turn
+    must have classification["type"] == "BANKING_SERVICE" (not
+    "CLARIFICATION_REQUIRED") -- otherwise a later, unrelated follow-up
+    message could be mistaken by _try_deterministic_payload_completion for a
+    still-pending T-49 payload-completeness guard reply and get its bare
+    number merged into an already-finished transfer payload instead of being
+    treated as a fresh request."""
+
+    async def fake_classify(message, recent_turns=None):
+        return BankingService(
+            category="transfer",
+            service="bank_transfer",
+            subservice="other_bank",
+            payload={"accountNumber": "1234567890", "amount": 5000},
+        )
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", _never_call_fulfill)
+    record_turn_spy = _install_session_fakes(monkeypatch)
+
+    resp = client.post(
+        "/chat",
+        json={"message": "send 5000 to account 1234567890 via other bank"},
+        headers=JWT_HEADERS,
+    )
+
+    assert resp.status_code == 200
+    assert len(record_turn_spy.calls) == 1
+    recorded_turn = record_turn_spy.calls[0][0][1]
+    assert recorded_turn.classification["type"] == "BANKING_SERVICE"
+
+    # The recorded turn must never be treated as a pending T-49 guard by a
+    # later message -- confirms _try_deterministic_payload_completion falls
+    # through (returns None) for it, exactly like any other non-clarification
+    # recorded turn.
+    assert chat_module._try_deterministic_payload_completion([recorded_turn], "2000") is None
+    assert chat_module._try_deterministic_payload_completion([recorded_turn], "ok thanks") is None
+
+
+def test_transfer_summary_followed_by_unrelated_message_classifies_fresh_and_still_records(
+    client, monkeypatch
+):
+    """Full round trip for the same concern as above, driven through two real
+    /chat calls: after a transfer summary is recorded, a second, unrelated
+    message must still call classify() fresh (never silently "completed"
+    against the already-finished transfer payload) and must still reach
+    record_turn for that second turn too -- confirming the new transfer
+    branch doesn't accidentally break session/recording wiring for whatever
+    comes after it."""
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    async def fake_classify_transfer(message, recent_turns=None):
+        return BankingService(
+            category="transfer",
+            service="bank_transfer",
+            subservice="other_bank",
+            payload={"accountNumber": "1234567890", "amount": 5000},
+        )
+
+    recorded_turns = []
+
+    def fake_record_turn(customer_id, turn):
+        recorded_turns.append(turn)
+
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "classify", fake_classify_transfer)
+    monkeypatch.setattr(chat_module, "get_classification_context", lambda customer_id: [])
+    monkeypatch.setattr(chat_module, "record_turn", fake_record_turn)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", _never_call_fulfill)
+
+    resp = client.post(
+        "/chat",
+        json={"message": "send 5000 to account 1234567890 via other bank"},
+        headers=JWT_HEADERS,
+    )
+
+    assert resp.status_code == 200
+    result_event = next(data for name, data in _parse_sse(resp.text) if name == "result")
+    assert result_event["type"] == "BANKING_SERVICE"
+    assert len(recorded_turns) == 1
+    first_turn = recorded_turns[0]
+    assert first_turn.classification["type"] == "BANKING_SERVICE"
+
+    # Second call: session now returns the just-recorded transfer turn as
+    # recent_turns. A fresh, unrelated balance request must call classify()
+    # (receiving that turn as context, unused), not be swallowed by the
+    # deterministic bare-amount-completion shortcut, and must proceed to a
+    # real adapter call + a second record_turn as normal.
+    monkeypatch.setattr(chat_module, "get_classification_context", lambda customer_id: [first_turn])
+
+    classify_calls = []
+
+    async def fake_classify_balance(message, recent_turns=None):
+        classify_calls.append((message, recent_turns))
+        return BankingService(category="account_info", service="balance", subservice="balance")
+
+    async def fake_fulfill(customer_identity, jwt, category, service, subservice, payload):
+        return AdapterResult(data={"balance": "500.00"})
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify_balance)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", fake_fulfill)
+
+    resp2 = client.post("/chat", json={"message": "what's my balance"}, headers=JWT_HEADERS)
+
+    assert resp2.status_code == 200
+    result_event2 = next(data for name, data in _parse_sse(resp2.text) if name == "result")
+    assert result_event2["type"] == "BANKING_SERVICE"
+
+    assert len(classify_calls) == 1
+    assert classify_calls[0] == ("what's my balance", [first_turn])
+    assert len(recorded_turns) == 2
+    assert recorded_turns[1].classification["type"] == "BANKING_SERVICE"
+    assert recorded_turns[1].classification["category"] == "account_info"
+
+
+def test_fees_fee_quote_still_calls_real_adapter_unaffected_by_transfer_branch(client, monkeypatch):
+    """Confirms the new transfer-only no-adapter branch is scoped exactly to
+    (transfer, bank_transfer)/(transfer, wallet_transfer) -- fees/fee_quote (and every
+    other existing real service) still calls fulfill_banking_service exactly as
+    before."""
+
+    async def fake_classify(message, recent_turns=None):
+        return BankingService(
+            category="fees",
+            service="fee_quote",
+            subservice=None,
+            payload={"transactionType": "bkash", "amount": 1000},
+        )
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    fulfill_calls = []
+
+    async def fake_fulfill(customer_identity, jwt, category, service, subservice, payload):
+        fulfill_calls.append((category, service, subservice, payload))
+        return AdapterResult(data={"mock": True})
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", fake_fulfill)
+    _install_session_fakes(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "fee for bkash 1000"}, headers=JWT_HEADERS)
+
+    assert resp.status_code == 200
     assert len(fulfill_calls) == 1
 
 

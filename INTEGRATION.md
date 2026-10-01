@@ -100,14 +100,33 @@ data: {}
   see — and therefore no way to repeat — a full number. `payload` itself is unaffected by this;
   it still carries the raw + masked fields exactly as described above. Other subservices
   (`device_history`, `login_history`) and mock results (`payload.mock === true`) are unaffected.
+  **`category="transfer"`/`service="bank_transfer"` or `"wallet_transfer"` is a special case:
+  there is no real adapter for either — a transfer is never executed by this API (ADR-0008's
+  standing GET-only policy) — so once the payload is complete (see the `CLARIFICATION_REQUIRED`
+  entry below) this result is built directly, with no downstream call at all.** `payload` is the
+  full collected payload (`accountNumber`/`amount` for `bank_transfer`, `walletNumber`/`amount`
+  for `wallet_transfer`) plus `formattedAmount` (BDT) and `executed: false` — `executed` is
+  always `false` here and exists specifically so a client can never mistake this for a completed
+  transfer. The `token` reply is a deterministic (not LLM-generated) summary stating the
+  collected details and explicitly saying the transfer is not yet done, e.g. *"Here's your
+  transfer summary: ৳5,000 to account 1234567890 via Other Bank Transfer. I can't complete this
+  for you here — please confirm and finish it in the app."* `routing.action` is
+  `f"{subservice}_transfer"` (e.g. `"other_bank_transfer"`, `"own_account_transfer"`,
+  `"city_account_transfer"`, `"bkash_transfer"`, `"nagad_transfer"`, `"rocket_transfer"`,
+  `"upay_transfer"`) — a specific, frontend-resolvable navigation hint (same pattern as
+  `BENEFICIARY_MATCH`'s `routing.action`) for the client to deep-link into the real app screen
+  that actually completes the transfer.
 - `CLARIFICATION_REQUIRED` — the message was too vague to route; the preceding `token` event is
   the full clarifying question (not a live token stream, just one event). `category`/`service`/
   `subservice`/`payload`/`routing` are all `null`. This also covers a routed-but-incomplete
   banking-service request: `category="fees"`/`service="fee_quote"` requires
-  `payload.transactionType` and `payload.amount`, and if either is missing (whether the message
-  was routed here directly or via classification) the response is a `CLARIFICATION_REQUIRED`
-  asking specifically for whichever piece is missing, rather than a `SERVICE_UNAVAILABLE` — this
-  is checked deterministically before the downstream fee-quote call is ever attempted. The
+  `payload.transactionType` and `payload.amount`; `category="transfer"`/`service="bank_transfer"`
+  requires `payload.accountNumber` and `payload.amount`; `category="transfer"`/
+  `service="wallet_transfer"` requires `payload.walletNumber` and `payload.amount`. If any
+  required field is missing (whether the message was routed here directly or via classification)
+  the response is a `CLARIFICATION_REQUIRED` asking specifically for whichever piece is missing,
+  rather than a `SERVICE_UNAVAILABLE`/silently-incomplete `BANKING_SERVICE` — this is checked
+  deterministically before any downstream call is ever attempted. The
   customer's very next message is then also resolved deterministically (no LLM re-classification)
   whenever it's a bare numeric reply to this specific kind of clarification (e.g. "2000", "2000
   taka", "5,000 tk") — the still-missing `amount` is parsed straight out of that reply and merged

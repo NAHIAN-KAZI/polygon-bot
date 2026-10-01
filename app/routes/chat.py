@@ -58,6 +58,13 @@ class ChatRequest(BaseModel):
 # below) — not new branching logic in _chat_stream.
 _REQUIRED_PAYLOAD_FIELDS: dict[tuple[str, str], tuple[str, ...]] = {
     ("fees", "fee_quote"): ("transactionType", "amount"),
+    # T-56: transfer/bank_transfer (own_account/city_account/other_bank) and
+    # transfer/wallet_transfer (bkash/nagad/rocket/upay) never call a real
+    # adapter -- see _chat_stream's dedicated no-adapter branch below -- but
+    # still need a complete payload before that deterministic confirmation
+    # summary can be built.
+    ("transfer", "bank_transfer"): ("accountNumber", "amount"),
+    ("transfer", "wallet_transfer"): ("walletNumber", "amount"),
 }
 
 
@@ -72,7 +79,7 @@ def _missing_payload_fields(category: str, service: str, payload: dict | None) -
     return [field for field in required if not payload.get(field)]
 
 
-def _fee_quote_clarification_question(payload: dict | None) -> str:
+def _fee_quote_clarification_question(payload: dict | None, subservice: str | None = None) -> str:
     """Customer-friendly clarifying question for an incomplete fees/fee_quote payload,
     mirroring the tone/wording of the fee_quote few-shot examples in
     app/banking/routing.py's build_system_prompt() so this code-level guard's question is
@@ -99,15 +106,82 @@ def _fee_quote_clarification_question(payload: dict | None) -> str:
     )
 
 
-_PAYLOAD_CLARIFICATION_BUILDERS: dict[tuple[str, str], Callable[[dict | None], str]] = {
-    ("fees", "fee_quote"): _fee_quote_clarification_question,
+# T-56: transfer/bank_transfer and transfer/wallet_transfer subservice ->
+# customer-facing display name maps, shared by both the clarification-question
+# builders below and the no-adapter confirmation summary built once the
+# payload is complete (see _transfer_summary_reply in _chat_stream).
+_BANK_TRANSFER_SUBSERVICE_NAMES: dict[str, str] = {
+    "own_account": "Own Account Transfer",
+    "city_account": "City Account Transfer",
+    "other_bank": "Other Bank Transfer",
+}
+
+_WALLET_PROVIDER_NAMES: dict[str, str] = {
+    "bkash": "bKash",
+    "nagad": "Nagad",
+    "rocket": "Rocket",
+    "upay": "Upay",
 }
 
 
-def _payload_clarification_question(category: str, service: str, payload: dict | None) -> str:
+def _bank_transfer_display_name(subservice: str | None) -> str:
+    return _BANK_TRANSFER_SUBSERVICE_NAMES.get(subservice or "", "Bank Transfer")
+
+
+def _wallet_provider_display_name(subservice: str | None) -> str:
+    return _WALLET_PROVIDER_NAMES.get(subservice or "", (subservice or "wallet").replace("_", " ").title())
+
+
+def _bank_transfer_clarification_question(payload: dict | None, subservice: str | None = None) -> str:
+    """Clarifying question for an incomplete transfer/bank_transfer payload
+    (own_account/city_account/other_bank), mirroring _fee_quote_clarification_question's
+    style: names back whichever of accountNumber/amount is already known, or the
+    subservice itself if both are still missing."""
+    payload = payload or {}
+    account_number = payload.get("accountNumber")
+    amount = payload.get("amount")
+
+    if account_number and not amount:
+        return f"Sure — how much would you like to send to account {account_number}?"
+    if amount and not account_number:
+        amount_formatted = _format_bdt(amount) or str(amount)
+        return f"Sure — which account number would you like to send {amount_formatted} to?"
+    transfer_name = _bank_transfer_display_name(subservice)
+    return (
+        f"Sure — which account number would you like to send money to via {transfer_name}, "
+        "and how much?"
+    )
+
+
+def _wallet_transfer_clarification_question(payload: dict | None, subservice: str | None = None) -> str:
+    """Clarifying question for an incomplete transfer/wallet_transfer payload
+    (bkash/nagad/rocket/upay), mirroring _bank_transfer_clarification_question."""
+    payload = payload or {}
+    wallet_number = payload.get("walletNumber")
+    amount = payload.get("amount")
+    provider_name = _wallet_provider_display_name(subservice)
+
+    if wallet_number and not amount:
+        return f"Sure — how much would you like to send to your {provider_name} number {wallet_number}?"
+    if amount and not wallet_number:
+        amount_formatted = _format_bdt(amount) or str(amount)
+        return f"Sure — which {provider_name} number would you like to send {amount_formatted} to?"
+    return f"Sure — to which {provider_name} number would you like to send money, and how much?"
+
+
+_PAYLOAD_CLARIFICATION_BUILDERS: dict[tuple[str, str], Callable[[dict | None, str | None], str]] = {
+    ("fees", "fee_quote"): _fee_quote_clarification_question,
+    ("transfer", "bank_transfer"): _bank_transfer_clarification_question,
+    ("transfer", "wallet_transfer"): _wallet_transfer_clarification_question,
+}
+
+
+def _payload_clarification_question(
+    category: str, service: str, payload: dict | None, subservice: str | None = None
+) -> str:
     builder = _PAYLOAD_CLARIFICATION_BUILDERS.get((category, service))
     if builder:
-        return builder(payload)
+        return builder(payload, subservice)
     return "Could you share a few more details so I can help with that?"
 
 
@@ -524,6 +598,28 @@ def _enrich_payload(service: str, subservice: str | None, data: dict) -> dict:
     return data
 
 
+def _transfer_summary_reply(service: str, subservice: str | None, payload: dict) -> str:
+    """Deterministic (never LLM-synthesized -- see T-56 module notes in _chat_stream)
+    confirmation summary for a complete transfer/bank_transfer or transfer/wallet_transfer
+    payload. There is no real adapter for either service -- ADR-0008's GET-only policy
+    means a transfer is never executed from here -- so this template, built only from
+    already-known payload fields, is the entire reply; it must never claim the transfer
+    is done."""
+    amount_formatted = _format_bdt(payload.get("amount")) or str(payload.get("amount"))
+    if service == "wallet_transfer":
+        provider_name = _wallet_provider_display_name(subservice)
+        wallet_number = payload.get("walletNumber")
+        destination = f"to your {provider_name} number {wallet_number}"
+    else:
+        transfer_name = _bank_transfer_display_name(subservice)
+        account_number = payload.get("accountNumber")
+        destination = f"to account {account_number} via {transfer_name}"
+    return (
+        f"Here's your transfer summary: {amount_formatted} {destination}. I can't complete "
+        "this for you here — please confirm and finish it in the app."
+    )
+
+
 def _account_selection_reply(accounts: list[dict]) -> str:
     options = ", ".join(
         f"{a.get('accountType', 'account').title()} account ending {str(a.get('accountNumber', ''))[-4:]}"
@@ -805,7 +901,9 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
         else:
             missing_fields = _missing_payload_fields(category, service, payload)
             if missing_fields:
-                clarification_question = _payload_clarification_question(category, service, payload)
+                clarification_question = _payload_clarification_question(
+                    category, service, payload, subservice
+                )
                 yield _sse("token", {"token": clarification_question})
                 yield _result_event("CLARIFICATION_REQUIRED", None, None, None)
                 turn_classification = {
@@ -822,6 +920,49 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                     "type": "CLARIFICATION_REQUIRED",
                     "token": clarification_question,
                 }))
+                audit.log_banking_turn(
+                    customer_identity,
+                    turn_classification,
+                    latency_ms=(time.monotonic() - turn_started_at) * 1000,
+                    request_id=request_id,
+                )
+            elif category == "transfer" and service in ("bank_transfer", "wallet_transfer"):
+                # T-56: never execute a transfer (ADR-0008 / the standing GET-only
+                # policy) -- no adapter call here at all, just a deterministic
+                # confirmation summary once every required field is known. The
+                # customer completes the actual transfer in the app via
+                # routing.action, same pattern as BENEFICIARY_MATCH's redirect.
+                collected_payload = dict(payload or {})
+                collected_payload["formattedAmount"] = _format_bdt(collected_payload.get("amount"))
+                collected_payload["executed"] = False
+                transfer_summary_token = _transfer_summary_reply(service, subservice, payload or {})
+                yield _sse("token", {"token": transfer_summary_token})
+                routing_action = f"{subservice}_transfer"
+                yield _result_event(
+                    "BANKING_SERVICE",
+                    category,
+                    service,
+                    subservice,
+                    payload=collected_payload,
+                    routing={
+                        "category": category,
+                        "service": service,
+                        "subservice": subservice,
+                        "action": routing_action,
+                    },
+                )
+                turn_classification = {
+                    "type": "BANKING_SERVICE",
+                    "category": category,
+                    "service": service,
+                    "subservice": subservice,
+                }
+                logger.info(json.dumps({
+                    "request_id": request_id,
+                    "type": "BANKING_SERVICE",
+                    "token": transfer_summary_token,
+                    "payload": collected_payload,
+                }, default=str))
                 audit.log_banking_turn(
                     customer_identity,
                     turn_classification,

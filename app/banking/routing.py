@@ -109,6 +109,24 @@ def build_system_prompt(taxonomy: dict) -> str:
         "Never call route_banking_service unless the message explicitly names an action or "
         "service that matches something in this list. When in doubt, prefer ask_clarification "
         "over guessing.\n\n"
+        "Transfer-specific rule: this bank never executes a transfer through this chat — it "
+        "only gathers details and hands back a confirmation summary for the customer to "
+        "complete in the real app. Once the message reveals a specific destination TYPE for a "
+        "transfer — the customer's own account, a Polygon Bank account that isn't their own "
+        "(\"city account\"), another bank, or a named mobile wallet provider (bKash, Nagad, "
+        "Rocket, Upay) — route immediately to route_banking_service with category=\"transfer\", "
+        "service=\"bank_transfer\" or \"wallet_transfer\" as appropriate, and the specific "
+        "subservice, even if the destination account/wallet number and/or amount are not yet "
+        "known. Put whatever of accountNumber (for bank_transfer), walletNumber (for "
+        "wallet_transfer), or amount the message already states into payload, and leave out "
+        "whatever isn't known — do NOT call ask_clarification in this case; a separate "
+        "mechanism already asks the customer for whatever's still missing. Only use "
+        "ask_clarification when the destination TYPE itself is still unknown (e.g. \"I want to "
+        "transfer money\" names no type at all). Important distinction: naming a specific "
+        "PERSON to send money to (e.g. \"send money to Ashan\") — not a raw account/wallet "
+        "number — is the separate polygon_services/beneficiary path below, not transfer/"
+        "bank_transfer or transfer/wallet_transfer; only use the transfer category when a raw "
+        "account number, wallet number, or \"own account\" is named, never a person's name.\n\n"
         "Available categories, services, and subservices:\n"
         f"{_render_taxonomy(taxonomy)}\n\n"
         "Examples:\n"
@@ -139,6 +157,29 @@ def build_system_prompt(taxonomy: dict) -> str:
         'service="beneficiary", payload={"nameQuery": "Dipu", "amount": 500})\n'
         '  (same pattern as above, plus the message also mentions an amount — include both '
         'nameQuery and amount together in the same payload)\n'
+        '- "transfer 5000 to account 1234567890 via other bank" -> route_banking_service('
+        'category="transfer", service="bank_transfer", subservice="other_bank", payload='
+        '{"accountNumber": "1234567890", "amount": 5000})\n'
+        '  (a raw destination account number is given, not a person\'s name — this is the '
+        'transfer/bank_transfer path, not beneficiary. Extract the account number into '
+        'payload.accountNumber and the amount into payload.amount)\n'
+        '- "send 2000 to my bkash 01812345678" -> route_banking_service(category="transfer", '
+        'service="wallet_transfer", subservice="bkash", payload={"walletNumber": '
+        '"01812345678", "amount": 2000})\n'
+        '  (a named wallet provider plus a raw wallet/phone number — transfer/wallet_transfer, '
+        'with the number in payload.walletNumber and the amount in payload.amount)\n'
+        '- "transfer money to my own account" -> route_banking_service(category="transfer", '
+        'service="bank_transfer", subservice="own_account", payload={})\n'
+        '  (the destination TYPE — own account — is named, which is specific enough to route '
+        'immediately, even though no account number or amount was given at all; payload is '
+        'empty, not a reason to ask_clarification)\n'
+        '- "I want to send 5000 to another bank account" -> route_banking_service('
+        'category="transfer", service="bank_transfer", subservice="other_bank", payload='
+        '{"amount": 5000})\n'
+        '  (destination type — another bank — and an amount are known, but no account number '
+        'is given yet; still route to transfer/bank_transfer with the partial payload rather '
+        'than falling back to a generic ask_clarification — the missing accountNumber is asked '
+        'for separately, outside this classification step)\n'
         '- "what\'s the fee for a bank transfer" -> route_banking_service(category="fees", '
         'service="fee_quote", payload={"transactionType": "other_bank"})\n'
         '- "how much does it cost to send money via bKash" -> route_banking_service('
