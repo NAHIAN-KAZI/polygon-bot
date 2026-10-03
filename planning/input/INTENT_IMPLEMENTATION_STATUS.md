@@ -56,11 +56,17 @@ list (digits, frontend pick, or an LLM pick of the wording).
 **Money (T-65):** the bank returns poisha everywhere except QR payment
 history (taka). `*Formatted` payload fields are converted (÷100).
 
+**Live status (2026-10-03, dev user `taslim_islamic`):** multi-turn eval 31/35;
+card freeze live-verified (restored by unfreeze); beneficiary add blocked on a
+bank 500. Security: payload ids can no longer be injected into bank API paths
+(T-71). Known bug: the accounts reply can quote the wrong (empty) balance
+field — queued as T-72.
+
 ## Summary
 
 | Intent | Status | Read-only done | Notes |
 |---|---|---|---|
-| ACCOUNT_INFO | Done | 6/6 relevant + `cards` | 1.3/1.4 deliberately skipped (signup/device-verification only). Account-specific transactions added (T-64) |
+| ACCOUNT_INFO | Done | 6/6 relevant + `cards` | 1.3/1.4 deliberately skipped (signup/device-verification only). Account-specific transactions added (T-64). Accounts reply balance wording bug queued (T-72) |
 | ATM_SUPPORT | Done (except cash-by-code) | 1/1 | Disputes list (T-58); raise dispute gather+redirect (T-61); cash-by-code blocked |
 | CARD_ISSUE | Done (read-only + redirects) | 2/2 | Disputes list + My Tickets (complaints) both live; unfreeze/PIN reset blocked |
 | CARD_MANAGEMENT | Mostly done | 4/7 | Freeze live-verified (T-57); limit requests, card products, virtual card requests (T-64); card-detail reveals deliberately not built (sensitive) |
