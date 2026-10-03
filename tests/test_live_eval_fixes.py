@@ -97,3 +97,31 @@ def test_number_moved_to_another_label_is_rejected():
     assert not chat._number_keeps_its_label(
         "0293", facts, "I've sent a code to your registered phone number 0293. To freeze this card, enter it.")
     assert chat._number_keeps_its_label("1,000.00", "Your balance is Tk 1,000.00.", "You have Tk 1,000.00 left.")
+
+
+@pytest.mark.parametrize("bad_id", ["../../auth/v1/admin", "45/../../x", "45?x=1", "45#x", "4%2F5", "45 6"])
+def test_payload_ids_cannot_inject_into_request_paths(monkeypatch, bad_id):
+    sent = []
+
+    class Client:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def request(self, *a, **k):
+            sent.append(a)
+
+    monkeypatch.setattr(real.httpx, "AsyncClient", Client)
+    with pytest.raises(real.AdapterUnavailableError, match="unsafe request path"):
+        asyncio.run(real.CreditCardSummaryAdapter().fulfill(None, "jwt", "x", {"cardId": bad_id}))
+    assert sent == []
+
+
+def test_normal_paths_still_allowed():
+    assert real._SAFE_PATH_RE.fullmatch("/card/v1/cards/45/credit-summary")
+    assert real._SAFE_PATH_RE.fullmatch("/transfer/v1/my-limit/100126000056")

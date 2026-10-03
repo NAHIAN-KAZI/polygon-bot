@@ -13,6 +13,12 @@ from app.banking.adapters.base import (
 from app.banking.identity import CustomerIdentity
 from app.config import settings
 
+# Ids from the request/LLM payload are interpolated into paths (cardId, account id,
+# transfer id ...). Only plain segments are allowed, so a value like "../x" or
+# "1?admin=true" can never steer the call to another endpoint with the
+# customer's JWT.
+_SAFE_PATH_RE = re.compile(r"(/[A-Za-z0-9_-]+)+")
+
 
 async def _call(
     method: str,
@@ -25,6 +31,8 @@ async def _call(
     """Make an authenticated call to the platform API and translate the
     outcome into the adapter's typed exceptions. Never lets a raw httpx
     exception escape."""
+    if not _SAFE_PATH_RE.fullmatch(path):
+        raise AdapterUnavailableError(f"{method} refused: unsafe request path")
     headers = {"Authorization": f"Bearer {jwt}"}
     try:
         async with httpx.AsyncClient(
