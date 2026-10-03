@@ -6,6 +6,37 @@ REAL_ADAPTER_SUBSERVICE_IDS = {
     "login_history",
     "beneficiary",
     "fee_quote",
+    "my_loans",
+    "fd_profit_history",
+    "dps_profit_history",
+    "disputes",
+    "cards",
+    # T-57: *** MUTATING exception *** -- live, navigable real service id
+    # (category "card_services"), not a synthetic taxonomy addition. See
+    # FreezeCardAdapter's docstring in app/banking/adapters/real.py.
+    "frezz_unfrezz",
+    # T-60: *** MUTATING exception *** -- distinct id from "beneficiary"
+    # (which stays the existing list operation). See BeneficiaryAddAdapter's
+    # docstring in app/banking/adapters/real.py.
+    "beneficiary_add",
+    # T-64: read-only (GET) real adapters -- see app/banking/adapters/real.py.
+    "my_tickets",
+    "account_transactions",
+    "card_limit_requests",
+    "card_products",
+    "virtual_card_requests",
+    "replacement_requests",
+    "credit_card_summary",
+    "credit_card_statement",
+    "profile",
+    "address",
+    "contacts",
+    "profile_change_requests",
+    "contact_priority_requests",
+    "gifts_received",
+    "email_transfers",
+    "qr_payment_history",
+    "transfer_limit",
 }
 
 

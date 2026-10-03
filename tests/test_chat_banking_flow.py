@@ -317,7 +317,7 @@ def test_banking_service_mock_adapter_success(client, monkeypatch):
     assert [name for name, _ in events] == ["token", "result", "done"]
 
     token_event = next(data for name, data in events if name == "token")
-    assert token_event["token"] == "Sure — here's information about transfer funds."
+    assert token_event["token"] == "This is placeholder information about transfer funds; the real service isn't connected to chat yet."
 
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "BANKING_SERVICE"
@@ -352,11 +352,11 @@ def test_banking_service_real_adapter_balance_success(client, monkeypatch):
     assert [name for name, _ in events] == ["token", "result", "done"]
 
     token_event = next(data for name, data in events if name == "token")
-    assert "500.00" in token_event["token"]
+    assert "Tk 5.00" in token_event["token"]  # poisha -> taka (T-65)
 
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "BANKING_SERVICE"
-    assert result_event["payload"] == {"balance": "500.00", "balanceFormatted": "৳500"}
+    assert result_event["payload"] == {"balance": "500.00", "balanceFormatted": "৳5.00"}
 
 
 class _FakeOllamaResponse:
@@ -410,7 +410,7 @@ def test_banking_service_real_adapter_success_uses_synthesized_reply(client, mon
 
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "BANKING_SERVICE"
-    assert result_event["payload"] == {"balance": "500.00", "balanceFormatted": "৳500"}
+    assert result_event["payload"] == {"balance": "500.00", "balanceFormatted": "৳5.00"}
 
 
 def test_banking_service_mock_adapter_never_calls_synthesize_reply(client, monkeypatch):
@@ -448,7 +448,7 @@ def test_banking_service_mock_adapter_never_calls_synthesize_reply(client, monke
     assert [name for name, _ in events] == ["token", "result", "done"]
 
     token_event = next(data for name, data in events if name == "token")
-    assert token_event["token"] == "Sure — here's information about transfer funds."
+    assert token_event["token"] == "This is placeholder information about transfer funds; the real service isn't connected to chat yet."
 
     assert synth_calls == []
 
@@ -610,6 +610,9 @@ def test_record_turn_called_for_account_selection_required_with_identity(client,
             "You have multiple accounts — which one did you mean? "
             "Savings account ending 111, Current account ending 222."
         ),
+        # T-67: kept so the customer's next message can resume the original service.
+        "candidates": _ACCOUNT_SELECTION_ACCOUNTS,
+        "payload": {},
     }
 
 
@@ -1074,7 +1077,7 @@ def test_enrich_payload_balance_adds_formatted_field_keeps_raw():
 
     assert result["balance"] == "500.00"
     assert result["currency"] == "BDT"
-    assert result["balanceFormatted"] == "৳500"
+    assert result["balanceFormatted"] == "৳5.00"
     # original untouched (additive, deep-copied)
     assert data == {"balance": "500.00", "currency": "BDT"}
 
@@ -1105,7 +1108,7 @@ def test_enrich_payload_accounts_adds_masked_and_formatted_fields():
     assert ledger["identifier"] == "9876543210"
     assert ledger["identifierMasked"] == "••••••3210"
     assert ledger["balance"] == "2500.00"
-    assert ledger["balanceFormatted"] == "৳2,500"
+    assert ledger["balanceFormatted"] == "৳25.00"
 
     # original input untouched
     assert data == original_copy
@@ -1126,7 +1129,7 @@ def test_enrich_payload_transaction_history_adds_masked_and_formatted_fields():
     assert txn["accountNumber"] == "1234567890"
     assert txn["accountNumberMasked"] == "••••••7890"
     assert txn["amount"] == "150.75"
-    assert txn["amountFormatted"] == "৳151"
+    assert txn["amountFormatted"] == "৳1.51"
     assert result["pagination"] == {"totalCount": 1}
 
     assert data == original_copy
@@ -1218,7 +1221,7 @@ def test_banking_service_real_adapter_accounts_success_enriches_payload(client, 
     assert account["accountNumberMasked"] == "••••••7890"
     ledger = payload["data"]["ledgerAccounts"][0]
     assert ledger["identifierMasked"] == "••••••3210"
-    assert ledger["balanceFormatted"] == "৳2,500"
+    assert ledger["balanceFormatted"] == "৳25.00"
 
 
 def test_banking_service_real_adapter_balance_success_enriches_payload(client, monkeypatch):
@@ -1247,7 +1250,7 @@ def test_banking_service_real_adapter_balance_success_enriches_payload(client, m
     result_event = next(data for name, data in events if name == "result")
     payload = result_event["payload"]
     assert payload["balance"] == "500.00"
-    assert payload["balanceFormatted"] == "৳500"
+    assert payload["balanceFormatted"] == "৳5.00"
 
 
 def test_banking_service_real_adapter_transaction_history_success_enriches_payload(client, monkeypatch):
@@ -1284,7 +1287,7 @@ def test_banking_service_real_adapter_transaction_history_success_enriches_paylo
     payload = result_event["payload"]
     txn = payload["transactions"][0]
     assert txn["accountNumberMasked"] == "••••••7890"
-    assert txn["amountFormatted"] == "৳151"
+    assert txn["amountFormatted"] == "৳1.51"
 
 
 def test_banking_service_mock_adapter_payload_not_enriched(client, monkeypatch):
@@ -1356,14 +1359,14 @@ def test_redact_for_prompt_identifier_without_masked_sibling_falls_back():
 def test_redact_for_prompt_cif_number_always_redacted():
     data = {"cifNumber": "CIF-000111", "accountNumber": "1234567890", "accountNumberMasked": "••••••7890"}
     result = chat_module._redact_for_prompt(data)
-    assert result["cifNumber"] == "[redacted]"
+    assert "cifNumber" not in result  # dropped, not placeholdered (live eval 2026-10-03)
     assert result["accountNumber"] == "••••••7890"
 
 
 def test_redact_for_prompt_nid_always_redacted():
     data = {"nid": "1234567890123"}
     result = chat_module._redact_for_prompt(data)
-    assert result["nid"] == "[redacted]"
+    assert "nid" not in result
 
 
 def test_redact_for_prompt_description_masks_embedded_long_digit_run():
@@ -1468,7 +1471,7 @@ def test_banking_service_real_adapter_success_prompt_redacted_payload_unchanged(
 
     async def fake_post(self, url, *args, **kwargs):
         captured_prompts.append(kwargs["json"]["prompt"])
-        return _FakeOllamaResponse({"response": "You spent ৳151 on a transfer recently."})
+        return _FakeOllamaResponse({"response": "You spent Tk 1.51 on a transfer recently."})
 
     monkeypatch.setattr(chat_module, "classify", fake_classify)
     monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
@@ -1489,15 +1492,15 @@ def test_banking_service_real_adapter_success_prompt_redacted_payload_unchanged(
     assert "9998887776" not in prompt
     # json.dumps(..., default=str) escapes the non-ASCII "•" bullet, so look
     # for the JSON-encoded form rather than the literal character.
-    assert json.dumps("••••••7890")[1:-1] in prompt  # accountNumberMasked substitute, added by T-32 _enrich_payload
-    assert json.dumps("••••••7776")[1:-1] in prompt  # masked description digit run
+    assert "••••••7890" in prompt or json.dumps("••••••7890")[1:-1] in prompt  # accountNumberMasked substitute, added by T-32 _enrich_payload
+    assert "••••••7776" in prompt or json.dumps("••••••7776")[1:-1] in prompt  # masked description digit run
 
     # the result payload must be raw + masked/formatted, exactly as T-32 left it.
     result_event = next(data for name, data in events if name == "result")
     txn = result_event["payload"]["transactions"][0]
     assert txn["accountNumber"] == "1234567890"
     assert txn["accountNumberMasked"] == "••••••7890"
-    assert txn["amountFormatted"] == "৳151"
+    assert txn["amountFormatted"] == "৳1.51"
     assert txn["description"] == "Transfer to 9998887776 for rent"
 
 
@@ -1600,7 +1603,7 @@ def test_chat_stream_fallback_redacts_token_but_not_payload(client, monkeypatch)
     assert txn["accountNumber"] == "9876543210"
     assert txn["accountNumberMasked"] == "••••••3210"
     assert txn["description"] == "bKash: From 100126000015 to 4600000"
-    assert txn["amountFormatted"] == "৳100"
+    assert txn["amountFormatted"] == "৳1.00"
 
 
 def test_chat_stream_passes_get_classification_context_result_into_classify(client, monkeypatch):

@@ -57,173 +57,308 @@ def _coerce_payload(raw: object) -> dict | None:
     later. Anything that isn't a dict (already, or after parsing) collapses
     to None instead of raising.
     """
-    if isinstance(raw, dict):
-        return raw
     if isinstance(raw, str):
         try:
-            parsed = json.loads(raw)
+            raw = json.loads(raw)
         except (ValueError, TypeError):
             return None
-        return parsed if isinstance(parsed, dict) else None
-    return None
+    if not isinstance(raw, dict):
+        return None
+    # The model fills fields it has no value for with "" / null (e.g.
+    # {"cardId": "", "isBilled": "", "month": ""}); an empty value is an unknown
+    # value, so drop it -- downstream then asks for it or applies its default.
+    cleaned = {k: v for k, v in raw.items() if v is not None and not (isinstance(v, str) and not v.strip())}
+    return cleaned or None
 
 
-def _render_taxonomy(taxonomy: dict) -> str:
-    lines = []
+# (category, service) -> (what the customer gets, payload fields it accepts).
+# Only services with a real implementation behind them are listed; every other
+# live taxonomy entry renders name-only. Field names mirror app/routes/chat.py's
+# _REQUIRED_PAYLOAD_FIELDS and app/banking/adapters/real.py exactly.
+SERVICE_DESCRIPTIONS: dict[tuple[str, str], tuple[str, tuple[str, ...]]] = {
+    ("account_info", "balance"): ("current balance / how much money they have", ()),
+    ("account_info", "accounts"): ("list or count of the customer's own bank accounts (account numbers, types)", ()),
+    ("account_info", "device_history"): ("devices registered/logged in to their profile", ()),
+    ("account_info", "login_history"): ("past login activity", ()),
+    ("account_info", "cards"): ("list of the customer's cards", ()),
+    ("account_info", "fd_profit_history"): ("profit earned on their fixed deposits (FD)", ()),
+    ("account_info", "dps_profit_history"): ("profit earned on their DPS savings schemes", ()),
+    ("loan_services", "my_loans"): (
+        "overview/list/status of loans the customer currently holds",
+        (),
+    ),
+    ("polygon_services", "transaction_history"): (
+        "ANY request about transactions, spending, a statement or recent activity, for any or a "
+        "specific account (which account is checked afterwards automatically)",
+        ("startDate", "endDate"),
+    ),
+    ("polygon_services", "beneficiary"): (
+        "send money to an EXISTING saved beneficiary by their name, or list beneficiaries",
+        ("nameQuery", "amount"),
+    ),
+    ("beneficiary_management", "beneficiary_add"): (
+        "add/save/register a NEW beneficiary (any add-a-beneficiary request; route even if name or account number is missing)",
+        ("nickname", "accountNumber"),
+    ),
+    ("service_requests", "disputes"): ("VIEW the customer's existing transaction disputes and their status", ()),
+    ("polygon_services", "my_tickets"): (
+        "VIEW the customer's existing complaints / support tickets and their status",
+        (),
+    ),
+    # account_info/account_transactions is deliberately NOT offered to the model: it
+    # overlaps transaction_history (which already resolves/asks which account), and
+    # two near-identical choices made llama3.1:8b ask "what do you mean" instead.
+    # It stays in the taxonomy for explicit category+service requests.
+    ("card_info", "card_limit_requests"): ("status of their card limit-change requests", ()),
+    ("card_info", "card_products"): (
+        "which cards the bank offers: any question about the card types/products available "
+        "(not general knowledge — this bank's own live catalog)",
+        (),
+    ),
+    ("card_info", "virtual_card_requests"): ("status of their virtual card requests", ()),
+    ("card_info", "replacement_requests"): ("status of their card replacement requests", ()),
+    ("card_info", "credit_card_summary"): (
+        "credit card limit, outstanding/due amount, available credit",
+        ("cardId",),
+    ),
+    ("card_info", "credit_card_statement"): (
+        "credit card statement (billed or unbilled) for a month",
+        ("cardId", "month", "isBilled"),
+    ),
+    ("profile", "profile"): ("the customer's own profile details (name, email, phone)", ()),
+    ("profile", "address"): ("the customer's registered address / KYC status", ()),
+    ("profile", "contacts"): ("which phone numbers and email addresses are registered with the bank for them", ()),
+    ("profile", "profile_change_requests"): ("status of their profile change requests", ()),
+    ("profile", "contact_priority_requests"): ("status of their primary-contact change requests", ()),
+    ("transfer_info", "gifts_received"): ("money gifts the customer has RECEIVED from others (incoming only, never sending)", ()),
+    ("transfer_info", "email_transfers"): ("history/status of their email transfers", ("id",)),
+    ("transfer_info", "qr_payment_history"): ("history of their QR payments", ()),
+    ("transfer_info", "transfer_limit"): (
+        "their transfer limits (daily/weekly/per-transaction) and remaining amount",
+        (),
+    ),
+    ("service_requests", "raise_dispute"): (
+        "report a NEW problem with a transaction (money deducted but not received, failed "
+        "or wrong transaction, wrong charge) or raise a new dispute",
+        ("accountNumber", "transactionReferenceNo", "remarks"),
+    ),
+    ("fees", "fee_quote"): (
+        "live fee/charge for a transaction type and amount",
+        ("transactionType", "amount"),
+    ),
+    ("transfer", "bank_transfer"): (
+        "send/transfer money to their own account, another Polygon Bank account, or an "
+        "account at another bank (a bank named by name or abbreviation); subservice required",
+        ("accountNumber", "amount"),
+    ),
+    ("transfer", "wallet_transfer"): (
+        "send to a mobile wallet number (subservice = provider)",
+        ("walletNumber", "amount"),
+    ),
+    ("card_services", "frezz_unfrezz"): (
+        "freeze/block a card ONLY when the customer says it is lost, stolen or compromised, or "
+        "explicitly asks to block/freeze it. A card problem that doesn't say what is wrong is "
+        "NOT this (ask_clarification). Never for unfreezing",
+        ("reason",),
+    ),
+}
+
+
+# Stage 1 of classification: the model first picks ONE domain (small, easy
+# choice), then stage 2 picks the service among only that domain's services.
+# One prompt holding all ~35 services confused llama3.1:8b (90/107 on the eval).
+DOMAINS: dict[str, tuple[str, frozenset[tuple[str, str]]]] = {
+    "accounts": (
+        "their balance, their accounts, transactions/statements/spending, login activity, devices or phones logged in to their banking",
+        frozenset({("account_info", "balance"), ("account_info", "accounts"),
+                   ("polygon_services", "transaction_history"),
+                   ("account_info", "login_history"), ("account_info", "device_history")}),
+    ),
+    "deposits_loans": (
+        "their loans, fixed deposits (FD/FDR), DPS, and the profit earned on them",
+        frozenset({("loan_services", "my_loans"), ("account_info", "fd_profit_history"),
+                   ("account_info", "dps_profit_history")}),
+    ),
+    "cards": (
+        "their cards: listing them, card types the bank offers, card requests (limit change, "
+        "virtual card, replacement), credit card limit/due/bill/statement, blocking a lost "
+        "or stolen card, or any other card problem",
+        frozenset({("account_info", "cards"), ("card_info", "card_products"),
+                   ("card_info", "card_limit_requests"), ("card_info", "virtual_card_requests"),
+                   ("card_info", "replacement_requests"), ("card_info", "credit_card_summary"),
+                   ("card_info", "credit_card_statement"), ("card_services", "frezz_unfrezz")}),
+    ),
+    "transfers": (
+        "sending money (to a bank account, a mobile wallet, or a saved person), adding a "
+        "beneficiary, their transfer limits, gifts received, email transfers, QR payments",
+        frozenset({("transfer", "bank_transfer"), ("transfer", "wallet_transfer"),
+                   ("polygon_services", "beneficiary"),
+                   ("beneficiary_management", "beneficiary_add"),
+                   ("transfer_info", "transfer_limit"), ("transfer_info", "gifts_received"),
+                   ("transfer_info", "email_transfers"), ("transfer_info", "qr_payment_history")}),
+    ),
+    "fees": ("what a transaction costs: fees, charges, VAT", frozenset({("fees", "fee_quote")})),
+    "disputes": (
+        "a problem with a transaction, raising or viewing disputes, complaints and support tickets",
+        frozenset({("service_requests", "disputes"), ("service_requests", "raise_dispute"),
+                   ("polygon_services", "my_tickets")}),
+    ),
+    "profile": (
+        "their personal details: profile, address, contact numbers/emails, and their requests "
+        "to change them",
+        frozenset({("profile", "profile"), ("profile", "address"), ("profile", "contacts"),
+                   ("profile", "profile_change_requests"),
+                   ("profile", "contact_priority_requests")}),
+    ),
+    "other": (
+        "other bank services: bill/utility payments, mobile recharge, cheque books, applying "
+        "for loans/cards/deposits, partners, remittance",
+        frozenset(),
+    ),
+    "general": (
+        "not about their own banking or this bank's products: greetings, thanks, general "
+        "knowledge, off-topic, abuse, or too unclear to tell",
+        frozenset(),
+    ),
+}
+
+
+def _render_taxonomy(
+    taxonomy: dict, allowed: frozenset | None = None, include_other: bool = True
+) -> str:
+    """Render the live taxonomy for the classifier prompt.
+
+    Services with an entry in SERVICE_DESCRIPTIONS (i.e. a real implementation)
+    are listed first, one self-contained line each, with what the customer gets and
+    the payload fields it accepts. Every other live entry is listed name-only,
+    one line per category. Only ids present in the live taxonomy are rendered.
+    `allowed` limits the described services to one domain's set; `include_other`
+    controls the name-only section.
+    """
+    supported = []
+    other = []
     for category in taxonomy.get("categories", []):
-        lines.append(f"- {category['id']} ({category['name']})")
+        described_lines = []
+        other_services = []
         for service in category.get("services", []):
-            lines.append(f"  - {service['id']} ({service['name']})")
-            for sub in service.get("subServices", []):
-                lines.append(f"    - {sub['id']} ({sub['name']})")
-    return "\n".join(lines)
+            subs = ", ".join(
+                f"{sub['id']} ({sub['name']})" for sub in service.get("subServices", [])
+            )
+            described = SERVICE_DESCRIPTIONS.get((category["id"], service["id"]))
+            if described and allowed is not None and (category["id"], service["id"]) not in allowed:
+                continue
+            if described:
+                description, fields = described
+                line = (
+                    f'- category="{category["id"]}" service="{service["id"]}": {description}'
+                )
+                if subs:
+                    line += f". subservices: {subs}"
+                else:
+                    line += ". no subservice"
+                if fields:
+                    line += f". payload: {', '.join(fields)}"
+                described_lines.append(line)
+            else:
+                other_services.append(
+                    f"{service['id']} ({service['name']})" + (f" [{subs}]" if subs else "")
+                )
+        supported.extend(described_lines)
+        if other_services and include_other:
+            other.append(
+                f"- {category['id']} ({category['name']}): " + "; ".join(other_services)
+            )
+    sections = []
+    if supported:
+        sections.append("Supported services:\n" + "\n".join(supported))
+    if other:
+        sections.append(
+            "Other services (category: service [subservices]) — use only when the message "
+            "clearly names exactly one of these:\n" + "\n".join(other)
+        )
+    return "\n\n".join(sections)
 
 
-def build_system_prompt(taxonomy: dict) -> str:
+def build_system_prompt(
+    taxonomy: dict, allowed: frozenset | None = None, include_other: bool = True
+) -> str:
     return (
-        "You are a banking assistant classifying customer messages. You MUST call exactly one "
-        "tool.\n\n"
-        "Decision rules, in order:\n"
-        "1. If the message asks for general information, explanation, or \"how does X work\" — "
-        "NOT a request to perform an action on the customer's own account — call "
-        "answer_kb_question. Exception: any message that is clearly asking about transaction "
-        "fees/charges/costs — however it's phrased, including informational-sounding wording "
-        "like \"what do you know about...\", \"tell me about...\", or \"can you explain...\" — "
-        "is NEVER a KB topic. Fees are a live, quotable real-time service, not static "
-        "background info, so always resolve fee questions via route_banking_service("
-        "category=\"fees\", service=\"fee_quote\", ...) when the transaction type and amount "
-        "are both known, or ask_clarification otherwise — never answer_kb_question.\n"
-        "2. If the message clearly names a specific action the customer wants performed or "
-        "checked on their own account, call route_banking_service with the category/service/"
-        "subservice ids from the list below that best match. Only use ids that appear in this "
-        "list — never invent one. Exception: if the message BOTH describes performing an "
-        "action (transfer/send/withdraw/pay/replace/etc.) AND asks about its cost/fee/charge "
-        "(e.g. \"what is the fee\", \"how much would it cost\", \"what will I be charged\"), "
-        "classify by the cost question, not the action verb — route to category=\"fees\", "
-        "service=\"fee_quote\" instead. The action mention is context for the fee lookup (it "
-        "supplies transactionType/amount for the payload), not a request to execute the "
-        "action itself.\n"
-        "3. If the message is vague or does not name a specific action or service, call "
-        "ask_clarification with a specific question asking what the customer wants to do. Do "
-        "NOT guess a service or subservice in this case.\n\n"
-        "Never call route_banking_service unless the message explicitly names an action or "
-        "service that matches something in this list. When in doubt, prefer ask_clarification "
-        "over guessing.\n\n"
-        "Transfer-specific rule: this bank never executes a transfer through this chat — it "
-        "only gathers details and hands back a confirmation summary for the customer to "
-        "complete in the real app. Once the message reveals a specific destination TYPE for a "
-        "transfer — the customer's own account, a Polygon Bank account that isn't their own "
-        "(\"city account\"), another bank, or a named mobile wallet provider (bKash, Nagad, "
-        "Rocket, Upay) — route immediately to route_banking_service with category=\"transfer\", "
-        "service=\"bank_transfer\" or \"wallet_transfer\" as appropriate, and the specific "
-        "subservice, even if the destination account/wallet number and/or amount are not yet "
-        "known. Put whatever of accountNumber (for bank_transfer), walletNumber (for "
-        "wallet_transfer), or amount the message already states into payload, and leave out "
-        "whatever isn't known — do NOT call ask_clarification in this case; a separate "
-        "mechanism already asks the customer for whatever's still missing. Only use "
-        "ask_clarification when the destination TYPE itself is still unknown (e.g. \"I want to "
-        "transfer money\" names no type at all). Important distinction: naming a specific "
-        "PERSON to send money to (e.g. \"send money to Ashan\") — not a raw account/wallet "
-        "number — is the separate polygon_services/beneficiary path below, not transfer/"
-        "bank_transfer or transfer/wallet_transfer; only use the transfer category when a raw "
-        "account number, wallet number, or \"own account\" is named, never a person's name.\n\n"
-        "Available categories, services, and subservices:\n"
-        f"{_render_taxonomy(taxonomy)}\n\n"
-        "Examples:\n"
-        '- "what\'s my balance?" -> route_banking_service(category="account_info", '
-        'service="balance")\n'
-        '- "how many accounts do I have?" -> route_banking_service(category="account_info", '
-        'service="accounts")\n'
-        '- "what devices are logged in?" -> route_banking_service(category="account_info", '
-        'service="device_history")\n'
-        '- "show my login history" -> route_banking_service(category="account_info", '
-        'service="login_history")\n'
-        '- "I need help with my card" -> ask_clarification(question="Sure — what do you need '
-        'help with on your card? For example, freezing/unfreezing it, resetting the PIN, or '
-        'something else?")\n'
-        '  (this is vague — "my card" could mean many different things, so ASK rather than '
-        'guessing which card service they mean)\n'
-        '- "I want to transfer money" -> ask_clarification(question="Sure — how would you like '
-        'to transfer money? For example, to your own account, another bank, or a mobile wallet '
-        'like bKash?")\n'
-        '  (same reasoning — many transfer types exist, do not guess which one)\n'
-        '- "send money to Ashan" -> route_banking_service(category="polygon_services", '
-        'service="beneficiary", payload={"nameQuery": "Ashan"})\n'
-        '  (the message names a specific person to send money to — that IS a specific, '
-        'actionable request, even though no account number or bank was given. Look up that '
-        'name as a saved beneficiary rather than asking which transfer type to use; put the '
-        'name verbatim as it appeared in the message into payload.nameQuery)\n'
-        '- "transfer 500 taka to Dipu" -> route_banking_service(category="polygon_services", '
-        'service="beneficiary", payload={"nameQuery": "Dipu", "amount": 500})\n'
-        '  (same pattern as above, plus the message also mentions an amount — include both '
-        'nameQuery and amount together in the same payload)\n'
-        '- "transfer 5000 to account 1234567890 via other bank" -> route_banking_service('
-        'category="transfer", service="bank_transfer", subservice="other_bank", payload='
-        '{"accountNumber": "1234567890", "amount": 5000})\n'
-        '  (a raw destination account number is given, not a person\'s name — this is the '
-        'transfer/bank_transfer path, not beneficiary. Extract the account number into '
-        'payload.accountNumber and the amount into payload.amount)\n'
-        '- "send 2000 to my bkash 01812345678" -> route_banking_service(category="transfer", '
-        'service="wallet_transfer", subservice="bkash", payload={"walletNumber": '
-        '"01812345678", "amount": 2000})\n'
-        '  (a named wallet provider plus a raw wallet/phone number — transfer/wallet_transfer, '
-        'with the number in payload.walletNumber and the amount in payload.amount)\n'
-        '- "transfer money to my own account" -> route_banking_service(category="transfer", '
-        'service="bank_transfer", subservice="own_account", payload={})\n'
-        '  (the destination TYPE — own account — is named, which is specific enough to route '
-        'immediately, even though no account number or amount was given at all; payload is '
-        'empty, not a reason to ask_clarification)\n'
-        '- "I want to send 5000 to another bank account" -> route_banking_service('
-        'category="transfer", service="bank_transfer", subservice="other_bank", payload='
-        '{"amount": 5000})\n'
-        '  (destination type — another bank — and an amount are known, but no account number '
-        'is given yet; still route to transfer/bank_transfer with the partial payload rather '
-        'than falling back to a generic ask_clarification — the missing accountNumber is asked '
-        'for separately, outside this classification step)\n'
-        '- "what\'s the fee for a bank transfer" -> route_banking_service(category="fees", '
-        'service="fee_quote", payload={"transactionType": "other_bank"})\n'
-        '- "how much does it cost to send money via bKash" -> route_banking_service('
-        'category="fees", service="fee_quote", payload={"transactionType": "bkash"})\n'
-        '  (put whatever transaction type the customer said verbatim into '
-        'payload.transactionType — do not normalize or guess a different id for it — and '
-        'include payload.amount too if an amount in taka was mentioned)\n'
-        '- "how much fees for sending to other bank accounts?" -> ask_clarification(question='
-        '"Sure — how much would you like to send to another bank account? I can give you the '
-        'exact fee once I know the amount.")\n'
-        '- "how much does it cost via qr transfer?" -> ask_clarification(question="Sure — how '
-        'much would you like to send via QR transfer? I can give you the exact fee once I know '
-        'the amount.")\n'
-        '  (the transaction type IS named in both of these, but no amount was given — name the '
-        'transaction type back to the customer and ask specifically for the amount, rather than '
-        'asking a generic "which transaction type" question)\n'
-        '- "what are your fees" -> ask_clarification(question="Sure — which transaction type '
-        'would you like a fee quote for, and for what amount? For example, a bank transfer, '
-        'bKash, or another wallet?")\n'
-        '  (no transaction type or amount was named — this is vague like the card-help example '
-        'above, so ASK rather than guessing which fee they mean)\n'
-        '- "what do you know about fees?" -> ask_clarification(question="Sure — which '
-        'transaction type would you like a fee quote for, and for what amount? For example, a '
-        'bank transfer, bKash, or another wallet?")\n'
-        '  (phrased informationally, like a KB question, but fees are always live-quotable via '
-        'route_banking_service/ask_clarification, never a KB topic — same handling and same '
-        'question as the "what are your fees" example above, never answer_kb_question)\n'
-        '- "If i transfer 1000 from my account to bkash what is the fee?" -> '
-        'route_banking_service(category="fees", service="fee_quote", payload='
-        '{"transactionType": "bkash", "amount": 1000})\n'
-        '  (this names an action verb — "transfer" — but the actual ask is the cost of doing '
-        'it, not a request to execute the transfer. Classify by the cost question: route to '
-        'fees/fee_quote and extract the transaction type and amount into payload, exactly as '
-        'in the fee examples above)\n'
-        '- "if I send 5000 taka to another bank account, how much would it cost?" -> '
-        'route_banking_service(category="fees", service="fee_quote", payload='
-        '{"transactionType": "other_bank", "amount": 5000})\n'
-        '  (same pattern — "send" is an action verb, but "how much would it cost" is the real '
-        'question, so this is a fee lookup, not a transfer request)\n'
-        '- "what will I be charged if I withdraw 2000 from an ATM?" -> route_banking_service('
-        'category="fees", service="fee_quote", payload={"transactionType": "atm_withdrawal", '
-        '"amount": 2000})\n'
-        '  (same pattern with a different action verb — "withdraw" — and cost phrasing "what '
-        'will I be charged"; still a fee_quote, not an ATM withdrawal request)\n'
+        "You classify ONE customer message for a bank's chat assistant by calling exactly one "
+        "tool. Customers write in English, Bangla or Banglish (romanized Bangla) with any "
+        "phrasing — understand what they mean, don't match keywords.\n\n"
+        "Decide in this order:\n"
+        "A. If the message — however short, informal, rude or misspelled — is about the "
+        "customer's own banking (their money, balance, accounts, cards, loans, deposits, "
+        "profits, transactions, transfers, fees, complaints/disputes), it is a service "
+        "request: call route_banking_service when one supported service below fits its "
+        "meaning, otherwise ask_clarification.\n"
+        "B. A greeting or an empty/unclear banking message -> ask_clarification.\n"
+        "C. Only general banking knowledge (\"what is...\", \"how does... work\") other than "
+        "fees, non-banking topics, or pure abuse with no request -> answer_kb_question.\n"
+        "ask_clarification questions are always your OWN short question naming exactly what "
+        "is unclear in THIS message.\n\n"
+        "Rules:\n"
+        "1. Match the MEANING of the message to a supported service's description below; "
+        "most customer requests are one of them.\n"
+        "2. Route as soon as the service is clear. Missing payload fields are collected "
+        "later automatically — never ask_clarification just because a field is missing. "
+        "Only when the message names a topic but no clear ask, so several services fit "
+        "equally, call ask_clarification.\n"
+        "3. Fees/charges/costs are never answer_kb_question, even when asked like general "
+        "info (\"what do you know about / tell me about fees\"). Any message asking what something "
+        "costs — even one describing an action (\"if I send/withdraw..., what's the charge?\") "
+        "— is fees/fee_quote, not the action itself. If no transaction type is named at all, "
+        "ask_clarification. A complaint about a charge already taken is a dispute, not a "
+        "fee quote.\n"
+        "4. Transfers: route to transfer only when the destination TYPE is known (own account, "
+        "another Polygon Bank account, another bank, or a named wallet provider) — choose the "
+        "matching subservice. No destination type -> ask_clarification. Sending money to a "
+        "person by NAME -> polygon_services/beneficiary (name in nameQuery), never transfer. "
+        "Asking to add/save a new beneficiary (even if a name and account number are given) "
+        "-> beneficiary_management/beneficiary_add. Nothing is executed in chat; details are only "
+        "gathered.\n"
+        "5. Freeze/block only when the customer says the card is lost, stolen, compromised "
+        "or should be blocked; a card problem that doesn't say what is wrong -> "
+        "ask_clarification. UNfreezing/UNblocking a card (making it usable again) is NOT available in chat: "
+        "never route it — call ask_clarification, in your own words saying so and asking "
+        "what else they need.\n"
+        "6. Pass subservice ONLY for a service that lists subservices; otherwise omit it. "
+        "Copy category and service exactly as they appear together on ONE line below; never "
+        "use a subservice id as the service. Viewing existing disputes -> "
+        "service_requests/disputes; viewing existing complaints/tickets -> "
+        "polygon_services/my_tickets; wanting to raise/file/open a dispute (even with no "
+        "details yet) or describing a problem with a transaction (charged twice, money "
+        "deducted but not received) -> service_requests/raise_dispute.\n"
+        "8. A one- or two-word message naming something the customer has (\"balance\", "
+        "\"cards\", \"loans\", \"profile\", \"limit\") -> that lookup service. What the bank "
+        "offers (card types/products) is card_info/card_products, not answer_kb_question.\n"
+        "7. payload: only fields listed for that service, only values the customer actually "
+        "stated (amount as a number, account/wallet numbers as strings). Never invent or "
+        "reuse values from this prompt. Omit unknown fields. Never put a PIN, password, OTP "
+        "or CVV in payload.\n\n"
+        f"{_render_taxonomy(taxonomy, allowed, include_other)}\n\n"
+        "Decision patterns (<...> = whatever the customer actually said):\n"
+        "- \"show my login activity\" -> route_banking_service(category=\"account_info\", "
+        "service=\"login_history\") (any simple lookup: pick the supported service whose "
+        "description matches)\n"
+        "- \"send <amount> to my <wallet provider> <number>\" -> route_banking_service("
+        "category=\"transfer\", service=\"wallet_transfer\", subservice=<provider id>, "
+        "payload={\"walletNumber\": \"<number>\", \"amount\": <amount>})\n"
+        "- \"send money to <person name>\" -> route_banking_service(category="
+        "\"polygon_services\", service=\"beneficiary\", payload={\"nameQuery\": \"<person "
+        "name>\"})\n"
+        "- \"if I <action> <amount> via <method>, what is the fee?\" -> route_banking_service("
+        "category=\"fees\", service=\"fee_quote\", payload={\"transactionType\": \"<method>\", "
+        "\"amount\": <amount>})\n"
+        "- \"I want to transfer money\" (no destination type) -> ask_clarification "
+        "(in your own words, ask where they want to send it)\n"
+        "- \"<topic> help\", \"<topic> info\", \"fees?\" — a topic with no clear ask -> "
+        "ask_clarification (in your own words, ask what exactly they need; for fees, which "
+        "transaction type and amount)\n"
+        "- \"I lost my card, block it\" -> route_banking_service(category=\"card_services\", "
+        "service=\"frezz_unfrezz\"); \"unblock my card\" -> ask_clarification (in your own "
+        "words, say unblocking isn't available in chat)\n"
+        "- \"what is a <banking product>?\", weather, maths, chit-chat -> answer_kb_question()"
     )
 
 
@@ -249,8 +384,8 @@ def build_tools() -> list[dict]:
             "function": {
                 "name": "route_banking_service",
                 "description": (
-                    "Route the message to a specific banking service the customer explicitly "
-                    "asked for, using ids from the provided taxonomy list."
+                    "Route the message to the banking service whose description matches what "
+                    "the customer means, using ids from the provided taxonomy list."
                 ),
                 "parameters": {
                     "type": "object",
@@ -270,11 +405,8 @@ def build_tools() -> list[dict]:
                         "payload": {
                             "type": "object",
                             "description": (
-                                "Extra structured details extracted from the message that the "
-                                "service needs, if any. For example {\"nameQuery\": \"Ashan\"} "
-                                "when the message names a person to send money to, optionally "
-                                "combined with {\"amount\": 500} if an amount was also "
-                                "mentioned. Omit entirely if nothing extra applies."
+                                "Only the payload fields listed for the chosen service, with "
+                                "values the customer actually stated. Omit entirely if none."
                             ),
                         },
                     },
@@ -287,8 +419,8 @@ def build_tools() -> list[dict]:
             "function": {
                 "name": "ask_clarification",
                 "description": (
-                    "Ask the customer a clarifying question when the message is vague or does "
-                    "not name a specific action or service. Never guess in this case."
+                    "Ask the customer a short clarifying question, written for this message, "
+                    "when no single service clearly fits. Never guess a service."
                 ),
                 "parameters": {
                     "type": "object",
@@ -317,6 +449,8 @@ async def _post_classification(messages: list[dict]) -> list[dict]:
                 "messages": messages,
                 "tools": build_tools(),
                 "stream": False,
+                "think": settings.OLLAMA_THINK,
+                "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0},
             },
         )
         resp.raise_for_status()
@@ -324,71 +458,203 @@ async def _post_classification(messages: list[dict]) -> list[dict]:
     return data.get("message", {}).get("tool_calls") or []
 
 
+async def _pick_domain(message: str, recent_turns: list[ChatTurn] | None) -> str | None:
+    """Stage 1: which domain is this message about? Returns a DOMAINS key, or None
+    on any failure (caller then falls back to the full single-stage prompt)."""
+    domains = "\n".join(f"- {key}: {desc}" for key, (desc, _) in DOMAINS.items())
+    context = ""
+    if recent_turns:
+        last = recent_turns[-1].classification or {}
+        question = last.get("question")
+        if question:
+            context = (
+                f'\nThe assistant just asked the customer: "{question}". If the new message '
+                "answers that question, pick the domain that question is about.\n"
+            )
+    prompt = (
+        "You route a bank customer's chat message to ONE domain. Customers write English, "
+        "Bangla or Banglish (romanized Bangla), often one or two words, misspelled or "
+        "informal. Read a misspelled word by how it sounds and Banglish as its English "
+        "meaning (e.g. 'pathabo' = I will send, 'koto' = how much, 'ase' = is there, "
+        "'dekhao' = show), then pick the domain by meaning. A banking word on its own, even "
+        "misspelled, belongs to its banking domain, not general.\n"
+        f"Domains:\n{domains}\n{context}\n"
+        f'Customer message: "{message}"\n\n'
+        'Respond only with JSON: {"domain": "<one domain key>"}'
+    )
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                f"{settings.OLLAMA_BASE_URL}/api/generate",
+                json={
+                    "model": settings.OLLAMA_CLASSIFY_MODEL,
+                    "prompt": prompt,
+                    "stream": False,
+                    "format": "json",
+                    "think": settings.OLLAMA_THINK,
+                    "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0},
+                },
+            )
+            resp.raise_for_status()
+            domain = json.loads(resp.json().get("response") or "{}").get("domain")
+    except Exception:
+        return None
+    return domain if domain in DOMAINS else None
+
+
+async def _domain_scope(
+    message: str, recent_turns: list[ChatTurn] | None
+) -> tuple[frozenset | None, bool]:
+    """(allowed services, include name-only other services) for stage 2. A banking
+    domain narrows stage 2 to that domain's services (plus the service a pending
+    clarification is about, so a reply can still complete it); anything else keeps
+    the full single-stage prompt."""
+    domain = await _pick_domain(message, recent_turns)
+    if domain is None or domain in ("general", "other"):
+        return None, True
+    allowed = set(DOMAINS[domain][1])
+    if recent_turns:
+        last = recent_turns[-1].classification or {}
+        if last.get("category") and last.get("service"):
+            allowed.add((last["category"], last["service"]))
+    return frozenset(allowed), False
+
+
 async def classify(
     message: str, recent_turns: list[ChatTurn] | None = None
 ) -> ClassificationResult:
-    messages = [{"role": "system", "content": build_system_prompt(get_taxonomy())}]
+    allowed, include_other = await _domain_scope(message, recent_turns)
+    messages = [{
+        "role": "system",
+        "content": build_system_prompt(get_taxonomy(), allowed, include_other),
+    }]
     if recent_turns:
         last_turn = recent_turns[-1]
-        pending_question = (last_turn.classification or {}).get("question") or "a clarifying question"
-        # T-53: broaden what counts as "answering" a pending clarification beyond bare
-        # nouns/amounts/yes-or-no — a full-sentence reply that names the missing piece the
-        # question asked for (e.g. "I want to transfer money to bkash" naming a transaction
-        # type) is still an answer, not a new unrelated request, even though it reads like
-        # one. This is a general context-continuity fix, not fees-specific: any pending
-        # clarification's genuine answer can be phrased as a full sentence of intent.
-        general_reasoning = (
-            f'PENDING CLARIFICATION (read first — overrides the general decision rules above '
-            f'for this one reply): you previously asked the customer "{pending_question}" in '
-            f'response to their message "{last_turn.message}", and got no clear answer yet. As '
-            "a general rule, treat the customer's new message below as the answer to THAT "
-            "pending question whenever it names or implies the missing piece the question "
-            "asked for (a transaction type, method, amount, account type, etc.) — even when "
-            "it's phrased as a full sentence describing an action/intent rather than a bare "
-            'word (e.g. "I want to transfer money to bkash" IS naming a transaction type, not '
-            "a subject change). Only treat the new message as a genuinely new, unrelated "
-            "request when it changes the subject to a different KIND of thing entirely (e.g. "
-            "the pending question was about fees, but the new message instead asks about "
-            "balance, account info, or login history)."
-        )
-        # The bulleted, imperative worked example below (naming the exact tool call to make)
-        # is dramatically more reliable in practice than reasoning/narrative prose alone —
-        # confirmed live (T-53) that qwen3:8b's tool-call choice needs a concrete grounded
-        # example, not just an abstract rule, to reliably resist matching the new message's
-        # surface wording (e.g. "transfer"/"bkash") to an unrelated taxonomy path. Only
-        # include it when the pending question we actually asked was itself a fee-quote
-        # question (detected from its own text) — never assert this fees/fee_quote-specific
-        # resolution for some other pending clarification (e.g. a card-help question), where
-        # it would be wrong.
-        if "fee quote" in pending_question.lower():
+        last_classification = last_turn.classification or {}
+        pending_question = last_classification.get("question") or "a clarifying question"
+        if last_classification.get("type") == "ACCOUNT_SELECTION_REQUIRED":
+            # T-59: ACCOUNT_SELECTION_REQUIRED is a structurally different pending state
+            # from a genuine CLARIFICATION_REQUIRED (the general branch below) — it never
+            # means the intent itself is ambiguous. The category/service/subservice are
+            # already fully and certainly known (stored on the turn itself); the only open
+            # question is which of the customer's own EXISTING accounts to use. Confirmed
+            # live: feeding this through the generic branch below let the new message's
+            # surface wording ("account(s)") collide with the Transfer-specific rule's own
+            # "raw account number" examples, hijacking an unrelated message (e.g. "how many
+            # accounts do i have?") into a transfer clarification. This dedicated branch
+            # states the already-known category/service/subservice explicitly and rules out
+            # transfer/wallet/beneficiary reinterpretation by name, rather than leaving the
+            # model to infer "this has nothing to do with transfers" on its own.
+            pending_category = last_classification.get("category")
+            pending_service = last_classification.get("service")
+            pending_subservice = last_classification.get("subservice")
+            service_args = f'category="{pending_category}", service="{pending_service}"'
+            if pending_subservice:
+                service_args += f', subservice="{pending_subservice}"'
+            general_reasoning = (
+                "PENDING ACCOUNT SELECTION (read first — overrides the general decision "
+                f"rules above for this one reply): the customer's request — "
+                f"{pending_category}/{pending_service}"
+                + (f"/{pending_subservice}" if pending_subservice else "")
+                + f' — is ALREADY fully identified and certain. You asked "{pending_question}" '
+                "only because the customer has more than one of THEIR OWN EXISTING accounts "
+                "and the system needs to know which one to use for that already-identified "
+                "request. This is purely picking among accounts the customer already owns — "
+                "it has NOTHING to do with a transfer destination, a wallet, a beneficiary, or "
+                "sending money anywhere, even though the word \"account\"/\"accounts\" appears "
+                "in both the question and possibly the new message too; that word overlap is a "
+                "coincidence, never a signal to route to transfer/wallet_transfer, "
+                "transfer/bank_transfer, or polygon_services/beneficiary.\n"
+                "Only treat the customer's new message below as answering this pending "
+                "selection when it clearly names ONE of the specific accounts listed in the "
+                'question above (by its type, e.g. "savings"/"credit", or by the last few '
+                'digits of its number, e.g. "0015"). In that case, call route_banking_service '
+                f"with EXACTLY {service_args} — the SAME category/service/subservice already "
+                "identified, never a different one — and, if the message named the account's "
+                'type, include it as payload={"accountType": "<type named>"} (omit payload '
+                "entirely if only a number was named).\n"
+                "If the new message does NOT clearly name one of the listed accounts, it is a "
+                "fresh, unrelated message — classify it independently using ONLY the general "
+                "decision rules above, exactly as if this pending selection had never "
+                "happened. Never guess which account was meant."
+            )
             worked_example = (
-                "\n- If the new message names a transaction type/method (e.g. bKash, Nagad, "
-                "another bank, ATM, cash) — with or without an amount, and however it's "
-                'phrased (a bare word or a full sentence like "I want to transfer money from '
-                'bank to bkash") — call route_banking_service(category="fees", '
-                'service="fee_quote", payload={"transactionType": "<method named>", ...amount '
-                "if present}). This is the only acceptable route_banking_service call for this "
-                "reply — never beneficiary, never a transfer/wallet action, never any other "
-                "category/service, even though the message is phrased like an action "
-                "request.\n"
-                "- If the new message still gives no transaction type at all, call "
-                "ask_clarification repeating the same kind of question.\n"
-                "- Only classify independently per the general rules above if the new message "
-                "is a genuine subject change (different kind of thing entirely, not just a "
-                "different phrasing of the fee answer)."
+                '\n- "how many accounts do i have?" -> does not name any of the specific '
+                "listed accounts at all — it's a different, already-identified request type "
+                "(asking how many accounts exist) — classify it independently per the general "
+                'rules above (e.g. route_banking_service(category="account_info", '
+                'service="accounts")). Never reinterpret this as a transfer just because it '
+                'says "accounts".\n'
+                '- "savings" or "the savings account please" -> clearly names one of the '
+                f"listed accounts by type — route_banking_service({service_args}, "
+                'payload={"accountType": "savings"}).\n'
+                '- "the one ending 0015" -> clearly names one of the listed accounts by its '
+                f"number — route_banking_service({service_args}).\n"
+                '- "what is the weather today" or "I want to transfer money to another bank" '
+                "-> a genuine subject change unrelated to picking an account — classify "
+                "independently per the general rules above (e.g. a KB/decline, or the "
+                "Transfer-specific rule's own path respectively), never treated as an "
+                "account-selection answer."
             )
         else:
-            worked_example = (
-                "\n- If the new message supplies the missing piece, resolve it using the SAME "
-                "category/service the pending question was already about — do not switch to a "
-                "different, unrelated category/service just because the new message's wording "
-                "happens to overlap with another feature's vocabulary.\n"
-                "- If the new message still doesn't supply what the pending question needs, "
-                "call ask_clarification, repeating what's still missing.\n"
-                "- Only classify independently per the general rules above if the new message "
-                "is a genuine subject change (a different kind of thing entirely, not just a "
-                "different phrasing of the same answer)."
+            # T-53: broaden what counts as "answering" a pending clarification beyond bare
+            # nouns/amounts/yes-or-no — a full-sentence reply that names the missing piece the
+            # question asked for (e.g. "I want to transfer money to bkash" naming a transaction
+            # type) is still an answer, not a new unrelated request, even though it reads like
+            # one. This is a general context-continuity fix, not fees-specific: any pending
+            # clarification's genuine answer can be phrased as a full sentence of intent.
+            general_reasoning = (
+                f'PENDING CLARIFICATION (read first — overrides the general decision rules above '
+                f'for this one reply): you previously asked the customer "{pending_question}" in '
+                f'response to their message "{last_turn.message}", and got no clear answer yet. As '
+                "a general rule, treat the customer's new message below as the answer to THAT "
+                "pending question whenever it names or implies the missing piece the question "
+                "asked for (a transaction type, method, amount, account type, etc.) — even when "
+                "it's phrased as a full sentence describing an action/intent rather than a bare "
+                'word (e.g. "I want to transfer money to bkash" IS naming a transaction type, not '
+                "a subject change). Only treat the new message as a genuinely new, unrelated "
+                "request when it changes the subject to a different KIND of thing entirely (e.g. "
+                "the pending question was about fees, but the new message instead asks about "
+                "balance, account info, or login history)."
             )
+            # The bulleted, imperative worked example below (naming the exact tool call to make)
+            # is dramatically more reliable in practice than reasoning/narrative prose alone —
+            # confirmed live (T-53) that qwen3:8b's tool-call choice needs a concrete grounded
+            # example, not just an abstract rule, to reliably resist matching the new message's
+            # surface wording (e.g. "transfer"/"bkash") to an unrelated taxonomy path. Only
+            # include it when the pending question we actually asked was itself a fee-quote
+            # question (detected from its own text) — never assert this fees/fee_quote-specific
+            # resolution for some other pending clarification (e.g. a card-help question), where
+            # it would be wrong.
+            if "fee quote" in pending_question.lower():
+                worked_example = (
+                    "\n- If the new message names a transaction type/method (e.g. bKash, Nagad, "
+                    "another bank, ATM, cash) — with or without an amount, and however it's "
+                    'phrased (a bare word or a full sentence like "I want to transfer money from '
+                    'bank to bkash") — call route_banking_service(category="fees", '
+                    'service="fee_quote", payload={"transactionType": "<method named>", ...amount '
+                    "if present}). This is the only acceptable route_banking_service call for this "
+                    "reply — never beneficiary, never a transfer/wallet action, never any other "
+                    "category/service, even though the message is phrased like an action "
+                    "request.\n"
+                    "- If the new message still gives no transaction type at all, call "
+                    "ask_clarification repeating the same kind of question.\n"
+                    "- Only classify independently per the general rules above if the new message "
+                    "is a genuine subject change (different kind of thing entirely, not just a "
+                    "different phrasing of the fee answer)."
+                )
+            else:
+                worked_example = (
+                    "\n- If the new message supplies the missing piece, resolve it using the SAME "
+                    "category/service the pending question was already about — do not switch to a "
+                    "different, unrelated category/service just because the new message's wording "
+                    "happens to overlap with another feature's vocabulary.\n"
+                    "- If the new message still doesn't supply what the pending question needs, "
+                    "call ask_clarification, repeating what's still missing.\n"
+                    "- Only classify independently per the general rules above if the new message "
+                    "is a genuine subject change (a different kind of thing entirely, not just a "
+                    "different phrasing of the same answer)."
+                )
         messages.append({
             "role": "system",
             "content": general_reasoning + worked_example,

@@ -14,6 +14,14 @@ _index: dict | None = None
 # features the mobile app calls directly, never surfaced via the navigation
 # grid, so they can never appear in a live fetch. Closed, named exception —
 # see banking-service-catalog agent file before adding another id here.
+# Extended by Amendment 2026-09-29 (T-41, `fees`/`fee_quote`), Amendment
+# 2026-10-01 (T-58, `account_info`/`fd_profit_history`+`dps_profit_history`
+# and the new `service_requests`/`disputes` category), Amendment 2026-10-01
+# (T-57, `account_info`/`cards`), and Amendment 2026-10-01 (T-61,
+# `service_requests`/`raise_dispute`) — each a standalone utility endpoint (or,
+# for `raise_dispute`, a gather+redirect-only flow with no real submission
+# endpoint at all) the app/chatbot calls directly, never surfaced via the
+# navigation grid, so none of them can ever appear in a live fetch either.
 _SYNTHETIC_CATEGORIES = [
     {
         "id": "account_info",
@@ -24,6 +32,11 @@ _SYNTHETIC_CATEGORIES = [
             {"id": "accounts", "name": "My Accounts", "isActive": True},
             {"id": "device_history", "name": "Device History", "isActive": True},
             {"id": "login_history", "name": "Login History", "isActive": True},
+            {"id": "fd_profit_history", "name": "FD Profit History", "isActive": True},
+            {"id": "dps_profit_history", "name": "DPS Profit History", "isActive": True},
+            {"id": "cards", "name": "My Cards", "isActive": True},
+            # ADR-0011 Amendment 2026-10-03 (T-64).
+            {"id": "account_transactions", "name": "Account Transactions", "isActive": True},
         ],
     },
     # ADR-0011 Amendment 2026-09-29 (T-41): fee-quote is a standalone utility
@@ -35,6 +48,69 @@ _SYNTHETIC_CATEGORIES = [
         "isActive": True,
         "services": [
             {"id": "fee_quote", "name": "Fee Quote", "isActive": True},
+        ],
+    },
+    # ADR-0011 Amendment 2026-10-01 (T-58): disputes list is a standalone
+    # service-request endpoint shared by ATM_SUPPORT/CARD_ISSUE/FAILED_TRANSFER,
+    # never surfaced via the navigation grid, so it can never appear in a live
+    # fetch either. Extended by Amendment 2026-10-01 (T-61, `raise_dispute`) —
+    # gather+redirect only, never submits a real dispute.
+    {
+        "id": "service_requests",
+        "name": "Service Requests",
+        "isActive": True,
+        "services": [
+            {"id": "disputes", "name": "Disputes", "isActive": True},
+            {"id": "raise_dispute", "name": "Raise Dispute", "isActive": True},
+        ],
+    },
+    # ADR-0011 Amendment 2026-10-03 (T-64): read-only (GET) card, profile and
+    # transfer-history endpoints the app calls directly, never surfaced via the
+    # navigation grid, so they can never appear in a live fetch either.
+    {
+        "id": "card_info",
+        "name": "Card Information",
+        "isActive": True,
+        "services": [
+            {"id": "card_limit_requests", "name": "Card Limit Requests", "isActive": True},
+            {"id": "card_products", "name": "Card Products", "isActive": True},
+            {"id": "virtual_card_requests", "name": "Virtual Card Requests", "isActive": True},
+            {"id": "replacement_requests", "name": "Card Replacement Requests", "isActive": True},
+            {"id": "credit_card_summary", "name": "Credit Card Summary", "isActive": True},
+            {"id": "credit_card_statement", "name": "Credit Card Statement", "isActive": True},
+        ],
+    },
+    {
+        "id": "profile",
+        "name": "Profile",
+        "isActive": True,
+        "services": [
+            {"id": "profile", "name": "My Profile", "isActive": True},
+            {"id": "address", "name": "Address", "isActive": True},
+            {"id": "contacts", "name": "Contacts", "isActive": True},
+            {"id": "profile_change_requests", "name": "Profile Change Requests", "isActive": True},
+            {"id": "contact_priority_requests", "name": "Contact Priority Requests", "isActive": True},
+        ],
+    },
+    {
+        "id": "transfer_info",
+        "name": "Transfer Information",
+        "isActive": True,
+        "services": [
+            {"id": "gifts_received", "name": "Gifts Received", "isActive": True},
+            {"id": "email_transfers", "name": "Email Transfers", "isActive": True},
+            {"id": "qr_payment_history", "name": "QR Payment History", "isActive": True},
+            {"id": "transfer_limit", "name": "Transfer Limit", "isActive": True},
+        ],
+    },
+    # ADR-0011 Amendment 2026-10-03 (T-60 fix): adding a beneficiary has no live
+    # catalog entry (the live polygon_services/beneficiary is the send/list one).
+    {
+        "id": "beneficiary_management",
+        "name": "Beneficiary Management",
+        "isActive": True,
+        "services": [
+            {"id": "beneficiary_add", "name": "Add Beneficiary", "isActive": True},
         ],
     },
 ]

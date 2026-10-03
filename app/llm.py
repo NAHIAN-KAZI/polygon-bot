@@ -81,6 +81,7 @@ async def stream_generate(prompt: str) -> AsyncGenerator[str, None]:
                 "prompt": prompt,
                 "stream": True,
                 "think": settings.OLLAMA_THINK,
+                "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0.2},
             },
         ) as resp:
             resp.raise_for_status()

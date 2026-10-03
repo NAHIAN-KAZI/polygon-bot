@@ -76,5 +76,147 @@ turns out to have no navigable-catalog entry (rather than being a genuine gap
 needing a fresh bank-side confirmation) will need its own dated amendment
 here, named per task — not a silent, unbounded extension of this exception.
 
+## Amendment 2026-10-01 (T-58): completing ACCOUNT_INFO + ATM_SUPPORT's read-only endpoints
+
+Completing `ACCOUNT_INFO`'s remaining read-only endpoints confirmed two of
+the five gaps (`loan/v1/loans` for "my loans", via the live
+`loan_services`/`my_loans` service — already navigable, no synthetic entry
+needed there) are real catalog entries. The other two genuinely are not,
+confirmed by inspecting a live taxonomy fetch directly — no shape for either
+exists under `support/v1/services` or `support/v1/pay-transfer`:
+
+- `product/v1/fixed-deposit/{id}/profit-history` — a standalone utility the
+  app calls from inside the Mudarabah Profit screen (tap an FD account card
+  to expand its history), not a navigation-grid item.
+- `product/v1/dps/{id}/profit-history` — same pattern, for DPS.
+
+Same reasoning as the two prior amendments: append `fd_profit_history` and
+`dps_profit_history` to the existing `account_info` synthetic category's
+`services` list (alongside `balance`/`accounts`/`device_history`/
+`login_history`).
+
+Separately, `ATM_SUPPORT`'s one read-only endpoint, `GET
+service-request/v1/disputes` ("list my disputes" — also shared, per the
+bank's own cURL reference, by `CARD_ISSUE` and `FAILED_TRANSFER`'s dispute
+lists), has no live catalog shape either — confirmed the same way. This one
+doesn't fit the existing `account_info` synthetic category conceptually (it's
+a service-request list, not an account feature), and since it will be reused
+by at least two more intents as they're built, it gets its own small
+synthetic category rather than being bolted onto an unrelated one: a new
+`service_requests` category (service: `disputes`) appended to
+`_SYNTHETIC_CATEGORIES`.
+
+This authorizes `banking-service-catalog` to add exactly these 3 service ids
+(2 under `account_info`, 1 new `service_requests` category) — no other
+addition is covered by this amendment.
+
+## Amendment 2026-10-01 (T-57): card list for the freeze-card flow
+
+T-57 (card freeze — see the user-approved mutating exception recorded in
+`planning/input/INTENT_IMPLEMENTATION_STATUS.md`) needs a read-only "list my
+cards" lookup as the first step of its confirm-before-freeze flow. There is
+no dedicated "list my cards" endpoint in the bank's cURL reference — cards
+only ever come embedded in each account's `cards` array under the existing,
+already-real `GET polygon-bank/v1/accounts` endpoint (live-confirmed shape:
+`{"cardNumber": "4001****0251", "cardType": "DEBIT", "id": "41", ...}`), and
+that array has no shape of its own anywhere in `support/v1/services` or
+`support/v1/pay-transfer` — confirmed the same way as the prior two
+amendments.
+
+Same reasoning as before: append one more synthetic service, `cards`, to the
+existing `account_info` synthetic category's `services` list. This
+amendment authorizes exactly that one addition — no other.
+
+Note this is unrelated to the T-57 card-freeze *mutating* call itself
+(`PATCH card/v1/cards/{id}/freeze`), which uses the already-real,
+already-navigable `card_services`/`frezz_unfrezz` service id and needed no
+taxonomy change at all.
+
+## Amendment 2026-10-01 (T-61): `raise_dispute` under the existing `service_requests` category
+
+T-61 adds a "raise a dispute" chatbot flow. Unlike the T-58 `disputes` entry
+(a read-only list of existing disputes backed by a real endpoint, `GET
+service-request/v1/disputes`), this flow is gather+redirect only: the
+chatbot collects the dispute details from the customer and returns a
+confirmation summary, but never actually submits a dispute anywhere — there
+is no real adapter call behind it at all, confirmed by inspecting
+`app/routes/chat.py`'s T-61 handling directly. It still needs a valid
+category/service pair to route through, and, same as every entry in this
+exception, no shape for it exists under `support/v1/services` or
+`support/v1/pay-transfer` — confirmed the same way as the prior amendments.
+
+Same reasoning as before: append one more synthetic service, `raise_dispute`
+(no subservices), to the existing `service_requests` synthetic category's
+`services` list, alongside `disputes`. This amendment authorizes exactly
+that one addition — no other. The existing `service_requests`/`disputes`
+entry is unaffected.
+
+## Amendment 2026-10-03 (T-64): 17 read-only services across `service_requests`, `account_info`, and three new categories
+
+T-64 builds read-only adapters for 17 more endpoints from the bank's own cURL
+reference (`planning/input/Internet Banking API cURL Reference.md`). Every one
+is a GET: a list/detail/history lookup that the app calls directly from inside
+a screen, never a navigation-grid item. A live fetch of `support/v1/services`
+and `support/v1/pay-transfer` on 2026-10-03 (`initialize_taxonomy()` then
+`get_taxonomy()` in the backend container) confirmed none of them has a
+catalog entry. Some live entries look close but are different features, and
+none of them are reused here:
+
+- `polygon_services`/`transaction_history` is the paginated, date-ranged
+  `transfer/v1/accounting/transaction-list`. `account_transactions` is a
+  separate endpoint, `polygon-bank/v1/accounts/{id}/transactions`.
+- `transfer`/`gift`, `transfer`/`email_transfer`, `transfer`/`qr_transfer`,
+  and `card_services`/`apply_for_virtual_card` are the *initiating*
+  (mutating) actions. The entries below are the read-only history and
+  request-status lists that go with them.
+- `card_services`/`card_offers` is a promotions grid, not the
+  `card/v1/card-products` catalog.
+- `polygon_services`/`tickets`/`my_tickets`: initially treated as unrelated
+  to `support/v1/complaints`, but the bank's backend team confirmed
+  (2026-10-03) "Tickets" = `POST support/v1/complaints` (submit) and
+  "My Tickets" = `GET support/v1/complaints` (list) — no separate ticket API
+  exists. So the complaints list is served through the real, live
+  `polygon_services`/`my_tickets` entry; no synthetic `complaints` id is added
+  (a duplicate would violate this ADR). `tickets` (submit) is mutating and
+  stays blocked.
+
+Same reasoning as the earlier amendments. This amendment authorizes exactly
+these entries and no others, none with subservices:
+
+- Existing `account_info` category: `account_transactions` (`GET
+  polygon-bank/v1/accounts/{id}/transactions`).
+- New `card_info` category ("Card Information"): `card_limit_requests` (`GET
+  card/v1/cards/limit-change-requests`), `card_products` (`GET
+  card/v1/card-products`), `virtual_card_requests` (`GET
+  card/v1/cards/virtual/requests`), `replacement_requests` (`GET
+  card/v1/cards/replacement-requests`), `credit_card_summary` (`GET
+  card/v1/cards/{id}/credit-summary`), `credit_card_statement` (`GET
+  card/v1/cards/{id}/statements`).
+- New `profile` category ("Profile"): `profile` (`GET auth/v1/user`),
+  `address` (`GET customer/v1/me/demographic`), `contacts` (`GET
+  customer/v1/me/contacts`), `profile_change_requests` (`GET
+  service-request/v1/profile-changes`), `contact_priority_requests` (`GET
+  service-request/v1/contact-priority`).
+- New `transfer_info` category ("Transfer Information"): `gifts_received`
+  (`GET transfer/v1/bank-transfer/gift/received`), `email_transfers` (`GET
+  transfer/v1/email-transfer`), `qr_payment_history` (`GET
+  merchant/v1/qr/history`), `transfer_limit` (`GET
+  transfer/v1/my-limit/{account}`).
+
+This does not authorize the mutating siblings of any of these endpoints
+(submit, cancel, update, reveal). Those still need their own amendment.
+
 ## Related
 FR-CATALOG-01, FR-CATALOG-03, FR-CATALOG-05, FR-CATALOG-06, FR-CATALOG-07, NFR-MAINT-01, NFR-REL-02, F-02
+
+## Amendment 2026-10-03 (T-60 fix): `beneficiary_management`/`beneficiary_add`
+
+T-60 registered a `beneficiary_add` adapter but never a taxonomy entry, so every
+correct classification of "add a beneficiary" failed `is_valid_path` and fell back
+to a clarifying question (found by the isolated eval). A live fetch confirms no
+add-beneficiary shape exists: the live `polygon_services`/`beneficiary` is the
+send-to / list action. A service can't be appended to a live category from the
+synthetic list without duplicating that category in the rendered taxonomy, so this
+authorizes one new synthetic category, `beneficiary_management`, with exactly one
+service, `beneficiary_add` (POST `beneficiary/v1/beneficiaries`, the user-approved
+mutating exception, behind the deterministic yes/no confirmation).

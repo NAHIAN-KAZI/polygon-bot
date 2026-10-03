@@ -36,7 +36,7 @@ import json
 import httpx
 
 from app.config import settings
-from app.routes.chat import _account_card_summary, _subservice_reply, _synthesize_reply
+from app.routes.chat import _account_card_summary, _redact_for_prompt, _subservice_reply, _synthesize_reply
 
 
 # --- 1. balance: unchanged behavior ------------------------------------------
@@ -264,7 +264,7 @@ def test_transaction_history_normal_case_mentions_counts_and_latest():
     reply = _subservice_reply("transaction_history", None, data)
     assert "2 most recent transactions" in reply
     assert "out of 12 total" in reply
-    assert "৳2000" in reply
+    assert "a 2000 Mobile Recharge" in reply  # unit passes through; prod feeds Tk-redacted data
     assert "Mobile Recharge: From 100126000015 to 4900000" in reply
     assert "debit" in reply
 
@@ -512,29 +512,29 @@ def test_synthesize_reply_non_200_status_falls_back_to_subservice_reply(monkeypa
     _install_post_response(monkeypatch, json_data={"response": "irrelevant, should never be seen"}, status_code=500)
     data = {"balance": 100}
     result = asyncio.run(_synthesize_reply("what's my balance", "balance", None, data))
-    assert result == _subservice_reply("balance", None, data)
-    assert result == "Your available balance is 100."
+    assert result == _subservice_reply("balance", None, _redact_for_prompt(data, "balance"))
+    assert result == "Your available balance is Tk 1.00."
 
 
 def test_synthesize_reply_connect_error_falls_back_no_exception_propagates(monkeypatch):
     _install_post_raises(monkeypatch, httpx.ConnectError("connection refused"))
     data = {"balance": 100}
     result = asyncio.run(_synthesize_reply("what's my balance", "balance", None, data))
-    assert result == _subservice_reply("balance", None, data)
+    assert result == _subservice_reply("balance", None, _redact_for_prompt(data, "balance"))
 
 
 def test_synthesize_reply_timeout_falls_back_no_exception_propagates(monkeypatch):
     _install_post_raises(monkeypatch, httpx.TimeoutException("request timed out"))
     data = {"balance": 100}
     result = asyncio.run(_synthesize_reply("what's my balance", "balance", None, data))
-    assert result == _subservice_reply("balance", None, data)
+    assert result == _subservice_reply("balance", None, _redact_for_prompt(data, "balance"))
 
 
 def test_synthesize_reply_empty_string_response_falls_back(monkeypatch):
     _install_post_response(monkeypatch, json_data={"response": ""})
     data = {"balance": 100}
     result = asyncio.run(_synthesize_reply("what's my balance", "balance", None, data))
-    assert result == _subservice_reply("balance", None, data)
+    assert result == _subservice_reply("balance", None, _redact_for_prompt(data, "balance"))
 
 
 def test_synthesize_reply_whitespace_only_response_falls_back(monkeypatch):
@@ -543,14 +543,14 @@ def test_synthesize_reply_whitespace_only_response_falls_back(monkeypatch):
     _install_post_response(monkeypatch, json_data={"response": "   "})
     data = {"balance": 100}
     result = asyncio.run(_synthesize_reply("what's my balance", "balance", None, data))
-    assert result == _subservice_reply("balance", None, data)
+    assert result == _subservice_reply("balance", None, _redact_for_prompt(data, "balance"))
 
 
 def test_synthesize_reply_malformed_json_body_falls_back_no_exception_propagates(monkeypatch):
     _install_post_response(monkeypatch, json_exc=ValueError("not valid json"))
     data = {"balance": 100}
     result = asyncio.run(_synthesize_reply("what's my balance", "balance", None, data))
-    assert result == _subservice_reply("balance", None, data)
+    assert result == _subservice_reply("balance", None, _redact_for_prompt(data, "balance"))
 
 
 def test_synthesize_reply_missing_response_key_falls_back(monkeypatch):
@@ -560,7 +560,7 @@ def test_synthesize_reply_missing_response_key_falls_back(monkeypatch):
     _install_post_response(monkeypatch, json_data={"unexpected": "shape"})
     data = {"balance": 100}
     result = asyncio.run(_synthesize_reply("what's my balance", "balance", None, data))
-    assert result == _subservice_reply("balance", None, data)
+    assert result == _subservice_reply("balance", None, _redact_for_prompt(data, "balance"))
 
 
 def test_synthesize_reply_sends_correct_request_body(monkeypatch):
@@ -611,7 +611,7 @@ def test_synthesize_reply_prompt_redacts_raw_account_number_uses_masked_sibling(
     assert "1234567890" not in prompt
     # json.dumps(..., default=str) escapes the non-ASCII "•" bullet, so look
     # for its JSON-encoded form rather than the literal character.
-    assert json.dumps("••••••7890")[1:-1] in prompt
+    assert "••••••7890" in prompt or json.dumps("••••••7890")[1:-1] in prompt
 
 
 def test_synthesize_reply_prompt_redacts_cif_and_nid(monkeypatch):
@@ -624,4 +624,4 @@ def test_synthesize_reply_prompt_redacts_cif_and_nid(monkeypatch):
     prompt = captured_calls[0]["kwargs"]["json"]["prompt"]
     assert "CIF-000111" not in prompt
     assert "1234567890123" not in prompt
-    assert "[redacted]" in prompt
+    assert "[redacted]" not in prompt  # identity numbers are dropped entirely

@@ -95,23 +95,18 @@ this is one quote, not a list. Suggested layout:
 └─────────────────────────────┘
 ```
 
-```js
-function renderFeeQuote(payload) {
-  const toTaka = (poisha) => (poisha / 100).toLocaleString("en-BD");
-  return {
-    principal: toTaka(payload.principalAmount),
-    charge: toTaka(payload.fees.charge * 100), // fees.* are already in taka-scale floats, not poisha — see note below
-    vat: toTaka(payload.fees.vat * 100),
-    total: toTaka(payload.totalAmount),
-  };
-}
+```dart
+// Every amount in this payload is POISHA — same as the app's own
+// TransactionChargeDto, which parses charge/vat/totalAmount with Money.fromPoisha.
+final principal = Money.fromPoisha(payload['principalAmount']?.toString());
+final charge = Money.fromPoisha(payload['fees']['charge']?.toString());
+final vat = Money.fromPoisha(payload['fees']['vat']?.toString());
+final total = Money.fromPoisha(payload['totalAmount']?.toString());
+// render with .formattedWithSymbol, as elsewhere in the app
 ```
-**Unit note**: `principalAmount`/`totalAmount` are poisha (divide by 100 for
-taka). `fees.charge`/`fees.vat`/`fees.total` come back as plain floats from
-the bank endpoint — in every case tested so far they were `0.0`, so the
-correct taka-scale interpretation hasn't been distinguishable from a poisha
-one yet. Confirm the actual unit with the bank team once a non-zero fee is
-observed, before shipping the conversion above as-is.
+**Unit note**: all money fields here are **poisha** (1 taka = 100 poisha).
+Confirmed 2026-10-03 against the bank app's `core/data/dto/transaction_charge_dto.dart`.
+The chatbot's spoken reply already converts to taka before wording it.
 
 **Action buttons**: none needed. This is informational only — `routing.action`
 is always the generic `"redirect"` value here (not a specific navigation

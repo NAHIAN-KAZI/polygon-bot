@@ -421,4 +421,4 @@ def test_e2e_non_beneficiary_banking_service_flow_unaffected(client, monkeypatch
     events = _parse_sse(resp.text)
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "BANKING_SERVICE"
-    assert result_event["payload"] == {"balance": "500.00", "balanceFormatted": "৳500"}
+    assert result_event["payload"] == {"balance": "500.00", "balanceFormatted": "৳5.00"}  # bank balances are poisha (T-65)

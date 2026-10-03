@@ -91,11 +91,22 @@ def test_refresh_merges_both_endpoints_preserving_ids(monkeypatch):
 
     result = taxonomy.get_taxonomy()
     category_ids = {c["id"] for c in result["categories"]}
-    # account_info and fees are synthetic categories unconditionally appended
-    # by _fetch_and_build() on every build, in addition to whatever the fetch
-    # returns (T-19, T-41), so both fetched ids and the synthetic ids must
-    # appear.
-    assert category_ids == {"banking", "transfers", "account_info", "fees"}
+    # account_info, fees, service_requests, card_info, profile and
+    # transfer_info are synthetic categories unconditionally appended by
+    # _fetch_and_build() on every build, in addition to whatever the fetch
+    # returns (T-19, T-41, T-58, T-64), so both fetched ids and the synthetic
+    # ids must appear.
+    assert category_ids == {
+        "banking",
+        "transfers",
+        "account_info",
+        "fees",
+        "service_requests",
+        "card_info",
+        "profile",
+        "transfer_info",
+        "beneficiary_management",  # T-60 fix: beneficiary_add needs a real taxonomy home
+    }
 
     banking = next(c for c in result["categories"] if c["id"] == "banking")
     assert banking["services"][0]["id"] == "accounts"
@@ -245,8 +256,17 @@ def test_synthetic_account_info_category_has_expected_services(monkeypatch):
     result = taxonomy.get_taxonomy()
     account_info = next(c for c in result["categories"] if c["id"] == "account_info")
     service_ids = {s["id"] for s in account_info["services"]}
-    assert service_ids == {"balance", "accounts", "device_history", "login_history"}
-    assert len(account_info["services"]) == 4
+    assert service_ids == {
+        "balance",
+        "accounts",
+        "device_history",
+        "login_history",
+        "fd_profit_history",
+        "dps_profit_history",
+        "cards",
+        "account_transactions",
+    }
+    assert len(account_info["services"]) == 8
 
 
 def test_synthetic_fees_category_has_expected_services(monkeypatch):
@@ -290,6 +310,20 @@ def test_synthetic_account_info_paths_are_valid(monkeypatch):
     assert taxonomy.is_valid_path("account_info", "login_history") is True
 
 
+# --- T-57: `cards` synthetic service (account_info) -------------------------
+
+
+def test_synthetic_account_info_cards_path_is_valid(monkeypatch):
+    _install_responses(monkeypatch, {
+        SERVICES_PATH: _ok([]),
+        PAY_TRANSFER_PATH: _ok([]),
+    })
+
+    asyncio.run(taxonomy.refresh_taxonomy())
+
+    assert taxonomy.is_valid_path("account_info", "cards") is True
+
+
 def test_synthetic_account_info_rejects_unknown_service(monkeypatch):
     _install_responses(monkeypatch, {
         SERVICES_PATH: _ok([]),
@@ -299,6 +333,95 @@ def test_synthetic_account_info_rejects_unknown_service(monkeypatch):
     asyncio.run(taxonomy.refresh_taxonomy())
 
     assert taxonomy.is_valid_path("account_info", "nonexistent") is False
+
+
+# --- T-58: service_requests synthetic category + fd/dps_profit_history ------
+# --- independent coverage -- the implementing agent updated the merged-set --
+# --- and account_info-services assertions above but added no dedicated ------
+# --- per-category test for the new service_requests category (unlike the ---
+# --- existing fees/account_info ones this mirrors), and no is_valid_path ----
+# --- coverage at all for fd_profit_history/dps_profit_history/disputes. -----
+
+
+def test_synthetic_service_requests_category_has_expected_services(monkeypatch):
+    services_categories = [_category("banking", "accounts", ("checking",))]
+    _install_responses(monkeypatch, {
+        SERVICES_PATH: _ok(services_categories),
+        PAY_TRANSFER_PATH: _ok([]),
+    })
+
+    asyncio.run(taxonomy.refresh_taxonomy())
+
+    result = taxonomy.get_taxonomy()
+    service_requests = next(c for c in result["categories"] if c["id"] == "service_requests")
+    service_ids = {s["id"] for s in service_requests["services"]}
+    assert service_ids == {"disputes", "raise_dispute"}
+    assert len(service_requests["services"]) == 2
+
+
+def test_synthetic_service_requests_path_is_valid(monkeypatch):
+    _install_responses(monkeypatch, {
+        SERVICES_PATH: _ok([]),
+        PAY_TRANSFER_PATH: _ok([]),
+    })
+
+    asyncio.run(taxonomy.refresh_taxonomy())
+
+    assert taxonomy.is_valid_path("service_requests", "disputes") is True
+
+
+def test_synthetic_service_requests_rejects_unknown_service(monkeypatch):
+    _install_responses(monkeypatch, {
+        SERVICES_PATH: _ok([]),
+        PAY_TRANSFER_PATH: _ok([]),
+    })
+
+    asyncio.run(taxonomy.refresh_taxonomy())
+
+    assert taxonomy.is_valid_path("service_requests", "nonexistent") is False
+
+
+def test_synthetic_disputes_has_no_valid_subservices(monkeypatch):
+    # Locks in the routing.py prompt note ("service_requests has exactly one
+    # service, disputes, and it has no subservices at all -- never pass a
+    # subservice argument"): disputes defines no subServices entry at all, so
+    # is_valid_path must reject ANY subservice_id for it, not just a specific
+    # made-up one.
+    _install_responses(monkeypatch, {
+        SERVICES_PATH: _ok([]),
+        PAY_TRANSFER_PATH: _ok([]),
+    })
+
+    asyncio.run(taxonomy.refresh_taxonomy())
+
+    assert taxonomy.is_valid_path("service_requests", "disputes", "anything") is False
+
+
+def test_synthetic_fd_dps_profit_history_paths_are_valid(monkeypatch):
+    _install_responses(monkeypatch, {
+        SERVICES_PATH: _ok([]),
+        PAY_TRANSFER_PATH: _ok([]),
+    })
+
+    asyncio.run(taxonomy.refresh_taxonomy())
+
+    assert taxonomy.is_valid_path("account_info", "fd_profit_history") is True
+    assert taxonomy.is_valid_path("account_info", "dps_profit_history") is True
+
+
+def test_synthetic_account_info_rejects_fd_dps_profit_history_as_subservice_of_other_service(monkeypatch):
+    # fd_profit_history/dps_profit_history are standalone services, not
+    # subservices of anything else in account_info -- confirms they weren't
+    # accidentally wired in as a subservice of e.g. "balance" instead.
+    _install_responses(monkeypatch, {
+        SERVICES_PATH: _ok([]),
+        PAY_TRANSFER_PATH: _ok([]),
+    })
+
+    asyncio.run(taxonomy.refresh_taxonomy())
+
+    assert taxonomy.is_valid_path("account_info", "balance", "fd_profit_history") is False
+    assert taxonomy.is_valid_path("account_info", "balance", "dps_profit_history") is False
 
 
 def test_synthetic_account_info_present_even_when_live_fetch_is_empty(monkeypatch):
@@ -311,4 +434,97 @@ def test_synthetic_account_info_present_even_when_live_fetch_is_empty(monkeypatc
 
     result = taxonomy.get_taxonomy()
     category_ids = {c["id"] for c in result["categories"]}
-    assert category_ids == {"account_info", "fees"}
+    assert category_ids == {
+        "account_info",
+        "fees",
+        "service_requests",
+        "card_info",
+        "profile",
+        "transfer_info",
+        "beneficiary_management",  # T-60 fix: beneficiary_add needs a real taxonomy home
+    }
+
+
+# --- T-64: 16 read-only synthetic services (ADR-0011 Amendment 2026-10-03) --
+
+_T64_PATHS = [
+    ("account_info", "account_transactions"),
+    ("card_info", "card_limit_requests"),
+    ("card_info", "card_products"),
+    ("card_info", "virtual_card_requests"),
+    ("card_info", "replacement_requests"),
+    ("card_info", "credit_card_summary"),
+    ("card_info", "credit_card_statement"),
+    ("profile", "profile"),
+    ("profile", "address"),
+    ("profile", "contacts"),
+    ("profile", "profile_change_requests"),
+    ("profile", "contact_priority_requests"),
+    ("transfer_info", "gifts_received"),
+    ("transfer_info", "email_transfers"),
+    ("transfer_info", "qr_payment_history"),
+    ("transfer_info", "transfer_limit"),
+]
+
+
+def test_t64_path_list_covers_exactly_17_services():
+    assert len(_T64_PATHS) == 16
+    assert len(set(_T64_PATHS)) == 16
+
+
+@pytest.mark.parametrize("category_id,service_id", _T64_PATHS)
+def test_synthetic_t64_paths_are_valid(monkeypatch, category_id, service_id):
+    _install_responses(monkeypatch, {
+        SERVICES_PATH: _ok([]),
+        PAY_TRANSFER_PATH: _ok([]),
+    })
+
+    asyncio.run(taxonomy.refresh_taxonomy())
+
+    assert taxonomy.is_valid_path(category_id, service_id) is True
+    # None of the T-64 services define subservices.
+    assert taxonomy.is_valid_path(category_id, service_id, "anything") is False
+
+
+@pytest.mark.parametrize(
+    "category_id,expected",
+    [
+        (
+            "card_info",
+            {
+                "card_limit_requests",
+                "card_products",
+                "virtual_card_requests",
+                "replacement_requests",
+                "credit_card_summary",
+                "credit_card_statement",
+            },
+        ),
+        (
+            "profile",
+            {
+                "profile",
+                "address",
+                "contacts",
+                "profile_change_requests",
+                "contact_priority_requests",
+            },
+        ),
+        (
+            "transfer_info",
+            {"gifts_received", "email_transfers", "qr_payment_history", "transfer_limit"},
+        ),
+    ],
+)
+def test_synthetic_t64_new_categories_have_expected_services(monkeypatch, category_id, expected):
+    _install_responses(monkeypatch, {
+        SERVICES_PATH: _ok([]),
+        PAY_TRANSFER_PATH: _ok([]),
+    })
+
+    asyncio.run(taxonomy.refresh_taxonomy())
+
+    category = next(c for c in taxonomy.get_taxonomy()["categories"] if c["id"] == category_id)
+    service_ids = [s["id"] for s in category["services"]]
+    assert set(service_ids) == expected
+    assert len(service_ids) == len(expected)

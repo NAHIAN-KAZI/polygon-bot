@@ -21,6 +21,47 @@ def client():
     return TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def _no_generated_clarifications(monkeypatch):
+    """Missing-field clarifying questions are LLM-worded in production
+    (app.routes.chat._generate_clarification_question), falling back to the
+    deterministic templates on any failure. Tests default to that fallback so they
+    stay deterministic and never call a live Ollama; tests of the generator itself
+    capture the real function at import time and/or re-patch it explicitly."""
+    import app.routes.chat as chat_module
+
+    async def _disabled(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(chat_module, "_generate_clarification_question", _disabled)
+
+    # Same for the LLM rewording of fact-based replies and the LLM account pick:
+    # tests see the code-decided facts verbatim and never call a live Ollama.
+    async def _identity(facts, customer_message):
+        return facts
+
+    async def _no_pick(message, candidates):
+        return None
+
+    monkeypatch.setattr(chat_module, "_phrase", _identity)
+    monkeypatch.setattr(chat_module, "_llm_pick_candidate", _no_pick)
+
+    # Freeze-reason grounding check: trust the classifier's reason in tests.
+    async def _stated(messages, reason):
+        return True
+
+    monkeypatch.setattr(chat_module, "_reason_was_stated", _stated)
+
+    # Stage-1 domain pick: default to "no domain" (full single-stage prompt) so
+    # classify() tests see exactly one Ollama call; two-stage tests patch it.
+    import app.banking.routing as routing_module
+
+    async def _no_domain(message, recent_turns):
+        return None
+
+    monkeypatch.setattr(routing_module, "_pick_domain", _no_domain)
+
+
 @pytest.fixture
 def isolated_catalog(monkeypatch, tmp_path):
     """Point the document catalog at a throwaway file so tests never touch

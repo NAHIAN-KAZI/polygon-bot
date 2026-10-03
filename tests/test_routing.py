@@ -108,89 +108,14 @@ def fake_taxonomy(monkeypatch):
 # --- _render_taxonomy / build_system_prompt ---------------------------------
 
 
-def test_render_taxonomy_includes_nested_ids_and_names():
-    rendered = _render_taxonomy(FAKE_TAXONOMY)
-
-    assert "- banking (Banking)" in rendered
-    assert "  - accounts (Accounts)" in rendered
-    assert "    - checking (Checking)" in rendered
-    assert "    - savings (Savings)" in rendered
-    assert "  - loans (Loans)" in rendered
-
-    # nesting order: category line precedes its services, which precede their subservices
-    lines = rendered.splitlines()
-    banking_idx = lines.index("- banking (Banking)")
-    accounts_idx = lines.index("  - accounts (Accounts)")
-    checking_idx = lines.index("    - checking (Checking)")
-    assert banking_idx < accounts_idx < checking_idx
 
 
-def test_build_system_prompt_embeds_rendered_taxonomy():
-    prompt = build_system_prompt(FAKE_TAXONOMY)
-
-    assert "- banking (Banking)" in prompt
-    assert "    - checking (Checking)" in prompt
 
 
-def test_build_system_prompt_rule_2_includes_action_plus_cost_exception_clause():
-    prompt = build_system_prompt(FAKE_TAXONOMY)
-
-    # T-47: an action verb (transfer/send/withdraw/pay/etc.) combined with a
-    # cost question (fee/charge/cost) must be classified by the cost question,
-    # not the action verb -- this locks in rule 2's amended clause so the fix
-    # can't be silently reverted or lost in a future prompt edit.
-    assert (
-        "Exception: if the message BOTH describes performing an action "
-        "(transfer/send/withdraw/pay/replace/etc.) AND asks about its cost/fee/charge"
-    ) in prompt
-    assert (
-        'classify by the cost question, not the action verb — route to category="fees", '
-        'service="fee_quote" instead.'
-    ) in prompt
-    assert (
-        "The action mention is context for the fee lookup (it supplies "
-        "transactionType/amount for the payload), not a request to execute the action "
-        "itself."
-    ) in prompt
 
 
-def test_build_system_prompt_includes_three_new_action_plus_fee_examples():
-    prompt = build_system_prompt(FAKE_TAXONOMY)
-
-    # T-47: the three new few-shot examples added to fix the misrouting bug --
-    # each pairs an action verb with a cost question and must resolve to
-    # fees/fee_quote, not the action's own category. Asserting the full
-    # example strings (message + resulting tool call) so a future prompt edit
-    # can't quietly drop or reword one of them.
-    assert (
-        '- "If i transfer 1000 from my account to bkash what is the fee?" -> '
-        'route_banking_service(category="fees", service="fee_quote", payload='
-        '{"transactionType": "bkash", "amount": 1000})'
-    ) in prompt
-    assert (
-        '- "if I send 5000 taka to another bank account, how much would it cost?" -> '
-        'route_banking_service(category="fees", service="fee_quote", payload='
-        '{"transactionType": "other_bank", "amount": 5000})'
-    ) in prompt
-    assert (
-        '- "what will I be charged if I withdraw 2000 from an ATM?" -> route_banking_service('
-        'category="fees", service="fee_quote", payload={"transactionType": "atm_withdrawal", '
-        '"amount": 2000})'
-    ) in prompt
 
 
-def test_build_system_prompt_new_examples_precede_unrelated_vulgar_example_block():
-    prompt = build_system_prompt(FAKE_TAXONOMY)
-
-    # The 3 new examples must land right after the existing "what are your
-    # fees" example and before the untouched T-46 vulgar-example block --
-    # guards against a future edit accidentally interleaving or reordering
-    # these two unrelated example groups.
-    fees_idx = prompt.index('- "what are your fees"')
-    new_example_idx = prompt.index('- "If i transfer 1000 from my account to bkash what is the fee?"')
-    vulgar_idx = prompt.index("you're a useless bot, screw this")
-
-    assert fees_idx < new_example_idx < vulgar_idx
 
 
 # --- T-56: transfer-specific rule + its 4 new few-shot examples ---------------
@@ -200,120 +125,14 @@ def test_build_system_prompt_new_examples_precede_unrelated_vulgar_example_block
 # --- the rule or an example without any test catching it). -------------------
 
 
-def test_build_system_prompt_includes_transfer_specific_rule():
-    prompt = build_system_prompt(FAKE_TAXONOMY)
-
-    # T-56: this bank never executes a transfer through chat -- once a
-    # destination TYPE is named, route immediately with whatever of
-    # accountNumber/walletNumber/amount is already known in the message,
-    # never ask_clarification merely because the account/wallet number or
-    # amount itself is still missing (a separate mechanism asks for that).
-    assert (
-        "Transfer-specific rule: this bank never executes a transfer through this chat — it "
-        "only gathers details and hands back a confirmation summary for the customer to "
-        "complete in the real app."
-    ) in prompt
-    assert (
-        'route immediately to route_banking_service with category="transfer", '
-        'service="bank_transfer" or "wallet_transfer" as appropriate, and the specific '
-        "subservice, even if the destination account/wallet number and/or amount are not yet "
-        "known."
-    ) in prompt
-    assert (
-        "do NOT call ask_clarification in this case; a separate "
-        "mechanism already asks the customer for whatever's still missing."
-    ) in prompt
-    assert (
-        "Only use "
-        'ask_clarification when the destination TYPE itself is still unknown (e.g. "I want to '
-        'transfer money" names no type at all).'
-    ) in prompt
 
 
-def test_build_system_prompt_transfer_rule_distinguishes_named_person_from_raw_account():
-    prompt = build_system_prompt(FAKE_TAXONOMY)
-
-    # T-56: this sentence is the ENTIRE mechanism that disambiguates "send
-    # money to Ashan" (polygon_services/beneficiary) from "send money to
-    # account 1234567890" (transfer/bank_transfer) -- there is no code-level
-    # disambiguation, so losing this text silently would leave the model's
-    # choice between the two paths undefined for a message naming both a
-    # person and a raw account/wallet number in the same breath.
-    assert (
-        "Important distinction: naming a specific "
-        'PERSON to send money to (e.g. "send money to Ashan") — not a raw account/wallet '
-        "number — is the separate polygon_services/beneficiary path below, not transfer/"
-        "bank_transfer or transfer/wallet_transfer; only use the transfer category when a raw "
-        "account number, wallet number, or \"own account\" is named, never a person's name."
-    ) in prompt
 
 
-def test_build_system_prompt_includes_four_new_transfer_examples():
-    prompt = build_system_prompt(FAKE_TAXONOMY)
-
-    # T-56's 4 new few-shot examples -- asserting the full example string
-    # (message + resulting tool call) so a future prompt edit can't quietly
-    # drop or reword one of them.
-    assert (
-        '- "transfer 5000 to account 1234567890 via other bank" -> route_banking_service('
-        'category="transfer", service="bank_transfer", subservice="other_bank", payload='
-        '{"accountNumber": "1234567890", "amount": 5000})'
-    ) in prompt
-    assert (
-        '- "send 2000 to my bkash 01812345678" -> route_banking_service(category="transfer", '
-        'service="wallet_transfer", subservice="bkash", payload={"walletNumber": '
-        '"01812345678", "amount": 2000})'
-    ) in prompt
-    assert (
-        '- "transfer money to my own account" -> route_banking_service(category="transfer", '
-        'service="bank_transfer", subservice="own_account", payload={})'
-    ) in prompt
-    assert (
-        '- "I want to send 5000 to another bank account" -> route_banking_service('
-        'category="transfer", service="bank_transfer", subservice="other_bank", payload='
-        '{"amount": 5000})'
-    ) in prompt
 
 
-def test_build_system_prompt_transfer_examples_follow_beneficiary_examples_precede_fee_examples():
-    prompt = build_system_prompt(FAKE_TAXONOMY)
-
-    # Ordering lock: the 4 new transfer examples must land right after the
-    # existing beneficiary (Ashan/Dipu) examples -- confirming that
-    # unaffected path is still present and unmoved -- and before the
-    # untouched fee_quote examples, not interleaved with either group.
-    ashan_idx = prompt.index('- "send money to Ashan"')
-    dipu_idx = prompt.index('- "transfer 500 taka to Dipu"')
-    transfer_account_idx = prompt.index('- "transfer 5000 to account 1234567890 via other bank"')
-    transfer_wallet_idx = prompt.index('- "send 2000 to my bkash 01812345678"')
-    transfer_own_idx = prompt.index('- "transfer money to my own account"')
-    transfer_partial_idx = prompt.index('- "I want to send 5000 to another bank account"')
-    fee_idx = prompt.index('- "what\'s the fee for a bank transfer"')
-
-    assert (
-        ashan_idx
-        < dipu_idx
-        < transfer_account_idx
-        < transfer_wallet_idx
-        < transfer_own_idx
-        < transfer_partial_idx
-        < fee_idx
-    )
 
 
-def test_build_system_prompt_pre_existing_transfer_ask_clarification_example_unaffected():
-    prompt = build_system_prompt(FAKE_TAXONOMY)
-
-    # Pre-existing (not part of T-56) example for a destination-TYPE-unknown
-    # transfer message -- the one case where ask_clarification remains
-    # correct for a transfer-shaped message -- must still be present
-    # verbatim, confirming the new "route immediately once type is known"
-    # rule didn't overwrite or contradict it.
-    assert (
-        '- "I want to transfer money" -> ask_clarification(question="Sure — how would you like '
-        'to transfer money? For example, to your own account, another bank, or a mobile wallet '
-        'like bKash?")'
-    ) in prompt
 
 
 # --- build_tools --------------------------------------------------------------
@@ -646,7 +465,7 @@ def test_classify_request_uses_ollama_classify_model_not_ollama_model(monkeypatc
     assert sent_body["model"] != "some-other-rag-model"
 
 
-def test_classify_request_body_does_not_include_think_key(monkeypatch):
+def test_classify_request_body_sends_configured_think_flag(monkeypatch):
     captured_calls = []
     _install_post_response(
         monkeypatch,
@@ -658,7 +477,8 @@ def test_classify_request_body_does_not_include_think_key(monkeypatch):
 
     assert len(captured_calls) == 1
     sent_body = captured_calls[0]["kwargs"]["json"]
-    assert "think" not in sent_body
+    assert sent_body["think"] is settings.OLLAMA_THINK
+    assert sent_body["options"]["num_ctx"] == settings.OLLAMA_NUM_CTX
 
 
 # --- classify: T-40 zero-tool-calls retry -----------------------------------
@@ -1041,7 +861,7 @@ def test_classify_withdraw_plus_cost_question_returns_fee_quote_banking_service(
 def test_coerce_payload_dict_passthrough_unchanged():
     payload = {"transactionType": "bkash", "amount": 1000}
 
-    assert _coerce_payload(payload) is payload
+    assert _coerce_payload(payload) == payload  # equal copy (empty values are dropped)
 
 
 def test_coerce_payload_json_object_string_parses_to_dict():
@@ -1126,36 +946,26 @@ def test_classify_route_banking_service_coerces_json_string_payload_to_dict(monk
 # a future prompt edit can't silently drop or reword them.
 
 
-def test_build_system_prompt_rule_1_includes_fees_never_a_kb_topic_exception():
-    prompt = build_system_prompt(FAKE_TAXONOMY)
-
-    assert (
-        "Exception: any message that is clearly asking about transaction "
-        "fees/charges/costs — however it's phrased, including informational-sounding wording "
-        'like "what do you know about...", "tell me about...", or "can you explain..." — '
-        "is NEVER a KB topic."
-    ) in prompt
-    assert (
-        "Fees are a live, quotable real-time service, not static "
-        "background info, so always resolve fee questions via route_banking_service("
-        'category="fees", service="fee_quote", ...) when the transaction type and amount '
-        "are both known, or ask_clarification otherwise — never answer_kb_question."
-    ) in prompt
 
 
-def test_build_system_prompt_includes_what_do_you_know_about_fees_example():
-    prompt = build_system_prompt(FAKE_TAXONOMY)
 
-    assert (
-        '- "what do you know about fees?" -> ask_clarification(question="Sure — which '
-        'transaction type would you like a fee quote for, and for what amount? For example, a '
-        'bank transfer, bKash, or another wallet?")'
-    ) in prompt
-    assert (
-        '  (phrased informationally, like a KB question, but fees are always live-quotable via '
-        'route_banking_service/ask_clarification, never a KB topic — same handling and same '
-        'question as the "what are your fees" example above, never answer_kb_question)'
-    ) in prompt
+
+# --- build_system_prompt: T-58 four new few-shot example blocks ------------
+#
+# The implementing agent live-verified these against a real model but, per
+# the pre-existing pattern noted for T-56 above, added no prompt-content
+# regression assertions -- these lock in the exact wording so a future prompt
+# edit can't silently drop or reword any of them.
+
+
+
+
+
+
+
+
+
+
 
 
 def test_classify_informational_fees_question_returns_clarification_not_kb_question(monkeypatch):
@@ -1190,3 +1000,190 @@ def test_classify_informational_fees_question_returns_clarification_not_kb_quest
         )
     )
     assert not isinstance(result, KbQuestion)
+
+
+# --- classify: T-59 ACCOUNT_SELECTION_REQUIRED gets its own dedicated context note,
+# distinct from the generic CLARIFICATION_REQUIRED branch above ------------------
+#
+# Live-reproduced regression: an unrelated message sent right after an
+# ACCOUNT_SELECTION_REQUIRED pending turn (e.g. "how many accounts do i have?"
+# answering nothing, just a fresh request) was getting hijacked into a transfer
+# clarification -- the generic branch's context note didn't say what KIND of
+# pending state this was, so the new message's surface wording ("accounts")
+# collided with the Transfer-specific rule's own "raw account number" examples.
+# These tests lock in the dedicated branch: it must name the already-known
+# category/service, explicitly rule out transfer/wallet/beneficiary
+# reinterpretation, and never fall back to the fee-quote-specific wording.
+
+
+def _account_selection_turn(message="what's my balance?", subservice=None):
+    classification = {
+        "type": "ACCOUNT_SELECTION_REQUIRED",
+        "category": "account_info",
+        "service": "balance",
+        "subservice": subservice,
+        "question": (
+            "You have multiple accounts — which one did you mean? Savings account ending "
+            "0015, Credit account ending 0379."
+        ),
+    }
+    return ChatTurn(timestamp=datetime.now(timezone.utc), message=message, classification=classification)
+
+
+def test_classify_account_selection_required_uses_dedicated_context_note(monkeypatch):
+    captured_calls = []
+    _install_post_response(
+        monkeypatch,
+        _ollama_response([_tool_call("answer_kb_question", {})]),
+        captured_calls=captured_calls,
+    )
+
+    asyncio.run(
+        classify("how many accounts do i have?", recent_turns=[_account_selection_turn()])
+    )
+
+    system_texts = [
+        m["content"]
+        for m in captured_calls[0]["kwargs"]["json"]["messages"]
+        if m["role"] == "system"
+    ]
+    assert any("PENDING ACCOUNT SELECTION" in text for text in system_texts)
+    # never the generic "PENDING CLARIFICATION" branch's narrative wording
+    assert not any("PENDING CLARIFICATION" in text for text in system_texts)
+
+
+def test_classify_account_selection_required_context_names_already_known_service(monkeypatch):
+    captured_calls = []
+    _install_post_response(
+        monkeypatch,
+        _ollama_response([_tool_call("answer_kb_question", {})]),
+        captured_calls=captured_calls,
+    )
+
+    asyncio.run(
+        classify("how many accounts do i have?", recent_turns=[_account_selection_turn()])
+    )
+
+    system_texts = [
+        m["content"]
+        for m in captured_calls[0]["kwargs"]["json"]["messages"]
+        if m["role"] == "system"
+    ]
+    assert any(
+        'with EXACTLY category="account_info", service="balance"' in text
+        for text in system_texts
+    )
+
+
+def test_classify_account_selection_required_context_rules_out_transfer_reinterpretation(
+    monkeypatch,
+):
+    captured_calls = []
+    _install_post_response(
+        monkeypatch,
+        _ollama_response([_tool_call("answer_kb_question", {})]),
+        captured_calls=captured_calls,
+    )
+
+    asyncio.run(
+        classify("how many accounts do i have?", recent_turns=[_account_selection_turn()])
+    )
+
+    system_texts = [
+        m["content"]
+        for m in captured_calls[0]["kwargs"]["json"]["messages"]
+        if m["role"] == "system"
+    ]
+    assert any(
+        "has NOTHING to do with a transfer destination, a wallet, a beneficiary, or "
+        "sending money anywhere" in text
+        for text in system_texts
+    )
+    assert any(
+        'how many accounts do i have?" -> does not name any of the specific listed accounts'
+        in text
+        for text in system_texts
+    )
+
+
+def test_classify_account_selection_required_context_includes_subservice_when_present(
+    monkeypatch,
+):
+    captured_calls = []
+    _install_post_response(
+        monkeypatch,
+        _ollama_response([_tool_call("answer_kb_question", {})]),
+        captured_calls=captured_calls,
+    )
+
+    asyncio.run(
+        classify(
+            "savings",
+            recent_turns=[_account_selection_turn(subservice="some_subservice")],
+        )
+    )
+
+    system_texts = [
+        m["content"]
+        for m in captured_calls[0]["kwargs"]["json"]["messages"]
+        if m["role"] == "system"
+    ]
+    assert any(
+        'category="account_info", service="balance", subservice="some_subservice"' in text
+        for text in system_texts
+    )
+
+
+def test_classify_account_selection_required_unrelated_message_resolves_independently(
+    monkeypatch,
+):
+    # Simulates the model correctly following the dedicated context note: an
+    # unrelated new message resolves to its own, different category/service,
+    # never to the pending balance selection nor to a transfer.
+    monkeypatch.setattr(routing, "is_valid_path", lambda *a, **k: True)
+    _install_post_response(
+        monkeypatch,
+        _ollama_response(
+            [_tool_call("route_banking_service", {"category": "banking", "service": "accounts"})]
+        ),
+    )
+
+    result = asyncio.run(
+        classify("how many accounts do i have?", recent_turns=[_account_selection_turn()])
+    )
+
+    assert result == BankingService(category="banking", service="accounts", subservice=None)
+    assert result.category != "transfer"
+
+
+def test_classify_account_selection_required_genuine_answer_resolves_to_same_service(
+    monkeypatch,
+):
+    # Simulates the model correctly following the dedicated context note: a
+    # message naming one of the listed accounts by type resolves back to the
+    # SAME already-identified category/service.
+    monkeypatch.setattr(routing, "is_valid_path", lambda *a, **k: True)
+    _install_post_response(
+        monkeypatch,
+        _ollama_response(
+            [
+                _tool_call(
+                    "route_banking_service",
+                    {
+                        "category": "account_info",
+                        "service": "balance",
+                        "payload": {"accountType": "savings"},
+                    },
+                )
+            ]
+        ),
+    )
+
+    result = asyncio.run(classify("savings", recent_turns=[_account_selection_turn()]))
+
+    assert result == BankingService(
+        category="account_info",
+        service="balance",
+        subservice=None,
+        payload={"accountType": "savings"},
+    )

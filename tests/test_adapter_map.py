@@ -68,6 +68,60 @@ def test_get_adapter_name_returns_real_for_fee_quote_subservice_id():
     )
 
 
+# --- T-58: my_loans/fd_profit_history/dps_profit_history/disputes ----------
+# --- independent coverage -- not touched by the implementing agent's own ---
+# --- tests, which only asserted the adapter dict/REAL_ADAPTERS wiring in ---
+# --- tests/test_real_adapters.py, not get_adapter_name's own routing. ------
+
+
+def test_get_adapter_name_returns_real_for_my_loans_service_id():
+    assert get_adapter_name("loan_services", "my_loans") == "real:my_loans"
+
+
+def test_get_adapter_name_returns_real_for_fd_profit_history_service_id():
+    assert get_adapter_name("account_info", "fd_profit_history") == "real:fd_profit_history"
+
+
+def test_get_adapter_name_returns_real_for_dps_profit_history_service_id():
+    assert get_adapter_name("account_info", "dps_profit_history") == "real:dps_profit_history"
+
+
+def test_get_adapter_name_returns_real_for_disputes_service_id():
+    assert get_adapter_name("service_requests", "disputes") == "real:disputes"
+
+
+def test_get_adapter_name_returns_real_for_t58_subservice_ids():
+    # subservice_id is checked before service_id (see
+    # test_get_adapter_name_labels_matching_subservice_id_even_with_unrelated_service_id
+    # above) -- confirm each of the 4 new ids is also recognized via that branch.
+    assert get_adapter_name("x", "unrelated", "my_loans") == "real:my_loans"
+    assert get_adapter_name("x", "unrelated", "fd_profit_history") == "real:fd_profit_history"
+    assert get_adapter_name("x", "unrelated", "dps_profit_history") == "real:dps_profit_history"
+    assert get_adapter_name("x", "unrelated", "disputes") == "real:disputes"
+
+
+# --- T-57/T-60: cards, frezz_unfrezz (card freeze), beneficiary_add --------
+
+
+def test_get_adapter_name_returns_real_for_cards_service_id():
+    assert get_adapter_name("account_info", "cards") == "real:cards"
+
+
+def test_get_adapter_name_returns_real_for_frezz_unfrezz_service_id():
+    assert get_adapter_name("card_services", "frezz_unfrezz") == "real:frezz_unfrezz"
+
+
+def test_get_adapter_name_returns_real_for_beneficiary_add_subservice_id():
+    assert (
+        get_adapter_name("polygon_services", "beneficiary", "beneficiary_add")
+        == "real:beneficiary_add"
+    )
+
+
+def test_get_adapter_name_returns_real_for_beneficiary_add_service_id():
+    assert get_adapter_name("beneficiary_management", "beneficiary_add") == "real:beneficiary_add"
+
+
 def test_requires_identity_always_true():
     assert requires_identity("accounts", "transaction_history") is True
     assert requires_identity("payments", "mobile_recharge", "beneficiary") is True

@@ -62,9 +62,9 @@ classification):
 **Balance**:
 ```json
 {"type": "BANKING_SERVICE", "category": "account_info", "service": "balance",
- "payload": {"balance": 100228201915, "balanceFormatted": "৳100,228,201,915"}}
+ "payload": {"balance": 100228201915, "balanceFormatted": "৳1,002,281,969.15"}}
 ```
-`balance` is a raw integer (poisha-scale as returned by the bank); `balanceFormatted` is ready-to-display BDT.
+`balance` is raw **poisha** as returned by the bank (1 taka = 100 poisha, same as the app's `Money.fromPoisha`); `balanceFormatted` is already converted to taka and ready to display. (Before 2026-10-03 `*Formatted` fields were wrongly 100× too high — fixed, T-65.)
 
 **Cards** (`{"cards": [...]}`, each entry from the account's own `cards[]` array — already masked by the bank, e.g. `"4001****0251"`):
 ```json
