@@ -1,6 +1,7 @@
 """Fixes from the 2026-10-03 live multi-turn eval: leaving a pending freeze OTP
 step, no invented freeze reason, masking of bare digit runs, no-credit-card answer."""
 import asyncio
+import json
 
 import pytest
 
@@ -227,3 +228,66 @@ def test_dispute_summary_shows_only_the_account_ending():
         {"accountNumber": "100126000056", "transactionReferenceNo": "TXN1", "remarks": "not received"})
     assert "100126000056" not in text
     assert "ending 0056" in text and "TXN1" in text
+
+
+def test_compact_for_prompt_drops_links_keeps_nulls_and_empty_lists():
+    data = {"transactions": [{"amount": "Tk 5.00", "icon": "https://x/y.png", "note": None, "tags": []}],
+            "pagination": {"hasNext": False}, "items": []}
+    assert chat._compact_for_prompt(data) == {
+        "transactions": [{"amount": "Tk 5.00", "note": None, "tags": []}],
+        "pagination": {"hasNext": False}, "items": []}
+
+
+_REAL_STREAM = chat._stream_reply  # conftest swaps it for the non-streamed path
+
+
+class _FakeStream:
+    def __init__(self, pieces):
+        self._lines = [json.dumps({"response": p, "done": False}) for p in pieces]
+        self._lines.append(json.dumps({"response": "", "done": True}))
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    def raise_for_status(self):
+        pass
+
+    async def aiter_lines(self):
+        for line in self._lines:
+            yield line
+
+
+def _stream_with(monkeypatch, pieces):
+    monkeypatch.setattr(real.httpx.AsyncClient, "stream", lambda self, *a, **k: _FakeStream(pieces))
+
+
+def _collect(gen):
+    async def run():
+        return [piece async for piece in gen]
+    return asyncio.run(run())
+
+
+def test_stream_releases_whole_verified_sentences(monkeypatch):
+    _stream_with(monkeypatch, ["Your balance is Tk 90", ",000", ".00. ", "It is ", "available now."])
+    out = _collect(_REAL_STREAM("balance?", "balance", None, {"balance": 9000000}))
+    assert out == ["Your balance is Tk 90,000.00.", " It is available now."]
+
+
+def test_stream_stops_before_an_unsupported_number_and_finishes_with_facts(monkeypatch):
+    _stream_with(monkeypatch, ["Here is your balance. ", "It is Tk 31,000.00", " today."])
+    out = "".join(_collect(_REAL_STREAM("balance?", "balance", None, {"balance": 9000000})))
+    assert "31,000" not in out
+    assert out == "Here is your balance. Your available balance is Tk 90,000.00."
+
+
+def test_stream_with_bad_first_number_uses_the_non_streamed_path(monkeypatch):
+    _stream_with(monkeypatch, ["Tk 31,000.00 is your balance."])
+
+    async def fake_synth(message, service, subservice, data):
+        return "checked reply"
+
+    monkeypatch.setattr(chat, "_synthesize_reply", fake_synth)
+    assert _collect(_REAL_STREAM("balance?", "balance", None, {"balance": 9000000})) == ["checked reply"]

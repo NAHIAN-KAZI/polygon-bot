@@ -1492,6 +1492,21 @@ def _unsupported_numbers(reply: str, source: str) -> list[str]:
     ]
 
 
+def _compact_for_prompt(node):
+    """Fewer prompt tokens, same facts: drop link fields (icon URLs) the reply never
+    uses. On the M40 every ~250 prompt tokens cost ~1 s. Nulls stay ("not set" is an
+    answer), and so do empty lists ("none")."""
+    if isinstance(node, dict):
+        return {
+            key: _compact_for_prompt(value)
+            for key, value in node.items()
+            if not (isinstance(value, str) and value.startswith(("http://", "https://")))
+        }
+    if isinstance(node, list):
+        return [_compact_for_prompt(item) for item in node]
+    return node
+
+
 def _label_running_balances(data):
     """A transaction's own `balance` is the balance right after it, not the current
     balance. Live, "balance and last transactions" was answered "current balance is
@@ -1546,16 +1561,15 @@ def _accounts_for_prompt(data: dict) -> dict:
     return {**data, "data": view}
 
 
-async def _synthesize_reply(message: str, service: str, subservice: str | None, data: dict) -> str:
-    """LLM-written reply answering the customer's actual question from the real
-    fetched data only. Every 3+-digit number in the reply must exist in that data;
-    a reply that fails the check is regenerated once at temperature 0, and only if
-    that also fails (or Ollama is down) does the deterministic summary stand in."""
+def _reply_prompt(message: str, service: str, subservice: str | None, data: dict) -> tuple[str, str, dict]:
+    """(prompt, data_json, redacted) for the data-answering reply -- shared by the
+    streamed and non-streamed paths so both send the model the identical prompt."""
     if (subservice or service) == "accounts":
         data = _accounts_for_prompt(data)
     data = _label_running_balances(data)
     redacted = _redact_for_prompt(data, subservice or service)
-    data_json = json.dumps(redacted, default=str, ensure_ascii=False)
+    data_json = json.dumps(_compact_for_prompt(redacted), default=str, ensure_ascii=False,
+                           separators=(",", ":"))
     prompt = (
         "You are Polygon Bank's chat assistant. The customer said:\n"
         f"\"{message}\"\n\n"
@@ -1577,6 +1591,15 @@ async def _synthesize_reply(message: str, service: str, subservice: str | None, 
         "data shows if useful. Give no advice, contacts or steps that aren't in the data. "
         "1-3 sentences, plain prose, no markdown."
     )
+    return prompt, data_json, redacted
+
+
+async def _synthesize_reply(message: str, service: str, subservice: str | None, data: dict) -> str:
+    """LLM-written reply answering the customer's actual question from the real
+    fetched data only. Every 3+-digit number in the reply must exist in that data;
+    a reply that fails the check is regenerated once at temperature 0, and only if
+    that also fails (or Ollama is down) does the deterministic summary stand in."""
+    prompt, data_json, redacted = _reply_prompt(message, service, subservice, data)
     for temperature in (0.2, 0.0):
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
@@ -1597,6 +1620,64 @@ async def _synthesize_reply(message: str, service: str, subservice: str | None, 
         if text and "$" not in text and not _unsupported_numbers(text, data_json):
             return text
     return _subservice_reply(service, subservice, redacted)
+
+
+# End of a sentence: . ! ? or a newline, followed by whitespace ("90,000.00." mid-number never matches).
+_SENTENCE_END_RE = re.compile(r"[.!?\n](?=\s)")
+
+
+async def _stream_reply(message: str, service: str, subservice: str | None, data: dict):
+    """Same reply as _synthesize_reply, streamed so the customer sees it as it is
+    written (a transaction list took ~14 s to finish on the M40). Text is released a
+    whole sentence at a time, and every released 3+-digit number has passed the same
+    check against the data. If the model goes wrong before anything
+    was sent, the non-streamed path (retry + deterministic fallback) answers instead;
+    if it goes wrong mid-way, generation stops and the deterministic facts finish
+    the reply -- no unverified number is ever sent."""
+    prompt, data_json, redacted = _reply_prompt(message, service, subservice, data)
+    full, sent = "", 0
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            async with client.stream(
+                "POST",
+                f"{settings.OLLAMA_BASE_URL}/api/generate",
+                json={
+                    "model": settings.OLLAMA_MODEL,
+                    "prompt": prompt,
+                    "stream": True,
+                    "think": settings.OLLAMA_THINK,
+                    "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0.2},
+                },
+            ) as resp:
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if not line:
+                        continue
+                    chunk = json.loads(line)
+                    full += chunk.get("response") or ""
+                    done = bool(chunk.get("done"))
+                    ends = [m.end() for m in _SENTENCE_END_RE.finditer(full)]
+                    cut = len(full) if done else (ends[-1] if ends else 0)
+                    safe = full[:cut]
+                    if "$" in safe or _unsupported_numbers(safe, data_json):
+                        raise ValueError("unsupported number in streamed reply")
+                    piece = safe[sent:]
+                    if sent == 0:
+                        piece = piece.lstrip()
+                    if piece:
+                        yield piece
+                        sent = cut
+                    if done:
+                        break
+    except Exception:
+        if sent == 0:
+            yield await _synthesize_reply(message, service, subservice, data)
+        else:
+            gap = "" if full[:sent].endswith((" ", "\n")) else " "
+            yield gap + _subservice_reply(service, subservice, redacted)
+        return
+    if sent == 0:
+        yield await _synthesize_reply(message, service, subservice, data)
 
 
 def _subservice_reply(service: str, subservice: str | None, data: dict) -> str:
@@ -2800,8 +2881,12 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                                 banking_service_token = await _phrase(f"This is placeholder information about {service.replace('_', ' ')}; the real service isn't connected to chat yet.", req.message)
                             else:
                                 data = _enrich_payload(service, subservice, data)
-                                banking_service_token = await _synthesize_reply(reply_context, service, subservice, data)
-                            yield _sse("token", {"token": banking_service_token})
+                                banking_service_token = ""
+                                async for piece in _stream_reply(reply_context, service, subservice, data):
+                                    banking_service_token += piece
+                                    yield _sse("token", {"token": piece})
+                            if data.get("mock") is True:
+                                yield _sse("token", {"token": banking_service_token})
                             yield _result_event(
                                 "BANKING_SERVICE",
                                 category,

@@ -53,6 +53,13 @@ def _no_generated_clarifications(monkeypatch):
 
     monkeypatch.setattr(chat_module, "_ground_freeze_request", _as_classified)
 
+    # Streamed reply: tests use the non-streamed path (same prompt and checks),
+    # which they already fake via httpx.AsyncClient.post.
+    async def _one_piece(message, service, subservice, data):
+        yield await chat_module._synthesize_reply(message, service, subservice, data)
+
+    monkeypatch.setattr(chat_module, "_stream_reply", _one_piece)
+
     # Stage-1 domain pick: default to "no domain" (full single-stage prompt) so
     # classify() tests see exactly one Ollama call; two-stage tests patch it.
     import app.banking.routing as routing_module
