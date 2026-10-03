@@ -291,7 +291,10 @@ class LoginHistoryAdapter:
         payload = payload or {}
         device_id = payload.get("deviceId")
         if not device_id:
-            raise AdapterUnavailableError("deviceId is required in payload for login_history")
+            # A customer never knows a device id: gather every enrolled device's
+            # recent logins instead (live 2026-10-03, "where was my account logged
+            # in from" was answered "service unavailable").
+            return AdapterResult(data=await self._all_devices(jwt, payload))
 
         start_date = payload.get("startDate")
         end_date = payload.get("endDate")
@@ -321,6 +324,21 @@ class LoginHistoryAdapter:
             },
         )
         return AdapterResult(data=body)
+
+    _MAX_DEVICES = 5
+
+    async def _all_devices(self, jwt: str | None, payload: dict) -> dict:
+        devices = await _call("GET", "/auth/v1/devices", jwt)
+        devices = devices if isinstance(devices, list) else (devices or {}).get("data") or []
+        records: list[dict] = []
+        for device in [d for d in devices if isinstance(d, dict) and d.get("deviceId")][: self._MAX_DEVICES]:
+            body = await _call(
+                "GET", f"/auth/v1/devices/{device['deviceId']}/login-history", jwt,
+                params={"page": 0, "size": payload.get("size", 10)},
+            )
+            records.extend(r for r in (body or {}).get("records") or [] if isinstance(r, dict))
+        records.sort(key=lambda r: str(r.get("loginAt") or ""), reverse=True)
+        return {"records": records[:20], "devicesChecked": min(len(devices), self._MAX_DEVICES)}
 
 
 class BeneficiaryAdapter:
@@ -1052,7 +1070,7 @@ class NoCreditCardError(AdapterUnavailableError):
 
 # What the credit-card adapters return instead of failing, so the reply can say
 # "you don't have a credit card" rather than "service unavailable".
-_NO_CREDIT_CARD = {"creditCards": [], "hasCreditCard": False}
+_NO_CREDIT_CARD = {"creditCard": None, "answer": "You don't have a credit card with Polygon Bank."}
 
 
 class CreditCardSummaryAdapter:

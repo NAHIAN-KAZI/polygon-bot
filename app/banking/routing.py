@@ -9,6 +9,7 @@ of asking for clarification.
 """
 
 import json
+import re
 from dataclasses import dataclass
 
 import httpx
@@ -44,6 +45,32 @@ class UnknownService:
 
 
 ClassificationResult = KbQuestion | BankingService | Clarification | UnknownService
+
+
+_INVALID_PATH_CORRECTION = (
+    "That category/service/subservice doesn't exist. Re-check the list above "
+    "and either pick a real id, or call ask_clarification if you're not sure."
+)
+
+
+def _echoes(text: str, instruction: str) -> bool:
+    """True when most of `text`'s words come from our own instruction -- the model
+    repeating our prompt back instead of writing to the customer."""
+    words = re.findall(r"[a-z]+", text.lower())
+    source = set(re.findall(r"[a-z]+", instruction.lower()))
+    return bool(words) and sum(w in source for w in words) / len(words) >= 0.6
+
+
+def _only_category_of(service: str) -> str | None:
+    """The single category holding `service` in the live taxonomy, or None if the id
+    is unknown or (ambiguously) used by more than one category."""
+    homes = {
+        category.get("id")
+        for category in (get_taxonomy() or {}).get("categories", [])
+        for item in category.get("services", [])
+        if item.get("id") == service
+    }
+    return homes.pop() if len(homes) == 1 else None
 
 
 def _coerce_payload(raw: object) -> dict | None:
@@ -131,7 +158,7 @@ SERVICE_DESCRIPTIONS: dict[tuple[str, str], tuple[str, tuple[str, ...]]] = {
     ("profile", "profile_change_requests"): ("status of their profile change requests", ()),
     ("profile", "contact_priority_requests"): ("status of their primary-contact change requests", ()),
     ("transfer_info", "gifts_received"): ("money gifts the customer has RECEIVED from others (incoming only, never sending)", ()),
-    ("transfer_info", "email_transfers"): ("history/status of their email transfers", ("id",)),
+    ("transfer_info", "email_transfers"): ("history/status of their email transfers", ()),
     ("transfer_info", "qr_payment_history"): ("history of their QR payments", ()),
     ("transfer_info", "transfer_limit"): (
         "their transfer limits (daily/weekly/per-transaction) and remaining amount",
@@ -189,7 +216,7 @@ DOMAINS: dict[str, tuple[str, frozenset[tuple[str, str]]]] = {
                    ("card_info", "credit_card_statement"), ("card_services", "frezz_unfrezz")}),
     ),
     "transfers": (
-        "sending money (to a bank account, a mobile wallet, or a saved person), adding a "
+        "making a NEW transfer (to a bank account, a mobile wallet, or a saved person), adding a "
         "beneficiary, their transfer limits, gifts received, email transfers, QR payments",
         frozenset({("transfer", "bank_transfer"), ("transfer", "wallet_transfer"),
                    ("polygon_services", "beneficiary"),
@@ -199,7 +226,9 @@ DOMAINS: dict[str, tuple[str, frozenset[tuple[str, str]]]] = {
     ),
     "fees": ("what a transaction costs: fees, charges, VAT", frozenset({("fees", "fee_quote")})),
     "disputes": (
-        "a problem with a transaction, raising or viewing disputes, complaints and support tickets",
+        "something that went wrong with money ALREADY sent, paid or withdrawn (deducted but "
+        "not received, ATM gave no cash, charged twice, failed or wrong transaction), raising "
+        "or viewing disputes, complaints and support tickets",
         frozenset({("service_requests", "disputes"), ("service_requests", "raise_dispute"),
                    ("polygon_services", "my_tickets")}),
     ),
@@ -221,6 +250,20 @@ DOMAINS: dict[str, tuple[str, frozenset[tuple[str, str]]]] = {
         frozenset(),
     ),
 }
+
+
+def fee_transaction_types(taxonomy: dict | None = None) -> list[str]:
+    """The bank's own transaction-type ids a fee quote accepts (`appSettingsId`):
+    the leaves of the live transfer menu (wallet providers, own/city/other bank).
+    Free text like "bkash transfer" or "NPSB" is a 404 on the bank's side."""
+    taxonomy = taxonomy if taxonomy is not None else (get_taxonomy() or {})
+    ids: list[str] = []
+    for category in taxonomy.get("categories", []):
+        if category.get("id") != "transfer":
+            continue
+        for service in category.get("services", []):
+            ids.extend(sub["id"] for sub in service.get("subServices") or [] if sub.get("id"))
+    return ids
 
 
 def _render_taxonomy(
@@ -258,6 +301,10 @@ def _render_taxonomy(
                     line += ". no subservice"
                 if fields:
                     line += f". payload: {', '.join(fields)}"
+                if (category["id"], service["id"]) == ("fees", "fee_quote"):
+                    types = fee_transaction_types(taxonomy)
+                    if types:
+                        line += f". transactionType must be one of: {', '.join(types)}"
                 described_lines.append(line)
             else:
                 other_services.append(
@@ -321,7 +368,10 @@ def build_system_prompt(
         "or should be blocked; a card problem that doesn't say what is wrong -> "
         "ask_clarification. UNfreezing/UNblocking a card (making it usable again) is NOT available in chat: "
         "never route it — call ask_clarification, in your own words saying so and asking "
-        "what else they need.\n"
+        "what else they need. The same for every other request to CHANGE something that no "
+        "service below does (reset a PIN, update email/phone/address/name, withdraw cash by "
+        "code, cancel or submit a request): ask_clarification saying it can't be done in "
+        "this chat but can be done in the app — never route it to a lookup service.\n"
         "6. Pass subservice ONLY for a service that lists subservices; otherwise omit it. "
         "Copy category and service exactly as they appear together on ONE line below; never "
         "use a subservice id as the service. Viewing existing disputes -> "
@@ -476,7 +526,7 @@ async def _pick_domain(message: str, recent_turns: list[ChatTurn] | None) -> str
         "Bangla or Banglish (romanized Bangla), often one or two words, misspelled or "
         "informal. Read a misspelled word by how it sounds and Banglish as its English "
         "meaning (e.g. 'pathabo' = I will send, 'koto' = how much, 'ase' = is there, "
-        "'dekhao' = show), then pick the domain by meaning. A banking word on its own, even "
+        "'dekhao' = show, 'lenden' = transactions, 'khoroch' = spending), then pick the domain by meaning. A banking word on its own, even "
         "misspelled, belongs to its banking domain, not general.\n"
         f"Domains:\n{domains}\n{context}\n"
         f'Customer message: "{message}"\n\n'
@@ -689,7 +739,12 @@ async def classify(
         if retry_name == "answer_kb_question":
             return KbQuestion()
         if retry_name == "ask_clarification":
-            return Clarification(question=retry_arguments.get("question") or _CLARIFICATION_FALLBACK)
+            question = retry_arguments.get("question") or ""
+            # Live: the model "asked" the customer our own correction text back
+            # ("That category/service/subservice doesn..."). Never show that.
+            if not question or _echoes(question, _INVALID_PATH_CORRECTION):
+                return Clarification(question=_CLARIFICATION_FALLBACK)
+            return Clarification(question=question)
         if retry_name == "route_banking_service":
             retry_category = retry_arguments.get("category")
             retry_service = retry_arguments.get("service")
@@ -725,6 +780,12 @@ async def classify(
             return BankingService(
                 category=category, service=service, subservice=subservice, payload=payload
             )
+        # Right service under the wrong category (live: "trnsactions" ->
+        # account_info/transaction_history). Service ids are unique, so the category
+        # can be corrected instead of discarding a correct pick.
+        home = _only_category_of(service) if service else None
+        if home and is_valid_path(home, service, subservice):
+            return BankingService(category=home, service=service, subservice=subservice, payload=payload)
 
         # First attempt hallucinated a category/service/subservice id that doesn't exist
         # anywhere in the real taxonomy (confirmed live: genuine model nondeterminism, not
@@ -733,13 +794,7 @@ async def classify(
         # doesn't become a confident "that's not available" to the customer.
         retry_messages = messages + [
             {"role": "assistant", "content": "", "tool_calls": [tool_calls[0]]},
-            {
-                "role": "user",
-                "content": (
-                    "That category/service/subservice doesn't exist. Re-check the list above "
-                    "and either pick a real id, or call ask_clarification if you're not sure."
-                ),
-            },
+            {"role": "user", "content": _INVALID_PATH_CORRECTION},
         ]
         retry_tool_calls = await _post_classification(retry_messages)
         if not retry_tool_calls:
@@ -752,7 +807,12 @@ async def classify(
         if retry_name == "answer_kb_question":
             return KbQuestion()
         if retry_name == "ask_clarification":
-            return Clarification(question=retry_arguments.get("question") or _CLARIFICATION_FALLBACK)
+            question = retry_arguments.get("question") or ""
+            # Live: the model "asked" the customer our own correction text back
+            # ("That category/service/subservice doesn..."). Never show that.
+            if not question or _echoes(question, _INVALID_PATH_CORRECTION):
+                return Clarification(question=_CLARIFICATION_FALLBACK)
+            return Clarification(question=question)
         if retry_name == "route_banking_service":
             retry_category = retry_arguments.get("category")
             retry_service = retry_arguments.get("service")

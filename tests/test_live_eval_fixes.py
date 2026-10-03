@@ -22,42 +22,51 @@ def test_ordinary_messages_do_not_look_like_secrets(message):
     assert not chat._looks_like_typed_secret(message)
 
 
+_REAL_GROUND = chat._ground_freeze_request  # conftest patches it per test
+
+
 def _freeze(payload):
     return BankingService("card_services", "frezz_unfrezz", None, payload)
 
 
-def test_unstated_freeze_reason_is_dropped(monkeypatch):
-    async def not_stated(messages, reason):
-        assert messages == ["freeze my card"]
-        return False
+def _facts(monkeypatch, reason, block, seen=None):
+    async def fake(messages):
+        if seen is not None:
+            seen.extend(messages)
+        return reason, block
 
-    monkeypatch.setattr(chat, "_reason_was_stated", not_stated)
-    result = asyncio.run(chat._drop_unstated_freeze_reason(_freeze({"reason": "lost"}), "freeze my card", []))
+    monkeypatch.setattr(chat, "_freeze_request_facts", fake)
+
+
+def test_invented_reason_replaced_by_none_when_customer_only_asked_to_block(monkeypatch):
+    _facts(monkeypatch, None, "freeze my card")
+    result = asyncio.run(_REAL_GROUND(_freeze({"reason": "lost"}), "freeze my card", []))
     assert result.payload is None
 
 
-def test_stated_freeze_reason_is_kept_and_earlier_turns_are_checked(monkeypatch):
-    seen = {}
-
-    async def stated(messages, reason):
-        seen["messages"] = messages
-        return True
-
-    monkeypatch.setattr(chat, "_reason_was_stated", stated)
-    turns = [ChatTurn(timestamp=None, message="someone stole my wallet", classification=None)]
-    result = asyncio.run(chat._drop_unstated_freeze_reason(
-        _freeze({"reason": "stolen", "cardId": "45"}), "block my card", turns))
-    assert result.payload == {"reason": "stolen", "cardId": "45"}
-    assert seen["messages"] == ["someone stole my wallet", "block my card"]
+def test_reason_is_the_customers_words_and_earlier_turns_are_read(monkeypatch):
+    seen = []
+    _facts(monkeypatch, "card was stolen", "block it", seen)
+    turns = [ChatTurn(timestamp=None, message="card churi hoye gese", classification=None)]
+    result = asyncio.run(_REAL_GROUND(_freeze({"reason": "lost", "cardId": "45"}), "block koro", turns))
+    assert result.payload == {"reason": "card was stolen", "cardId": "45"}
+    assert seen == ["card churi hoye gese", "block koro"]
 
 
-def test_reason_check_ignores_other_services(monkeypatch):
-    async def boom(messages, reason):
+def test_vague_card_problem_is_not_a_freeze(monkeypatch):
+    _facts(monkeypatch, None, None)
+    result = asyncio.run(_REAL_GROUND(_freeze({"reason": "lost"}), "reset my card pin", []))
+    assert isinstance(result, chat.Clarification)
+    assert "lost, stolen or misused" in result.question
+
+
+def test_grounding_ignores_other_services(monkeypatch):
+    async def boom(messages):
         raise AssertionError("must not be called")
 
-    monkeypatch.setattr(chat, "_reason_was_stated", boom)
+    monkeypatch.setattr(chat, "_freeze_request_facts", boom)
     other = BankingService("account_info", "balance", None, {"reason": "x"})
-    assert asyncio.run(chat._drop_unstated_freeze_reason(other, "balance", [])) is other
+    assert asyncio.run(_REAL_GROUND(other, "balance", [])) is other
 
 
 def test_redact_masks_linked_account_and_drops_identity_numbers():
@@ -80,7 +89,7 @@ def test_no_credit_card_is_an_answer_not_an_outage(monkeypatch, adapter):
 
     monkeypatch.setattr(real, "_call", fake_call)
     result = asyncio.run(adapter.fulfill(None, "jwt", "x", None))
-    assert result.data == {"creditCards": [], "hasCreditCard": False}
+    assert result.data == {"creditCard": None, "answer": "You don't have a credit card with Polygon Bank."}
 
 
 def test_coerce_payload_drops_empty_values_the_model_fills_in():
@@ -125,3 +134,89 @@ def test_payload_ids_cannot_inject_into_request_paths(monkeypatch, bad_id):
 def test_normal_paths_still_allowed():
     assert real._SAFE_PATH_RE.fullmatch("/card/v1/cards/45/credit-summary")
     assert real._SAFE_PATH_RE.fullmatch("/transfer/v1/my-limit/100126000056")
+
+
+def test_accounts_reply_view_uses_ledger_balance_and_counts_each_account_once():
+    data = {"data": {
+        "accounts": [{"accountNumber": "100126000056", "accountType": "SAVINGS", "balance": "0"}],
+        "ledgerAccounts": [{"identifier": "100126000056", "balance": "9000000"},
+                           {"identifier": "900000000001", "balance": "500"}],
+    }}
+    view = chat._accounts_for_prompt(data)
+    assert view["data"]["accounts"] == [
+        {"accountNumber": "100126000056", "accountType": "SAVINGS", "balance": "9000000"}]
+    assert view["data"]["ledgerAccounts"] == [{"identifier": "900000000001", "balance": "500"}]
+    assert data["data"]["accounts"][0]["balance"] == "0"  # frontend payload untouched
+
+
+def test_grounded_drops_quotes_the_customer_never_wrote():
+    assert chat._grounded("my card was stolen", "freeze my card") is None
+    assert chat._grounded("card churi hoye gese", "card churi hoye gese, block koro") == "card churi hoye gese"
+    assert chat._grounded("I lost my card", "i lost my card") == "I lost my card"
+    assert chat._grounded(None, "x") is None
+
+
+def test_echoed_correction_text_is_never_shown_to_the_customer():
+    from app.banking.routing import _INVALID_PATH_CORRECTION, _echoes
+
+    assert _echoes("That category/service/subservice doesn", _INVALID_PATH_CORRECTION)
+    assert not _echoes("Which account's transactions would you like to see?", _INVALID_PATH_CORRECTION)
+
+
+def test_poisha_named_keys_are_converted_to_taka():
+    out = chat._redact_for_prompt({"products": [{"issuanceFeePoisha": 5788800, "name": "GOLD"}]})
+    assert out["products"][0]["issuanceFeePoisha"] == "Tk 57,888.00"
+
+
+def test_login_history_without_device_gathers_all_devices(monkeypatch):
+    calls = []
+
+    async def fake_call(method, path, jwt, **kw):
+        calls.append(path)
+        if path == "/auth/v1/devices":
+            return [{"id": 1, "deviceId": "aaa"}, {"id": 2, "deviceId": "bbb"}]
+        stamp = "2026-10-01" if "aaa" in path else "2026-10-02"
+        return {"records": [{"loginAt": stamp, "status": "SUCCESS"}]}
+
+    monkeypatch.setattr(real, "_call", fake_call)
+    result = asyncio.run(real.LoginHistoryAdapter().fulfill(None, "jwt", "login_history", None))
+    assert calls == ["/auth/v1/devices", "/auth/v1/devices/aaa/login-history", "/auth/v1/devices/bbb/login-history"]
+    assert [r["loginAt"] for r in result.data["records"]] == ["2026-10-02", "2026-10-01"]
+
+
+def test_wrong_category_for_a_unique_service_is_corrected(monkeypatch):
+    from app.banking import routing
+
+    taxonomy = {"categories": [
+        {"id": "polygon_services", "services": [{"id": "transaction_history"}, {"id": "shared"}]},
+        {"id": "account_info", "services": [{"id": "balance"}, {"id": "shared"}]},
+    ]}
+    monkeypatch.setattr(routing, "get_taxonomy", lambda: taxonomy)
+    assert routing._only_category_of("transaction_history") == "polygon_services"
+    assert routing._only_category_of("shared") is None
+    assert routing._only_category_of("nope") is None
+
+
+def test_running_balance_is_labelled_for_the_reply():
+    view = chat._label_running_balances({"transactions": [{"amount": 500000, "balance": 9500000}], "balance": 1})
+    assert view == {"transactions": [{"amount": 500000, "balanceAfterThisTransaction": 9500000}], "balance": 1}
+    redacted = chat._redact_for_prompt(view, "transaction_history")
+    assert redacted["transactions"][0]["balanceAfterThisTransaction"] == "Tk 95,000.00"
+
+
+def test_fee_type_is_mapped_to_a_live_id_or_dropped(monkeypatch):
+    monkeypatch.setattr(chat, "fee_transaction_types", lambda: ["bkash", "nagad", "other_bank"])
+
+    def fee(t):
+        return chat._normalize_fee_type(BankingService("fees", "fee_quote", None, {"transactionType": t, "amount": 500}))
+
+    assert fee("bkash transfer").payload == {"transactionType": "bkash", "amount": 500}
+    assert fee("Other Bank").payload == {"transactionType": "other_bank", "amount": 500}
+    assert fee("NPSB").payload == {"amount": 500}
+
+
+def test_foreign_script_and_repeated_quote_guards():
+    assert chat._foreign_script("কি বলছেন?", "taka kete nise")
+    assert not chat._foreign_script("কি বলছেন?", "টাকা কেটে নিসে")
+    assert not chat._foreign_script("What happened?", "taka kete nise")
+    assert chat._quoted("lost it! lost it!") == "lost it!"

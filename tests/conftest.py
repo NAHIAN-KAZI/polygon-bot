@@ -46,11 +46,12 @@ def _no_generated_clarifications(monkeypatch):
     monkeypatch.setattr(chat_module, "_phrase", _identity)
     monkeypatch.setattr(chat_module, "_llm_pick_candidate", _no_pick)
 
-    # Freeze-reason grounding check: trust the classifier's reason in tests.
-    async def _stated(messages, reason):
-        return True
+    # Freeze grounding check (an extra LLM call): pass the classification through
+    # unchanged in tests; tests of the check itself capture the real function.
+    async def _as_classified(result, message, recent_turns):
+        return result
 
-    monkeypatch.setattr(chat_module, "_reason_was_stated", _stated)
+    monkeypatch.setattr(chat_module, "_ground_freeze_request", _as_classified)
 
     # Stage-1 domain pick: default to "no domain" (full single-stage prompt) so
     # classify() tests see exactly one Ollama call; two-stage tests patch it.

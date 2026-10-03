@@ -23,7 +23,15 @@ from app.banking.adapters.base import (
     AdapterValidationError,
 )
 from app.banking.identity import extract_jwt, verify_jwt
-from app.banking.routing import BankingService, Clarification, KbQuestion, UnknownService, classify
+from app.banking.routing import (
+    BankingService,
+    Clarification,
+    KbQuestion,
+    UnknownService,
+    classify,
+    fee_transaction_types,
+    _CLARIFICATION_FALLBACK,
+)
 from app.banking.session import ChatTurn, get_classification_context, get_session, record_turn
 from app.banking.taxonomy import is_valid_path
 from app.config import settings
@@ -573,6 +581,9 @@ async def _phrase(facts: str, customer_message: str) -> str:
     if (
         not text
         or len(text) > 600
+        # Much longer than the facts means it added something (seen live: invented
+        # "contact the number on your statement", "refer to your welcome email").
+        or len(text) > len(facts) * 1.5 + 40
         or "$" in text
         or any(fact not in text for fact in required)
         # A number repeated beyond the facts, or moved away from the word it follows
@@ -1073,20 +1084,65 @@ def _candidate_number(candidate: dict) -> str:
     )
 
 
-async def _reason_was_stated(messages: list[str], reason: str) -> bool:
-    """Did the customer themselves give `reason` for freezing their card? The
-    classifier sometimes fills a plausible reason ("lost") for a bare "freeze my
-    card"; the freeze must ask instead. Any failure counts as not stated."""
+_BENGALI_RE = re.compile(r"[\u0980-\u09FF]")
+
+
+def _foreign_script(reply: str, message: str) -> bool:
+    """Bengali script in a reply to a customer who wrote none (replies are English)."""
+    return bool(_BENGALI_RE.search(reply or "")) and not _BENGALI_RE.search(message or "")
+
+
+def _normalize_fee_type(result):
+    """fees/fee_quote: transactionType must be one of the bank's live transfer ids
+    (routing.fee_transaction_types). Live, the model sent "bkash transfer" and
+    "NPSB", both 404s. Map to the id it names; otherwise drop it so the customer is
+    asked which transfer type they mean."""
+    if not (isinstance(result, BankingService) and (result.category, result.service) == ("fees", "fee_quote")):
+        return result
+    payload = dict(result.payload or {})
+    raw = payload.get("transactionType")
+    if not raw:
+        return result
+    valid = fee_transaction_types()
+    if not valid:  # taxonomy not loaded: nothing to check against
+        return result
+    text = re.sub(r"[\s-]+", "_", str(raw).strip().lower())
+    named = [v for v in valid if v == text or re.search(rf"(^|_){re.escape(v)}(_|$)", text)]
+    if len(named) == 1:
+        payload["transactionType"] = named[0]
+    else:
+        payload.pop("transactionType")
+    return BankingService(result.category, result.service, result.subservice, payload or None)
+
+
+def _quoted(value) -> str | None:
+    text = value.strip() if isinstance(value, str) else ""
+    # The model sometimes repeats the quote ("X X"); keep one copy.
+    half = len(text) // 2
+    if text and text[:half].strip() == text[half:].strip():
+        text = text[:half].strip()
+    return text if text and text.lower() not in ("null", "none", "n/a") else None
+
+
+async def _freeze_request_facts(messages: list[str]) -> tuple[str | None, str | None]:
+    """(reason, block_request) as the customer themselves wrote them, each None if
+    they didn't. Extraction, not a yes/no judgement: llama3.1:8b answered "false"
+    to "did they say why?" even for "my card was stolen", but quotes reliably.
+    Any failure returns (None, None)."""
     said = "\n".join(f'- "{_DIGIT_RUN_RE.sub(_mask_digit_run, m)}"' for m in messages)
-    # Extraction, not a yes/no judgement: llama3.1:8b answered "false" to "did they
-    # say why?" even for "my card was stolen", but quotes the reason reliably.
     prompt = (
         "A bank customer wrote these chat messages (English, Bangla or Banglish):\n"
         f"{said}\n\n"
-        "Why does the customer want their card frozen/blocked? Quote the reason in a few "
-        "words exactly as the customer gave it (e.g. what happened to the card). Only "
-        "asking to freeze or block is not a reason. If they gave no reason, use null. "
-        'Respond only with JSON: {"reason": "<their reason>" or null}'
+        "1. reason: the exact words, copied from their messages, that say what happened "
+        "to the card (for example that it was lost, stolen or used by someone else). Only "
+        "asking to freeze or block is not a reason. null if they didn't say.\n"
+        "2. block_request: the exact words, copied from their messages, asking to freeze, "
+        "block or lock the card, or reporting it lost/stolen/misused. A card that just "
+        "doesn't work, or a request to reset a PIN or unblock, is NOT a block request. "
+        "null if none.\n"
+        "Saying the card was lost, stolen or misused counts for BOTH fields (copy those "
+        "words into each).\n"
+        'Respond only with JSON: {"reason": "<text>" or null, "block_request": "<text>" or null}'
     )
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
@@ -1102,24 +1158,50 @@ async def _reason_was_stated(messages: list[str], reason: str) -> bool:
                 },
             )
             resp.raise_for_status()
-            stated = json.loads(resp.json().get("response") or "{}").get("reason")
-            return isinstance(stated, str) and bool(stated.strip()) and stated.strip().lower() not in ("null", "none")
+            parsed = json.loads(resp.json().get("response") or "{}")
     except Exception:
-        return False
+        return None, None
+    if not isinstance(parsed, dict):
+        return None, None
+    said_text = " ".join(messages)
+    return (
+        _grounded(_quoted(parsed.get("reason")), said_text),
+        _grounded(_quoted(parsed.get("block_request")), said_text),
+    )
 
 
-async def _drop_unstated_freeze_reason(result, message: str, recent_turns: list[ChatTurn]):
-    """Freeze only: keep the classifier's `reason` only if the customer stated it."""
+def _grounded(quote: str | None, said: str) -> str | None:
+    """Keep a quote only if most of its words really appear in what the customer
+    wrote -- the model otherwise invents "my card was stolen" for "freeze my card"."""
+    if not quote:
+        return None
+    words = re.findall(r"\w+", quote.lower())
+    said_words = set(re.findall(r"\w+", said.lower()))
+    if not words:
+        return None
+    return quote if sum(w in said_words for w in words) / len(words) >= 0.7 else None
+
+
+async def _ground_freeze_request(result, message: str, recent_turns: list[ChatTurn]):
+    """Freeze only. The classifier invents a plausible reason ("lost") and routes
+    vague card problems ("my card isn't working", "reset my PIN") to freeze. Keep the
+    freeze only if the customer asked to block the card or said why; the reason is
+    the customer's own words, never the classifier's guess."""
     if not (isinstance(result, BankingService) and (result.category, result.service) == _FREEZE_KEY):
         return result
-    payload = dict(result.payload or {})
-    reason = payload.get("reason")
-    if not reason:
-        return result
     messages = [t.message for t in (recent_turns or [])[-2:] if t.message] + [message]
-    if await _reason_was_stated(messages, str(reason)):
-        return result
-    payload.pop("reason")
+    reason, block_request = await _freeze_request_facts(messages)
+    if not reason and not block_request:
+        question = await _phrase(
+            "Freezing a card is only for a lost, stolen or misused card. What's happening "
+            "with your card, and what would you like me to help with?",
+            message,
+        )
+        return Clarification(question=question)
+    payload = dict(result.payload or {})
+    payload.pop("reason", None)
+    if reason:
+        payload["reason"] = reason
     return BankingService(result.category, result.service, result.subservice, payload or None)
 
 
@@ -1303,6 +1385,7 @@ def _format_bdt(amount: object) -> str | None:
 # except merchant/v1/qr/* (taka) -- confirmed against the bank app's own
 # Money.fromPoisha parsing. These are the response keys that carry money.
 _POISHA_KEYS = frozenset({
+    "balanceAfterThisTransaction",
     "balance", "amount", "totalAmount", "principalAmount", "charge", "vat", "total",
     "openingBalance", "closingBalance", "creditLimit", "totalOutstanding",
     "availableCredit", "unbilledAmount", "statementDueAmount", "minimumDueAmount",
@@ -1362,9 +1445,11 @@ def _redact_for_prompt(data: dict, service: str | None = None) -> dict:
             if isinstance(node, dict):
                 for key in [k for k in node if k.endswith("Formatted")]:
                     del node[key]
-                for key in _POISHA_KEYS & node.keys():
+                # Known money keys, plus any key the bank names "...Poisha" (live:
+                # card products' issuanceFeePoisha was read as 57,888 taka).
+                for key in (_POISHA_KEYS & node.keys()) | {k for k in node if k.endswith("Poisha")}:
                     if _is_numeric(node[key]):
-                        node[key] = _tk_text(node[key], divisor)
+                        node[key] = _tk_text(node[key], 100 if key.endswith("Poisha") else divisor)
                 if "accountNumber" in node:
                     node["accountNumber"] = node.get("accountNumberMasked", "[masked]")
                 if "identifier" in node:
@@ -1407,11 +1492,68 @@ def _unsupported_numbers(reply: str, source: str) -> list[str]:
     ]
 
 
+def _label_running_balances(data):
+    """A transaction's own `balance` is the balance right after it, not the current
+    balance. Live, "balance and last transactions" was answered "current balance is
+    Tk 95,000.00" from a transaction row while the real balance was Tk 90,000.00.
+    Renamed for the reply only."""
+    if isinstance(data, list):
+        return [_label_running_balances(item) for item in data]
+    if not isinstance(data, dict):
+        return data
+    out = {}
+    for key, value in data.items():
+        if key in ("transactions", "records", "statements") and isinstance(value, list):
+            value = [
+                {("balanceAfterThisTransaction" if k == "balance" else k): v for k, v in row.items()}
+                if isinstance(row, dict) else row
+                for row in value
+            ]
+        out[key] = _label_running_balances(value)
+    return out
+
+
+def _accounts_for_prompt(data: dict) -> dict:
+    """The accounts payload lists each account twice: under `accounts` (core record,
+    whose `balance` is not the live balance -- 0 live while the real one was
+    Tk 90,000) and under `ledgerAccounts` (the accounting ledger, same source as the
+    balance service). Live, the reply quoted Tk 0.00 and counted two accounts. For
+    the reply only: each account takes its ledger balance and the matching ledger
+    entry is dropped. The frontend payload is untouched."""
+    inner = data.get("data") if isinstance(data, dict) else None
+    if not isinstance(inner, dict):
+        return data
+    accounts = inner.get("accounts") if isinstance(inner.get("accounts"), list) else []
+    ledgers = inner.get("ledgerAccounts") if isinstance(inner.get("ledgerAccounts"), list) else []
+    by_number = {str(l.get("identifier")): l for l in ledgers if isinstance(l, dict)}
+    merged, used = [], set()
+    for account in accounts:
+        if not isinstance(account, dict):
+            continue
+        account = dict(account)
+        ledger = by_number.get(str(account.get("accountNumber")))
+        if ledger is not None:
+            account["balance"] = ledger.get("balance")
+            used.add(str(account.get("accountNumber")))
+        merged.append(account)
+    rest = [l for l in ledgers if isinstance(l, dict) and str(l.get("identifier")) not in used]
+    view = dict(inner)
+    view["accounts"] = merged
+    if rest:
+        view["ledgerAccounts"] = rest
+    else:
+        view.pop("ledgerAccounts", None)
+    return {**data, "data": view}
+
+
 async def _synthesize_reply(message: str, service: str, subservice: str | None, data: dict) -> str:
     """LLM-written reply answering the customer's actual question from the real
     fetched data only. Every 3+-digit number in the reply must exist in that data;
     a reply that fails the check is regenerated once at temperature 0, and only if
     that also fails (or Ollama is down) does the deterministic summary stand in."""
+    if (subservice or service) == "accounts":
+        data = _accounts_for_prompt(data)
+    data = _label_running_balances(data)
     redacted = _redact_for_prompt(data, subservice or service)
     data_json = json.dumps(redacted, default=str, ensure_ascii=False)
     prompt = (
@@ -1429,6 +1571,10 @@ async def _synthesize_reply(message: str, service: str, subservice: str | None, 
         "timestamps' time-of-day) unless the customer asked about them. If the data doesn't "
         "cover something they asked (e.g. a date range), say what you DO have instead. Never "
         "state a full account or card number; use only masked forms present in the data. "
+        "You can only SHOW this information: you cannot change, update, submit or cancel "
+        "anything. If the customer asked to change something, never say it was done — say "
+        "it can't be done in this chat and they can do it in the app, then share what the "
+        "data shows if useful. Give no advice, contacts or steps that aren't in the data. "
         "1-3 sentences, plain prose, no markdown."
     )
     for temperature in (0.2, 0.0):
@@ -2131,7 +2277,8 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                     subservice=result.subservice,
                     payload=req.payload,
                 )
-            result = await _drop_unstated_freeze_reason(result, req.message, recent_turns)
+            result = await _ground_freeze_request(result, req.message, recent_turns)
+            result = _normalize_fee_type(result)
 
     turn_classification: dict | None = None
 
@@ -2145,6 +2292,9 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
             )
         return
 
+    if isinstance(result, Clarification) and _foreign_script(result.question, req.message):
+        # Live: Banglish typed in Latin letters came back as garbled Bengali script.
+        result = Clarification(question=_CLARIFICATION_FALLBACK)
     if isinstance(result, Clarification):
         yield _sse("token", {"token": result.question})
         yield _result_event("CLARIFICATION_REQUIRED", None, None, None)

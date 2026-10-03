@@ -212,14 +212,7 @@ def test_login_history_adapter_returns_whole_body_on_success(monkeypatch):
     assert result == AdapterResult(data=body)
 
 
-def test_login_history_adapter_missing_device_id_raises_without_http_call(monkeypatch):
-    calls = _install_request(monkeypatch, response=FakeResponse(json_data={}))
-
-    with pytest.raises(AdapterUnavailableError):
-        asyncio.run(real.login_history_adapter.fulfill(_IDENTITY, _JWT, "login_history", {}))
-
-    assert calls == []
-
+# (missing deviceId now gathers every device's history -- see test_live_eval_fixes.py)
 
 def _install_path_responses(monkeypatch, responses_by_path):
     """Like _install_request, but for scenarios where a single fulfill() call
