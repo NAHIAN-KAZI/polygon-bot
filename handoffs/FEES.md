@@ -30,7 +30,7 @@ Two ways, same as every other banking-service intent:
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `transactionType` | string | ✅ | The transaction type id, e.g. `"bkash"`, `"nagad"`, `"other_bank"`, `"city_account"`, `"own_account"`, `"cash_by_code"`. **Note**: we don't have a confirmed, complete list of every valid id from the API team — these are spot-tested and confirmed working. An unrecognized id returns `SERVICE_UNAVAILABLE` (the bank's endpoint 404s cleanly on it). |
+| `transactionType` | string | ✅ | One of the bank's live transfer ids (from the Pay & Transfer menu): `bkash`, `nagad`, `rocket`, `upay`, `own_account`, `city_account`, `other_bank`. In chat the customer can say it any way ("bKash", "NPSB", "another bank") — the bot maps it to these ids, and asks if it can't. |
 | `amount` | number | ✅ | In **taka** (not poisha) — we convert to poisha internally before calling the bank endpoint. |
 
 Both fields are required — if either is missing, natural-language messages
@@ -68,17 +68,13 @@ that don't mention a clear transaction type + amount correctly get a
 
 ## Frontend integration
 
-**Detecting this result** in your SSE handler:
-```js
-if (event === "result" && data.type === "BANKING_SERVICE" && data.service === "fee_quote") {
-  // real fee quote — render below
-} else if (event === "result" && data.type === "CLARIFICATION_REQUIRED") {
-  // show the preceding `token` text as a normal chat bubble — same as any
-  // other clarification, nothing fee_quote-specific here
-} else if (event === "result" && data.type === "SERVICE_UNAVAILABLE" && data.service === "fee_quote") {
-  // show the preceding `token` text as a normal chat bubble; this also
-  // fires for an unrecognized transactionType (bank endpoint 404s cleanly)
+**Detecting this result** (with the `PolygonBotClient` from `COMMON.md`):
+```dart
+if (turn.type == 'BANKING_SERVICE' && turn.service == 'fee_quote') {
+  showFeeQuoteCard(turn.payload!);           // below
 }
+// CLARIFICATION_REQUIRED (type/amount missing) and SERVICE_UNAVAILABLE need
+// nothing fee-specific: the bubble text is the whole answer.
 ```
 
 **What to render on success**: a single small breakdown card, not a table —
@@ -115,7 +111,7 @@ transfer" button after showing the quote, that's your own app's existing
 navigation (same transfer screens as always) — we don't provide a routing
 hint for it since we never initiate the transfer ourselves.
 
-## Live-verified (2026-09-30)
+## Live-verified (2026-09-30, re-checked 2026-10-03)
 
 - `"how much does it cost to send 500 taka via bKash"` → `BANKING_SERVICE`,
   real fee data, correct 500→50000 poisha conversion, coherent spoken reply.
@@ -123,13 +119,15 @@ hint for it since we never initiate the transfer ourselves.
   asks which transaction type and amount.
 - Direct route with `payload.transactionType`/`payload.amount` → same
   correct behavior, bypassing classification entirely.
+- 2026-10-03: "bkash e 5000 pathale koto charge" (Banglish) → quote, Tk 0.00 charge;
+  "What would be the total charge if I transfer 20000 taka to another bank via NPSB?" →
+  mapped to `other_bank`, quote returned; "is there any charge" → asks type + amount.
 
 ## Known gaps
 
-1. **No confirmed complete `transactionType` id list from the bank.** We're
-   going on spot-tested ids that happen to work. If your frontend needs a
-   fixed dropdown of valid transaction types, get that list from the API
-   team directly rather than relying on what we've tested.
+1. The valid `transactionType` ids are read from the live Pay & Transfer menu
+   (not hard-coded). Cash-by-code and other menu items without sub-types aren't
+   offered for quotes.
 2. **Zero fees observed everywhere so far** — likely a dev-environment
    config state, not necessarily representative of production fee amounts.
 3. This is a read-only quote — it does **not** execute anything. Same

@@ -26,7 +26,7 @@ conventions) — these are narrow, intent-specific supplements.
      screens referenced in `API_SCREEN_MAP.md`) is Flutter/Dart, not a JS
      web frontend. Use the `http` package's streamed `Request`/`StreamedResponse`
      and manual SSE line parsing (`event:`/`data:`) unless the team confirms
-     they already have an SSE client package in use.
+     they already have an SSE client package in use. The shared client is in `COMMON.md`.
    - Any action buttons/next-screen navigation this intent implies, or an
      explicit note that none apply.
 5. **Live-verified** — exact messages tested, dated, with real results.
@@ -35,8 +35,26 @@ conventions) — these are narrow, intent-specific supplements.
 
 ## Index
 
-- [FEES.md](FEES.md) — transaction fee/charge quote.
-- [ACCOUNT_INFO.md](ACCOUNT_INFO.md) — balance, accounts, device/login
-  history, cards, loans, FD/DPS profit history.
-- [ATM_SUPPORT.md](ATM_SUPPORT.md) — list disputes (read-only part only;
-  cash-by-code/raise-dispute remain blocked/gather-only, not covered here).
+Start with **[COMMON.md](COMMON.md)** — request/response contract, every
+`result.type`, account/card selection, the secure OTP form, money units, and
+the shared Dart client used by every snippet below.
+
+| Intent | Handoff | What's in it |
+|---|---|---|
+| ACCOUNT_INFO | [ACCOUNT_INFO.md](ACCOUNT_INFO.md) | Accounts, cards, devices, login history, loans, FD/DPS profit |
+| ATM_SUPPORT | [ATM_SUPPORT.md](ATM_SUPPORT.md) | Dispute list, raise dispute (gather + redirect), cash-by-code (app only) |
+| CARD_ISSUE | [CARD_ISSUE.md](CARD_ISSUE.md) | My tickets/complaints, disputes, vague card problems, blocked fixes |
+| CARD_MANAGEMENT | [CARD_MANAGEMENT.md](CARD_MANAGEMENT.md) | Cards, card catalog, limit/virtual card request status, freeze |
+| CARD_REPLACEMENT | [CARD_REPLACEMENT.md](CARD_REPLACEMENT.md) | Replacement request status |
+| CHECK_BALANCE | [CHECK_BALANCE.md](CHECK_BALANCE.md) | Balance, credit card summary |
+| EDIT_PERSONAL_DETAILS | [EDIT_PERSONAL_DETAILS.md](EDIT_PERSONAL_DETAILS.md) | Profile, address/KYC, contacts, change-request status (changes: app only) |
+| FAILED_TRANSFER | [FAILED_TRANSFER.md](FAILED_TRANSFER.md) | Raise dispute flow in detail, disputes, tickets |
+| FALLBACK | [FALLBACK.md](FALLBACK.md) | Knowledge-base answers, off-topic/abuse handling |
+| FEES | [FEES.md](FEES.md) | Transaction fee quote |
+| GREETING | [GREETING.md](GREETING.md) | Hello/thanks, quick-reply chips |
+| LOST_OR_STOLEN_CARD | [LOST_OR_STOLEN_CARD.md](LOST_OR_STOLEN_CARD.md) | Card freeze with OTP + PIN/password, step by step |
+| MINI_STATEMENT | [MINI_STATEMENT.md](MINI_STATEMENT.md) | Transactions, credit card statement |
+| TRANSFER | [TRANSFER.md](TRANSFER.md) | Transfers (gather + redirect), beneficiaries, limits, gifts, email/QR history |
+
+Every handoff was checked against live `result` events captured on
+2026-10-03 (dev user `taslim_islamic`, `experiments/capture_payloads.py`).

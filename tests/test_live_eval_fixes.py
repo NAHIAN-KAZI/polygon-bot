@@ -220,3 +220,10 @@ def test_foreign_script_and_repeated_quote_guards():
     assert not chat._foreign_script("কি বলছেন?", "টাকা কেটে নিসে")
     assert not chat._foreign_script("What happened?", "taka kete nise")
     assert chat._quoted("lost it! lost it!") == "lost it!"
+
+
+def test_dispute_summary_shows_only_the_account_ending():
+    text = chat._dispute_summary_reply(
+        {"accountNumber": "100126000056", "transactionReferenceNo": "TXN1", "remarks": "not received"})
+    assert "100126000056" not in text
+    assert "ending 0056" in text and "TXN1" in text

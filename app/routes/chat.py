@@ -1796,9 +1796,11 @@ def _dispute_summary_reply(payload: dict) -> str:
     transaction_ref = payload.get("transactionReferenceNo")
     account_number = payload.get("accountNumber")
     remarks = payload.get("remarks")
+    # The customer's own account: last 4 only, like every other reply.
+    account_ref = f"ending {str(account_number)[-4:]}" if account_number else "on file"
     return (
         f"Here's your dispute summary: transaction {transaction_ref} on account "
-        f"{account_number}, reason: {remarks}. I can't submit this for you here — please "
+        f"{account_ref}, reason: {remarks}. I can't submit this for you here — please "
         "confirm and complete it in the app."
     )
 
