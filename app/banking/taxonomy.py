@@ -113,6 +113,37 @@ _SYNTHETIC_CATEGORIES = [
             {"id": "beneficiary_add", "name": "Add Beneficiary", "isActive": True},
         ],
     },
+    # ADR-0011 Amendment 2026-10-04 (T-75): customer-requested changes. Report
+    # lost/stolen card and profile photo are redirect-only (no bank call from chat);
+    # complaint/nickname/address act after an explicit yes; email/mobile after OTP.
+    {
+        "id": "card_requests",
+        "name": "Card Requests",
+        "isActive": True,
+        "services": [
+            {"id": "report_lost_card", "name": "Report Lost/Stolen Card", "isActive": True},
+        ],
+    },
+    {
+        "id": "support",
+        "name": "Support",
+        "isActive": True,
+        "services": [
+            {"id": "submit_complaint", "name": "Submit Complaint", "isActive": True},
+        ],
+    },
+    {
+        "id": "profile_update",
+        "name": "Update Profile",
+        "isActive": True,
+        "services": [
+            {"id": "update_nickname", "name": "Update Nickname", "isActive": True},
+            {"id": "update_address", "name": "Update Address", "isActive": True},
+            {"id": "update_email", "name": "Update Email", "isActive": True},
+            {"id": "update_mobile", "name": "Update Mobile Number", "isActive": True},
+            {"id": "update_profile_image", "name": "Update Profile Photo", "isActive": True},
+        ],
+    },
 ]
 
 

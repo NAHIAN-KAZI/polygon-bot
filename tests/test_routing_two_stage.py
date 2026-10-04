@@ -58,7 +58,11 @@ def test_domain_scope_narrows_to_that_domains_services(monkeypatch, domain):
 
     monkeypatch.setattr(routing, "_pick_domain", fake_pick)
     allowed, include_other = asyncio.run(_domain_scope("x", None))
-    assert allowed == DOMAINS[domain][1]
+    expected = DOMAINS[domain][1]
+    if domain in ("transfers", "fees"):
+        # fee vs transfer wording is too close to split: both are always offered
+        expected = DOMAINS["transfers"][1] | DOMAINS["fees"][1]
+    assert allowed == expected
     assert include_other is False
 
 

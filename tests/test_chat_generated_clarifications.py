@@ -215,7 +215,11 @@ def test_beneficiary_add_confirmation_stays_fixed_text(client, monkeypatch, real
             payload={"nickname": "Rahim", "accountNumber": "1234567890"},
         )
 
+    async def fake_lookup(jwt, identifier):
+        return {"accountNumber": "1234567890", "accountName": "Rahim Uddin"}
+
     monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "lookup_recipient", fake_lookup)
     resp = client.post("/chat", json={"message": "add Rahim"}, headers=JWT_HEADERS)
     token = next(d for n, d in _parse_sse(resp.text) if n == "token")["token"]
     assert token.endswith("Shall I proceed? (yes/no)")

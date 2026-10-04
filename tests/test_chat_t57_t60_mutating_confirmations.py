@@ -119,7 +119,7 @@ def test_freeze_card_zero_cards_is_clean_no_error(client, monkeypatch):
     assert [name for name, _ in events] == ["token", "result", "done"]
 
     token_event = next(data for name, data in events if name == "token")
-    assert token_event["token"] == "You don't have any cards on file, so there's nothing to freeze."
+    assert token_event["token"] == "You don't have any cards on file."
 
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "BANKING_SERVICE"
@@ -312,8 +312,13 @@ def test_beneficiary_add_complete_payload_asks_for_confirmation(client, monkeypa
     async def fake_fulfill(*a, **k):
         raise AssertionError("must not call the real adapter before confirmation")
 
+    async def fake_lookup(jwt, identifier):
+        assert identifier == "1234567890"
+        return {"accountNumber": "1234567890", "accountName": "Rahim Uddin"}
+
     monkeypatch.setattr(chat_module, "classify", fake_classify)
     monkeypatch.setattr(chat_module, "fulfill_banking_service", fake_fulfill)
+    monkeypatch.setattr(chat_module, "lookup_recipient", fake_lookup)
     _install_identity_fakes(monkeypatch)
     _install_no_pending_session(monkeypatch)
 
@@ -322,21 +327,22 @@ def test_beneficiary_add_complete_payload_asks_for_confirmation(client, monkeypa
     events = _parse_sse(resp.text)
     token_event = next(data for name, data in events if name == "token")
     assert token_event["token"] == (
-        "You're about to add Rahim as a beneficiary with account number ending 7890. "
-        "Shall I proceed? (yes/no)"
+        "You're about to add Rahim as a beneficiary: Rahim Uddin's Polygon Bank account "
+        "ending 7890. Shall I proceed? (yes/no)"
     )
 
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "CONFIRMATION_REQUIRED"
     assert result_event["category"] == "beneficiary_management"
     assert result_event["service"] == "beneficiary_add"
-    # serviceType/identifierType defaults are filled in here (not asked of the
-    # customer), already present for the eventual real adapter call on "yes".
+    # The bank's recipient lookup found a Polygon Bank account: OWN_BANK, with the
+    # bank's own identifierType value ("ACCOUNT" -- "ACCOUNT_NUMBER" is a 500).
     assert result_event["payload"] == {
         "nickname": "Rahim",
         "accountNumber": "1234567890",
-        "serviceType": "OTHER_BANK",
-        "identifierType": "ACCOUNT_NUMBER",
+        "serviceType": "OWN_BANK",
+        "identifierType": "ACCOUNT",
+        "accountHolderName": "Rahim Uddin",
     }
 
 

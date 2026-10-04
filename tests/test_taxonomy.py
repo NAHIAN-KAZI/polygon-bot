@@ -106,6 +106,7 @@ def test_refresh_merges_both_endpoints_preserving_ids(monkeypatch):
         "profile",
         "transfer_info",
         "beneficiary_management",  # T-60 fix: beneficiary_add needs a real taxonomy home
+        "card_requests", "support", "profile_update",  # T-75 customer-requested changes
     }
 
     banking = next(c for c in result["categories"] if c["id"] == "banking")
@@ -442,6 +443,7 @@ def test_synthetic_account_info_present_even_when_live_fetch_is_empty(monkeypatc
         "profile",
         "transfer_info",
         "beneficiary_management",  # T-60 fix: beneficiary_add needs a real taxonomy home
+        "card_requests", "support", "profile_update",  # T-75 customer-requested changes
     }
 
 

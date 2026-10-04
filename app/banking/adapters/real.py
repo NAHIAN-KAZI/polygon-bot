@@ -6,6 +6,7 @@ import httpx
 from app.banking.adapters.base import (
     AdapterAccountSelectionRequiredError,
     AdapterAuthError,
+    AdapterRejectedError,
     AdapterResult,
     AdapterUnavailableError,
     AdapterValidationError,
@@ -44,8 +45,16 @@ async def _call(
     except httpx.HTTPError as exc:
         raise AdapterUnavailableError(f"{method} {path} failed: {exc}") from exc
 
+    bank_message = _extract_error_message(response) if not response.is_success else None
+    # A 401 about a verification token (email/mobile change, card actions) is a
+    # wrong/expired OTP token, not an expired login.
+    if response.status_code == 401 and "verification" in (bank_message or "").lower():
+        raise AdapterRejectedError(f"{method} {path} returned 401: {bank_message}", bank_message)
     if response.status_code in (401, 403):
         raise AdapterAuthError(f"{method} {path} rejected the provided JWT")
+    if response.status_code in (400, 409, 422, 428) and bank_message:
+        raise AdapterRejectedError(
+            f"{method} {path} returned {response.status_code}: {bank_message}", bank_message)
     if not response.is_success:
         raise AdapterUnavailableError(
             f"{method} {path} returned {response.status_code}: {response.text}"
@@ -71,6 +80,8 @@ async def _resolve_account_number(
 
     result = await accounts_adapter.fulfill(customer_identity, jwt, "accounts", None)
     accounts = result.data.get("data", {}).get("accounts")
+    if isinstance(accounts, list):
+        accounts = [a for a in accounts if not _is_card_row(a)]
     if not isinstance(accounts, list) or len(accounts) == 0:
         raise AdapterUnavailableError("customer has no accounts on record")
 
@@ -878,11 +889,21 @@ def _forward_present(payload: dict, keys: tuple[str, ...]) -> dict | None:
     return params or None
 
 
+def _is_card_row(account: object) -> bool:
+    """Since 2026-10-04 the bank also lists linked credit/prepaid cards as rows of
+    GET polygon-bank/v1/accounts (id "card-<n>", balance "0"). They aren't deposit
+    accounts: never offer them as "which account?" or call account endpoints with them."""
+    return isinstance(account, dict) and (
+        str(account.get("id") or "").startswith("card-")
+        or str(account.get("accountType") or "").upper() in ("CREDIT", "PREPAID")
+    )
+
+
 async def _list_customer_accounts(customer_identity: CustomerIdentity, jwt: str | None) -> list:
     result = await accounts_adapter.fulfill(customer_identity, jwt, "accounts", None)
     data = result.data.get("data") if isinstance(result.data, dict) else None
     accounts = data.get("accounts") if isinstance(data, dict) else None
-    return accounts if isinstance(accounts, list) else []
+    return [a for a in accounts if not _is_card_row(a)] if isinstance(accounts, list) else []
 
 
 async def _resolve_account_id(
@@ -959,9 +980,10 @@ async def _resolve_credit_card_id(
 
     # Credit cards aren't linked to a deposit account, so they never appear in
     # /polygon-bank/v1/accounts' embedded cards[] -- list them from
-    # GET card/v1/cards ({"data": [...]}, category in cardCategory).
     body = await _call("GET", "/card/v1/cards", jwt)
-    cards = body.get("data") if isinstance(body, dict) else body
+    # Live shape: {"status": "success", "data": {"cards": [...]}} (CardController).
+    data = body.get("data") if isinstance(body, dict) else body
+    cards = data.get("cards") if isinstance(data, dict) else data
     credit_cards = [c for c in (cards or []) if isinstance(c, dict) and _is_credit_card(c)]
 
     if not credit_cards:
@@ -1166,6 +1188,98 @@ class TransferLimitAdapter:
         return AdapterResult(data=_wrap_list(body, "limits"))
 
 
+# --- T-75: customer-requested changes (*** MUTATING, user-approved 2026-10-04 ***) --
+# Never called on a first message: the chat layer only reaches these after an
+# explicit "yes" (complaint/nickname/address) or a verified OTP (email/mobile).
+
+COMPLAINT_CATEGORIES = (
+    "ACCOUNT", "CARD", "TRANSACTION", "LOAN_DEPOSIT", "MOBILE_APP_TECHNICAL", "SERVICE_QUALITY", "OTHER",
+)
+ADDRESS_FIELDS = ("presentAddress", "permanentAddress", "district", "division")
+
+
+def _required(payload: dict | None, *fields: str) -> dict:
+    payload = payload or {}
+    missing = [f for f in fields if not payload.get(f)]
+    if missing:
+        raise AdapterUnavailableError(f"missing required payload fields: {', '.join(missing)}")
+    return payload
+
+
+async def lookup_recipient(jwt: str | None, identifier: str) -> dict | None:
+    """GET polygon-bank/v1/accounts/recipient/{identifier} (added 2026-10-04): the
+    Polygon Bank account behind an account/card/mobile number -> {accountNumber,
+    accountName}. None when it isn't a Polygon Bank account (404)."""
+    digits = re.sub(r"\D", "", str(identifier or ""))
+    if not digits:
+        return None
+    try:
+        body = await _call("GET", f"/polygon-bank/v1/accounts/recipient/{digits}", jwt)
+    except AdapterRejectedError:
+        return None
+    except AdapterUnavailableError as exc:
+        if " returned 404" in str(exc):
+            return None
+        raise
+    data = body.get("data") if isinstance(body, dict) else None
+    return data if isinstance(data, dict) and data.get("accountNumber") else None
+
+
+class SubmitComplaintAdapter:
+    """POST support/v1/complaints (cURL 3.5/8.4): {category (enum), description (<=2000)}."""
+
+    async def fulfill(self, customer_identity, jwt, subservice, payload) -> AdapterResult:
+        payload = _required(payload, "category", "description")
+        category = payload["category"] if payload["category"] in COMPLAINT_CATEGORIES else "OTHER"
+        body = await _call("POST", "/support/v1/complaints", jwt,
+                           json={"category": category, "description": str(payload["description"])[:2000]})
+        return AdapterResult(data=body if isinstance(body, dict) else {"result": body})
+
+
+class UpdateNicknameAdapter:
+    """PATCH auth/v1/user/profile/nickname (cURL 7.2): {nickName} -- capital N."""
+
+    async def fulfill(self, customer_identity, jwt, subservice, payload) -> AdapterResult:
+        payload = _required(payload, "nickName")
+        body = await _call("PATCH", "/auth/v1/user/profile/nickname", jwt,
+                           json={"nickName": str(payload["nickName"]).strip()})
+        return AdapterResult(data=body if isinstance(body, dict) else {"result": body})
+
+
+class UpdateAddressAdapter:
+    """PATCH customer/v1/me/demographic (cURL 7.8), partial update: only the
+    address fields the customer gave are sent."""
+
+    async def fulfill(self, customer_identity, jwt, subservice, payload) -> AdapterResult:
+        fields = {k: str(v).strip() for k, v in (payload or {}).items() if k in ADDRESS_FIELDS and v}
+        if not fields:
+            raise AdapterUnavailableError("no address field given")
+        body = await _call("PATCH", "/customer/v1/me/demographic", jwt, json=fields)
+        return AdapterResult(data=body if isinstance(body, dict) else {"result": body})
+
+
+class UpdateEmailAdapter:
+    """POST auth/v1/auth/email/update (cURL 7.6): {newEmail, verificationToken}."""
+
+    async def fulfill(self, customer_identity, jwt, subservice, payload) -> AdapterResult:
+        payload = _required(payload, "newEmail", "verificationToken")
+        body = await _call("POST", "/auth/v1/auth/email/update", jwt,
+                           json={"newEmail": payload["newEmail"], "verificationToken": payload["verificationToken"]})
+        return AdapterResult(data=body if isinstance(body, dict) else {"result": body})
+
+
+class UpdateMobileAdapter:
+    """POST auth/v1/auth/mobile/update (cURL 7.5): {newPhone (^01[3-9]\\d{8}$),
+    verificationToken}. The bank binds the token to the customer's CURRENT phone
+    (UserAuthServiceImpl.updateMobile), so the OTP goes there, not to newPhone."""
+
+    async def fulfill(self, customer_identity, jwt, subservice, payload) -> AdapterResult:
+        payload = _required(payload, "newPhone", "verificationToken")
+        body = await _call("POST", "/auth/v1/auth/mobile/update", jwt,
+                           json={"newPhone": payload["newPhone"], "verificationToken": payload["verificationToken"]})
+        return AdapterResult(data=body if isinstance(body, dict) else {"result": body})
+
+
 balance_adapter = BalanceAdapter()
 transaction_history_adapter = TransactionHistoryAdapter()
 accounts_adapter = AccountsAdapter()
@@ -1249,4 +1363,9 @@ REAL_ADAPTERS = {
     "real:email_transfers": email_transfers_adapter,
     "real:qr_payment_history": qr_payment_history_adapter,
     "real:transfer_limit": transfer_limit_adapter,
+    "real:submit_complaint": SubmitComplaintAdapter(),
+    "real:update_nickname": UpdateNicknameAdapter(),
+    "real:update_address": UpdateAddressAdapter(),
+    "real:update_email": UpdateEmailAdapter(),
+    "real:update_mobile": UpdateMobileAdapter(),
 }

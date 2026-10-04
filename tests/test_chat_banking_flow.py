@@ -570,7 +570,9 @@ def test_record_turn_called_for_banking_service_with_identity(client, monkeypatc
     customer_id, turn = args
     assert customer_id == CUSTOMER_ID
     assert turn.message == "what's my balance"
-    assert turn.classification == {
+    # Answered turns also keep the request details, for follow-ups ("and for X?").
+    assert "request" in turn.classification
+    assert {k: v for k, v in turn.classification.items() if k != "request"} == {
         "type": "BANKING_SERVICE",
         "category": "account_info",
         "service": "balance",
@@ -2583,12 +2585,13 @@ def test_transfer_bank_transfer_complete_payload_builds_summary_without_calling_
 
     assert len(record_turn_spy.calls) == 1
     recorded_turn = record_turn_spy.calls[0][0][1]
-    assert recorded_turn.classification == {
+    assert {k: v for k, v in recorded_turn.classification.items() if k != "request"} == {
         "type": "BANKING_SERVICE",
         "category": "transfer",
         "service": "bank_transfer",
         "subservice": "other_bank",
     }
+    assert "pin" not in recorded_turn.classification["request"]
 
 
 def test_transfer_wallet_transfer_complete_payload_builds_summary_without_calling_adapter(

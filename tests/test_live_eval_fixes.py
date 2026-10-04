@@ -291,3 +291,32 @@ def test_stream_with_bad_first_number_uses_the_non_streamed_path(monkeypatch):
 
     monkeypatch.setattr(chat, "_synthesize_reply", fake_synth)
     assert _collect(_REAL_STREAM("balance?", "balance", None, {"balance": 9000000})) == ["checked reply"]
+
+
+def test_fee_quote_routing_offers_the_matching_transfer():
+    routing = chat._service_routing("fees", "fee_quote", None, {"transactionType": "nagad", "amount": 500})
+    assert routing["action"] == "start_transfer"
+    assert routing["transfer"] == {"category": "transfer", "service": "wallet_transfer",
+                                   "subservice": "nagad", "prefill": {"amount": 500}}
+    assert chat._service_routing("fees", "fee_quote", None, {"transactionType": "cash_by_code"})["action"] == "redirect"
+    assert chat._service_routing("account_info", "balance", None, None)["action"] == "redirect"
+
+
+def _fee_pending(payload=None):
+    return [ChatTurn(timestamp=None, message="fees", classification={
+        "type": "CLARIFICATION_REQUIRED", "category": "fees", "service": "fee_quote",
+        "payload": payload or {}, "missingFields": ["transactionType", "amount"]})]
+
+
+def test_transfer_shaped_answer_to_a_fee_question_is_the_fee():
+    transfer = BankingService("transfer", "wallet_transfer", "bkash", {"amount": 500})
+    out = chat._fee_answer_not_transfer(transfer, _fee_pending(), "mobile wallet 500 taka")
+    # "bkash" was never said -> not assumed; the type is asked for next.
+    assert (out.category, out.service, out.payload) == ("fees", "fee_quote", {"amount": 500})
+    named = chat._fee_answer_not_transfer(transfer, _fee_pending(), "bkash e 500")
+    assert named.payload == {"transactionType": "bkash", "amount": 500}
+
+
+def test_transfer_wording_without_a_pending_fee_question_stays_a_transfer():
+    transfer = BankingService("transfer", "wallet_transfer", "bkash", None)
+    assert chat._fee_answer_not_transfer(transfer, [], "i want to transfer money to bkash") is transfer

@@ -14,6 +14,17 @@ class AdapterUnavailableError(Exception):
     network error, or a mock adapter's own simulated failure)."""
 
 
+class AdapterRejectedError(AdapterUnavailableError):
+    """The bank understood the request and refused it with a readable reason
+    (400/409/422/428, or 401 for a bad verification token) -- e.g. "number already
+    in use". `bank_message` is safe to show the customer. Subclass of
+    AdapterUnavailableError so existing handlers keep working unchanged."""
+
+    def __init__(self, message: str, bank_message: str | None = None):
+        super().__init__(message)
+        self.bank_message = bank_message
+
+
 class AdapterAuthError(Exception):
     """Raised by an adapter when the downstream call is rejected for an auth
     reason (401/403), so callers can distinguish AUTH_REQUIRED from

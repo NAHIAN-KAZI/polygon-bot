@@ -110,7 +110,7 @@ included).
 | 3.2 Unfreeze card | ⛔ Blocked (bot points the customer to the app) |
 | 3.3 Raise dispute | ✅ Done (gather+redirect — T-61) |
 | 3.4 List disputes | ✅ Done (shared `disputes` adapter; routing covers card-issue phrasing) |
-| 3.5 Submit complaint | ⛔ Blocked |
+| 3.5 Submit complaint | 🔶 Built (same flow as 8.4, T-75) |
 | 3.6 My complaints | ✅ Done (T-64 — live `polygon_services`/`my_tickets` = `GET support/v1/complaints`, confirmed by bank team) |
 
 ## CARD_MANAGEMENT — *Mostly done*
@@ -157,12 +157,12 @@ included).
 | # | Endpoint | Status |
 |---|---|---|
 | 7.1 Get profile | ✅ Done (T-64, `profile`/`profile` — CIF/NID redacted from the LLM) |
-| 7.2 Update nickname | ⛔ Blocked |
-| 7.3/7.4 Upload profile image | ⛔ Blocked |
-| 7.5 Update mobile number | ⛔ Blocked |
-| 7.6 Update email address | ⛔ Blocked |
+| 7.2 Update nickname | 🔶 Built (T-75 — yes/no then PATCH; live test pending) |
+| 7.3/7.4 Upload profile image | ✅ Redirect (T-75 — sends the customer to the app's photo screen; no file handling in chat, by decision) |
+| 7.5 Update mobile number | 🔶 Built (T-75 — OTP to the CURRENT registered phone (bank binds the token to it, UserAuthServiceImpl.updateMobile) then POST; customer is signed out after; live test pending) |
+| 7.6 Update email address | 🔶 Built (T-75 — OTP to the registered phone then POST; live test pending) |
 | 7.7 Get address | ✅ Done (T-64, `profile`/`address`) |
-| 7.8 Update address | ⛔ Blocked |
+| 7.8 Update address | 🔶 Built (T-75 — yes/no then PATCH; live test pending) |
 | 7.9 Submit KYC | ⛔ Blocked |
 | 7.10 My contacts | ✅ Done (T-64, `profile`/`contacts`) |
 | 7.11 Profile change — submit | ⛔ Blocked |
@@ -176,7 +176,7 @@ included).
 | 8.1 Transaction history | ✅ Done (shared `transaction_history` adapter) |
 | 8.2 Raise dispute | ✅ Done (gather+redirect — T-61) |
 | 8.3 List disputes | ✅ Done (shared `disputes` adapter) |
-| 8.4 Submit complaint | ⛔ Blocked |
+| 8.4 Submit complaint | 🔶 Built (T-75 — LLM-written category + description, yes/no, POST; live test pending) |
 | 8.5 My complaints | ✅ Done (T-64, live `my_tickets`) |
 
 ## FALLBACK — *Done (own implementation)*
@@ -196,8 +196,8 @@ No API needed — handled conversationally.
 ## LOST_OR_STOLEN_CARD — *Freeze built*
 | # | Endpoint | Status |
 |---|---|---|
-| 12.1 Report lost/stolen card | ⛔ Blocked |
-| 12.2 Freeze card immediately | ✅ Built (same flow as 4.1 — lost/stolen/compromised routes to freeze) |
+| 12.1 Report lost/stolen card | ✅ Redirect (T-75 — caution + pre-filled redirect to the app's report screen; chat never calls the bank, by decision) |
+| 12.2 Freeze card immediately | ✅ Done (same flow as 4.1 — only when the customer explicitly asks to freeze/block; plain lost/stolen goes to 12.1's redirect) |
 
 ## MINI_STATEMENT — *Mostly done*
 | # | Endpoint | Status |

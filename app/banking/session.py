@@ -50,7 +50,7 @@ def record_turn(customer_id: str, turn: ChatTurn) -> None:
     entry.last_active_at = turn.timestamp
 
 
-_PENDING_CLARIFICATION_TYPES = {"CLARIFICATION_REQUIRED", "ACCOUNT_SELECTION_REQUIRED"}
+_PENDING_CLARIFICATION_TYPES = {"CLARIFICATION_REQUIRED", "ACCOUNT_SELECTION_REQUIRED", "TRANSACTION_SELECTION_REQUIRED"}
 
 
 def get_classification_context(customer_id: str) -> list[ChatTurn]:

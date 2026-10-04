@@ -485,11 +485,12 @@ def test_call_constructs_asyncclient_with_timeout_above_httpx_default(monkeypatc
     assert captured_kwargs["timeout"] > 5.0  # httpx.AsyncClient's own default
 
 
-def test_real_adapters_dict_has_exactly_the_thirty_one_expected_keys():
+def test_real_adapters_dict_has_exactly_the_thirty_six_expected_keys():
     # T-57/T-60: cards, frezz_unfrezz (freeze card, MUTATING), beneficiary_add
     # (MUTATING) added. T-64: 17 read-only GET adapters added (identity of
-    # each T-64 entry is asserted in tests/test_real_adapters_t64.py).
-    assert len(real.REAL_ADAPTERS) == 31
+    # each T-64 entry is asserted in tests/test_real_adapters_t64.py). T-75: 5
+    # MUTATING change adapters (complaint, nickname, address, email, mobile).
+    assert len(real.REAL_ADAPTERS) == 36
     assert set(real.REAL_ADAPTERS.keys()) == {
         "real:balance",
         "real:transaction_history",
@@ -522,6 +523,8 @@ def test_real_adapters_dict_has_exactly_the_thirty_one_expected_keys():
         "real:email_transfers",
         "real:qr_payment_history",
         "real:transfer_limit",
+        "real:submit_complaint", "real:update_nickname", "real:update_address",
+        "real:update_email", "real:update_mobile",
     }
     assert real.REAL_ADAPTERS["real:balance"] is real.balance_adapter
     assert real.REAL_ADAPTERS["real:transaction_history"] is real.transaction_history_adapter

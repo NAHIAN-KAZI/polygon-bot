@@ -37,6 +37,14 @@ REAL_ADAPTER_SUBSERVICE_IDS = {
     "email_transfers",
     "qr_payment_history",
     "transfer_limit",
+    # T-75: *** MUTATING, user-approved 2026-10-04 *** -- complaint, nickname and
+    # address act only after an explicit yes; email and mobile only after a
+    # verified OTP. See the adapters' docstrings in app/banking/adapters/real.py.
+    "submit_complaint",
+    "update_nickname",
+    "update_address",
+    "update_email",
+    "update_mobile",
 }
 
 

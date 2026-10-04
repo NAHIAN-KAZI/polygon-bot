@@ -125,7 +125,7 @@ SERVICE_DESCRIPTIONS: dict[tuple[str, str], tuple[str, tuple[str, ...]]] = {
     ),
     ("beneficiary_management", "beneficiary_add"): (
         "add/save/register a NEW beneficiary (any add-a-beneficiary request; route even if name or account number is missing)",
-        ("nickname", "accountNumber"),
+        ("nickname", "accountNumber", "bankName", "branchName", "routingNumber"),
     ),
     ("service_requests", "disputes"): ("VIEW the customer's existing transaction disputes and their status", ()),
     ("polygon_services", "my_tickets"): (
@@ -169,13 +169,44 @@ SERVICE_DESCRIPTIONS: dict[tuple[str, str], tuple[str, tuple[str, ...]]] = {
         "or wrong transaction, wrong charge) or raise a new dispute",
         ("accountNumber", "transactionReferenceNo", "remarks"),
     ),
+    ("card_requests", "report_lost_card"): (
+        "the customer's card is lost or stolen (or damaged) and they want to report it / get "
+        "it replaced; reasonCode is one of LOST, STOLEN, DAMAGED, EXPIRED, OTHER",
+        ("reasonCode",),
+    ),
+    ("support", "submit_complaint"): (
+        "make/file/lodge a NEW complaint about the bank's service, staff, app, an account, a "
+        "card or a loan (a money problem with one specific transaction is raise_dispute "
+        "instead). category is one of ACCOUNT, CARD, TRANSACTION, LOAN_DEPOSIT, "
+        "MOBILE_APP_TECHNICAL, SERVICE_QUALITY, OTHER; description = what they are "
+        "complaining about, in their words",
+        ("category", "description"),
+    ),
+    ("profile_update", "update_nickname"): ("change their nickname (display name) in the app", ("nickName",)),
+    ("profile_update", "update_address"): (
+        "change their present and/or permanent address (or district/division)",
+        ("presentAddress", "permanentAddress", "district", "division"),
+    ),
+    ("profile_update", "update_email"): ("change the email address on their profile", ("newEmail",)),
+    ("profile_update", "update_mobile"): (
+        "change the mobile number registered with the bank",
+        ("newPhone",),
+    ),
+    ("profile_update", "update_profile_image"): ("change or upload their profile photo", ()),
     ("fees", "fee_quote"): (
-        "live fee/charge for a transaction type and amount",
+        "live fee/charge for sending money. transactionType: to another bank (any bank name, "
+        "NPSB, BEFTN, RTGS) = other_bank; to someone else's Polygon Bank account = "
+        "city_account; between their own accounts = own_account; mobile wallets = the "
+        "provider id; cash by code = cash_by_code",
         ("transactionType", "amount"),
     ),
     ("transfer", "bank_transfer"): (
-        "send/transfer money to their own account, another Polygon Bank account, or an "
-        "account at another bank (a bank named by name or abbreviation); subservice required",
+        "send/transfer money; subservice required: own_account = moving money between the "
+        "customer's OWN accounts (their other account, between their accounts; which "
+        "account is looked up for them, so route even with no account number); "
+        "other_bank = to an account at ANY bank other than Polygon Bank (whenever a bank "
+        "name or abbreviation is mentioned); city_account = to someone else's account at "
+        "Polygon Bank itself",
         ("accountNumber", "amount"),
     ),
     ("transfer", "wallet_transfer"): (
@@ -183,9 +214,10 @@ SERVICE_DESCRIPTIONS: dict[tuple[str, str], tuple[str, tuple[str, ...]]] = {
         ("walletNumber", "amount"),
     ),
     ("card_services", "frezz_unfrezz"): (
-        "freeze/block a card ONLY when the customer says it is lost, stolen or compromised, or "
-        "explicitly asks to block/freeze it. A card problem that doesn't say what is wrong is "
-        "NOT this (ask_clarification). Never for unfreezing",
+        "freeze/block/lock a card ONLY when the customer explicitly asks to freeze, block or "
+        "lock it (a temporary block). A lost or stolen card WITHOUT that ask is "
+        "card_requests/report_lost_card. A card problem that doesn't say what is wrong is NOT "
+        "this (ask_clarification). Never for unfreezing",
         ("reason",),
     ),
 }
@@ -213,7 +245,8 @@ DOMAINS: dict[str, tuple[str, frozenset[tuple[str, str]]]] = {
         frozenset({("account_info", "cards"), ("card_info", "card_products"),
                    ("card_info", "card_limit_requests"), ("card_info", "virtual_card_requests"),
                    ("card_info", "replacement_requests"), ("card_info", "credit_card_summary"),
-                   ("card_info", "credit_card_statement"), ("card_services", "frezz_unfrezz")}),
+                   ("card_info", "credit_card_statement"), ("card_services", "frezz_unfrezz"),
+                   ("card_requests", "report_lost_card")}),
     ),
     "transfers": (
         "making a NEW transfer (to a bank account, a mobile wallet, or a saved person), adding a "
@@ -228,16 +261,19 @@ DOMAINS: dict[str, tuple[str, frozenset[tuple[str, str]]]] = {
     "disputes": (
         "something that went wrong with money ALREADY sent, paid or withdrawn (deducted but "
         "not received, ATM gave no cash, charged twice, failed or wrong transaction), raising "
-        "or viewing disputes, complaints and support tickets",
+        "or viewing disputes, complaints and support tickets, or making a complaint",
         frozenset({("service_requests", "disputes"), ("service_requests", "raise_dispute"),
-                   ("polygon_services", "my_tickets")}),
+                   ("polygon_services", "my_tickets"), ("support", "submit_complaint")}),
     ),
     "profile": (
-        "their personal details: profile, address, contact numbers/emails, and their requests "
-        "to change them",
+        "their personal details: viewing or CHANGING their nickname, address, email, mobile "
+        "number or profile photo, their contacts, and the status of change requests",
         frozenset({("profile", "profile"), ("profile", "address"), ("profile", "contacts"),
                    ("profile", "profile_change_requests"),
-                   ("profile", "contact_priority_requests")}),
+                   ("profile", "contact_priority_requests"),
+                   ("profile_update", "update_nickname"), ("profile_update", "update_address"),
+                   ("profile_update", "update_email"), ("profile_update", "update_mobile"),
+                   ("profile_update", "update_profile_image")}),
     ),
     "other": (
         "other bank services: bill/utility payments, mobile recharge, cheque books, applying "
@@ -262,7 +298,9 @@ def fee_transaction_types(taxonomy: dict | None = None) -> list[str]:
         if category.get("id") != "transfer":
             continue
         for service in category.get("services", []):
-            ids.extend(sub["id"] for sub in service.get("subServices") or [] if sub.get("id"))
+            subs = [sub["id"] for sub in service.get("subServices") or [] if sub.get("id")]
+            # A menu item with no sub-types (e.g. cash_by_code) is itself a type.
+            ids.extend(subs or ([service["id"]] if service.get("id") else []))
     return ids
 
 
@@ -354,24 +392,28 @@ def build_system_prompt(
         "3. Fees/charges/costs are never answer_kb_question, even when asked like general "
         "info (\"what do you know about / tell me about fees\"). Any message asking what something "
         "costs — even one describing an action (\"if I send/withdraw..., what's the charge?\") "
-        "— is fees/fee_quote, not the action itself. If no transaction type is named at all, "
-        "ask_clarification. A complaint about a charge already taken is a dispute, not a "
-        "fee quote.\n"
+        "— is fees/fee_quote, not the action itself. ALWAYS route fee questions to "
+        "fees/fee_quote, even with no transfer type or amount (those are asked for "
+        "afterwards) — never ask_clarification for a fee question. A complaint about a "
+        "charge already taken is a dispute, not a fee quote.\n"
         "4. Transfers: route to transfer only when the destination TYPE is known (own account, "
         "another Polygon Bank account, another bank, or a named wallet provider) — choose the "
-        "matching subservice. No destination type -> ask_clarification. Sending money to a "
+        "matching subservice. Moving money between their own accounts is ALWAYS "
+        "transfer/bank_transfer/own_account — never ask which account (their accounts are "
+        "looked up for them). No destination type -> ask_clarification. Sending money to a "
         "person by NAME -> polygon_services/beneficiary (name in nameQuery), never transfer. "
         "Asking to add/save a new beneficiary (even if a name and account number are given) "
         "-> beneficiary_management/beneficiary_add. Nothing is executed in chat; details are only "
         "gathered.\n"
-        "5. Freeze/block only when the customer says the card is lost, stolen, compromised "
-        "or should be blocked; a card problem that doesn't say what is wrong -> "
-        "ask_clarification. UNfreezing/UNblocking a card (making it usable again) is NOT available in chat: "
-        "never route it — call ask_clarification, in your own words saying so and asking "
-        "what else they need. The same for every other request to CHANGE something that no "
-        "service below does (reset a PIN, update email/phone/address/name, withdraw cash by "
-        "code, cancel or submit a request): ask_clarification saying it can't be done in "
-        "this chat but can be done in the app — never route it to a lookup service.\n"
+        "5. A lost or stolen card -> card_requests/report_lost_card; freeze/block only when "
+        "the customer explicitly asks to freeze, block or lock the card; a card problem that "
+        "doesn't say what is wrong -> ask_clarification. Wanting to CHANGE their nickname, "
+        "address, email, mobile number or profile photo -> the matching profile_update "
+        "service (never a profile lookup). UNfreezing/UNblocking a card is NOT available in "
+        "chat: ask_clarification, in your own words saying so and asking what else they "
+        "need. The same for any other change no service below does (reset a PIN, withdraw "
+        "cash by code, cancel a request): ask_clarification saying it can't be done in this "
+        "chat but can be done in the app — never route it to a lookup service.\n"
         "6. Pass subservice ONLY for a service that lists subservices; otherwise omit it. "
         "Copy category and service exactly as they appear together on ONE line below; never "
         "use a subservice id as the service. Viewing existing disputes -> "
@@ -383,7 +425,9 @@ def build_system_prompt(
         "\"cards\", \"loans\", \"profile\", \"limit\") -> that lookup service. What the bank "
         "offers (card types/products) is card_info/card_products, not answer_kb_question.\n"
         "7. payload: only fields listed for that service, only values the customer actually "
-        "stated (amount as a number, account/wallet numbers as strings). Never invent or "
+        "stated (amount as a number in taka with unit words applied: k/thousand/hajar = "
+        "×1,000, lakh/lac = ×100,000, crore/koti = ×10,000,000; account/wallet numbers as "
+        "strings of digits). Never invent or "
         "reuse values from this prompt. Omit unknown fields. Never put a PIN, password, OTP "
         "or CVV in payload.\n\n"
         f"{_render_taxonomy(taxonomy, allowed, include_other)}\n\n"
@@ -402,12 +446,16 @@ def build_system_prompt(
         "\"amount\": <amount>})\n"
         "- \"I want to transfer money\" (no destination type) -> ask_clarification "
         "(in your own words, ask where they want to send it)\n"
-        "- \"<topic> help\", \"<topic> info\", \"fees?\" — a topic with no clear ask -> "
-        "ask_clarification (in your own words, ask what exactly they need; for fees, which "
-        "transaction type and amount)\n"
+        "- \"<topic> help\", \"<topic> info\" — a topic with no clear ask -> "
+        "ask_clarification (in your own words, ask what exactly they need)\n"
         "- \"I lost my card, block it\" -> route_banking_service(category=\"card_services\", "
-        "service=\"frezz_unfrezz\"); \"unblock my card\" -> ask_clarification (in your own "
-        "words, say unblocking isn't available in chat)\n"
+        "service=\"frezz_unfrezz\"); \"my card was stolen\" (no ask to block) -> "
+        "route_banking_service(category=\"card_requests\", service=\"report_lost_card\", "
+        "payload={\"reasonCode\": \"STOLEN\"}); \"unblock my card\" -> ask_clarification (in "
+        "your own words, say unblocking isn't available in chat)\n"
+        "- wanting to change a profile detail -> the matching profile_update service, with the "
+        "new value in payload ONLY if the customer actually wrote it (otherwise omit it; "
+        "it is asked for)\n"
         "- \"what is a <banking product>?\", weather, maths, chit-chat -> answer_kb_question()"
     )
 
@@ -563,6 +611,11 @@ async def _domain_scope(
     if domain is None or domain in ("general", "other"):
         return None, True
     allowed = set(DOMAINS[domain][1])
+    # Fees and transfers are always offered together: "how much does it cost to send
+    # 5000 to nagad?" reads like a transfer, and with the fee service missing from
+    # stage 2 the model could only pick a transfer or ask.
+    if domain in ("transfers", "fees"):
+        allowed |= DOMAINS["transfers"][1] | DOMAINS["fees"][1]
     if recent_turns:
         last = recent_turns[-1].classification or {}
         if last.get("category") and last.get("service"):
@@ -582,7 +635,24 @@ async def classify(
         last_turn = recent_turns[-1]
         last_classification = last_turn.classification or {}
         pending_question = last_classification.get("question") or "a clarifying question"
-        if last_classification.get("type") == "ACCOUNT_SELECTION_REQUIRED":
+        if last_classification.get("type") == "BANKING_SERVICE":
+            # The last request was ANSWERED; the customer may follow up on it with just
+            # the detail that changes ("and for nagad?", "what about 3000?").
+            prev = f'category="{last_classification.get("category")}", service="{last_classification.get("service")}"'
+            details = json.dumps(last_classification.get("request") or {}, ensure_ascii=False)
+            messages.append({
+                "role": "system",
+                "content": (
+                    "PREVIOUS ANSWERED REQUEST: the customer's last message "
+                    f'"{last_turn.message}" was answered as route_banking_service({prev}) with '
+                    f"payload {details}. If the new message is a short follow-up that only "
+                    "changes or adds a detail of that same request (another provider, bank or "
+                    "amount, \"and for X?\", \"what about Y?\"), call "
+                    f"route_banking_service({prev}) with ONLY the changed/added details in "
+                    "payload. Otherwise ignore this and classify the new message on its own."
+                ),
+            })
+        elif last_classification.get("type") == "ACCOUNT_SELECTION_REQUIRED":
             # T-59: ACCOUNT_SELECTION_REQUIRED is a structurally different pending state
             # from a genuine CLARIFICATION_REQUIRED (the general branch below) — it never
             # means the intent itself is ambiguous. The category/service/subservice are
@@ -676,22 +746,26 @@ async def classify(
             # question (detected from its own text) — never assert this fees/fee_quote-specific
             # resolution for some other pending clarification (e.g. a card-help question), where
             # it would be wrong.
-            if "fee quote" in pending_question.lower():
+            pending_category = last_classification.get("category")
+            pending_service = last_classification.get("service")
+            if pending_category and pending_service:
+                # The pending question is about a KNOWN service (we asked for its missing
+                # details). Name it -- the old check looked for the words "fee quote" in
+                # the question text, which LLM-worded questions never contain, so fee
+                # follow-ups ("bkash", "1000") lost their context.
+                target = f'category="{pending_category}", service="{pending_service}"'
+                if last_classification.get("subservice"):
+                    target += f', subservice="{last_classification["subservice"]}"'
+                missing = ", ".join(last_classification.get("missingFields") or []) or "the missing details"
                 worked_example = (
-                    "\n- If the new message names a transaction type/method (e.g. bKash, Nagad, "
-                    "another bank, ATM, cash) — with or without an amount, and however it's "
-                    'phrased (a bare word or a full sentence like "I want to transfer money from '
-                    'bank to bkash") — call route_banking_service(category="fees", '
-                    'service="fee_quote", payload={"transactionType": "<method named>", ...amount '
-                    "if present}). This is the only acceptable route_banking_service call for this "
-                    "reply — never beneficiary, never a transfer/wallet action, never any other "
-                    "category/service, even though the message is phrased like an action "
-                    "request.\n"
-                    "- If the new message still gives no transaction type at all, call "
-                    "ask_clarification repeating the same kind of question.\n"
+                    f"\n- The pending question asked for: {missing}. If the new message gives any "
+                    "of that — a bare word, a number, or a full sentence, however phrased — call "
+                    f"route_banking_service({target}) with ONLY the details it gives in payload. "
+                    "Never switch to a different service just because the wording overlaps "
+                    "another feature (e.g. a wallet or bank named while asking a fee is still "
+                    "the fee).\n"
                     "- Only classify independently per the general rules above if the new message "
-                    "is a genuine subject change (different kind of thing entirely, not just a "
-                    "different phrasing of the fee answer)."
+                    "is a genuine subject change (a different kind of thing entirely)."
                 )
             else:
                 worked_example = (
@@ -705,10 +779,11 @@ async def classify(
                     "is a genuine subject change (a different kind of thing entirely, not just a "
                     "different phrasing of the same answer)."
                 )
-        messages.append({
-            "role": "system",
-            "content": general_reasoning + worked_example,
-        })
+        if last_classification.get("type") != "BANKING_SERVICE":
+            messages.append({
+                "role": "system",
+                "content": general_reasoning + worked_example,
+            })
     messages.append({"role": "user", "content": message})
 
     tool_calls = await _post_classification(messages)
