@@ -53,6 +53,13 @@ def _no_generated_clarifications(monkeypatch):
 
     monkeypatch.setattr(chat_module, "_ground_freeze_request", _as_classified)
 
+    # Slot filling for a pending question (an LLM call): tests use the deterministic
+    # amount-only completion it builds on.
+    async def _deterministic_fill(recent_turns, message):
+        return chat_module._try_deterministic_payload_completion(recent_turns, message)
+
+    monkeypatch.setattr(chat_module, "_llm_fill_pending_fields", _deterministic_fill)
+
     # Streamed reply: tests use the non-streamed path (same prompt and checks),
     # which they already fake via httpx.AsyncClient.post.
     async def _one_piece(message, service, subservice, data):

@@ -188,7 +188,7 @@ the bank's own AI/FAQ hand-off APIs.
 ## FEES — *Done*
 | # | Endpoint | Status |
 |---|---|---|
-| 10.1 Transaction charge quote | ✅ Done (`fee_quote` adapter; amounts in poisha, T-65) |
+| 10.1 Transaction charge quote | ✅ Done (`fee_quote` adapter; amounts in poisha, T-65). T-76 (2026-10-05): every fee question routes here; missing type/amount asked with the options and filled by slot filling across turns; lakh/crore/k amounts; follow-ups ("and for nagad?"); "ok send it" starts the transfer. Multi-turn re-verification in progress |
 
 ## GREETING — *Done*
 No API needed — handled conversationally.

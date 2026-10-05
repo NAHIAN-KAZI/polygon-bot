@@ -623,6 +623,29 @@ async def _domain_scope(
     return frozenset(allowed), False
 
 
+_WALLET_IDS = ("bkash", "nagad", "rocket", "upay")
+
+
+def _send_after_fee_hint(previous: dict) -> str:
+    """After a fee quote, "ok send it" / "go ahead" means: start THAT transfer."""
+    if (previous.get("category"), previous.get("service")) != ("fees", "fee_quote"):
+        return ""
+    request = previous.get("request") or {}
+    kind = request.get("transactionType")
+    if kind in _WALLET_IDS:
+        target = f'category="transfer", service="wallet_transfer", subservice="{kind}"'
+    elif kind in ("own_account", "city_account", "other_bank"):
+        target = f'category="transfer", service="bank_transfer", subservice="{kind}"'
+    else:
+        return ""
+    amount = request.get("amount")
+    payload = f', payload={{"amount": {amount}}}' if amount else ""
+    return (
+        "If the customer now wants to actually send that money (\"ok send it\", \"go ahead\", "
+        f"\"pathao\"), call route_banking_service({target}{payload}). "
+    )
+
+
 async def classify(
     message: str, recent_turns: list[ChatTurn] | None = None
 ) -> ClassificationResult:
@@ -649,7 +672,8 @@ async def classify(
                     "changes or adds a detail of that same request (another provider, bank or "
                     "amount, \"and for X?\", \"what about Y?\"), call "
                     f"route_banking_service({prev}) with ONLY the changed/added details in "
-                    "payload. Otherwise ignore this and classify the new message on its own."
+                    "payload. " + _send_after_fee_hint(last_classification)
+                    + "Otherwise ignore this and classify the new message on its own."
                 ),
             })
         elif last_classification.get("type") == "ACCOUNT_SELECTION_REQUIRED":

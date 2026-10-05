@@ -491,7 +491,8 @@ _PLACEHOLDER_RE = re.compile(r"[xX]{3,}|[\[\]<>{}]")
 def _clean_generated_question(text: str) -> str | None:
     """Post-checks a generated question. Returns None (-> caller falls back to the
     template) if it's empty, implausibly long, or mentions PIN/password/OTP; also
-    strips wrapping quotes/markdown and masks any 6+ digit run it may have echoed."""
+    strips wrapping quotes/markdown and masks any account/phone-length (8+ digit) run it
+    may have echoed -- not shorter ones, which are amounts (live: "Tk ••0000" for 5 lakh)."""
     text = (text or "").strip().strip('"').strip("'").strip()
     text = re.sub(r"[*_`#]+", "", text).strip()
     text = re.sub(r"\s+", " ", text)
@@ -499,7 +500,7 @@ def _clean_generated_question(text: str) -> str | None:
         return None
     if _FORBIDDEN_CLARIFICATION_RE.search(text) or _PLACEHOLDER_RE.search(text):
         return None
-    return _DIGIT_RUN_RE.sub(_mask_digit_run, text)
+    return _LONG_DIGITS_RE.sub(_mask_digit_run, text)
 
 
 async def _generate_clarification_question(
@@ -1499,6 +1500,78 @@ def _try_deterministic_payload_completion(
         subservice=last_classification.get("subservice"),
         payload=payload,
     )
+
+
+async def _llm_fill_pending_fields(recent_turns: list[ChatTurn], message: str) -> BankingService | None:
+    """Slot filling for a pending missing-field question of a KNOWN service. Re-
+    classifying a one-word reply from scratch was unreliable (live: "bkash" after "what
+    kind of transfer is the fee for?" became gifts_received; "1000" a KB answer). Here
+    the model only fills the fields we asked for. Values are checked (a transfer type
+    must be a real id, amounts come from _amounts_in_text). Nothing filled -> None, so
+    a genuine change of topic still goes to classify()."""
+    if not recent_turns:
+        return None
+    last = recent_turns[-1].classification or {}
+    if last.get("type") != "CLARIFICATION_REQUIRED" or not last.get("category") or not last.get("service"):
+        return None
+    missing = [f for f in (last.get("missingFields") or []) if f != "amount"]
+    payload = dict(last.get("payload") or {})
+    filled: dict = {}
+    if "amount" in (last.get("missingFields") or []):
+        amount = _extract_single_amount(message)
+        if amount is not None:
+            filled["amount"] = amount
+    if missing:
+        valid_types = fee_transaction_types() if "transactionType" in missing else []
+        lines = []
+        for field in missing:
+            line = f'- "{field}": {_CLARIFICATION_FIELD_DESCRIPTIONS.get(field, field)}'
+            if field == "transactionType" and valid_types:
+                line += (
+                    f" — one of: {', '.join(valid_types)}. own_account = between the customer's "
+                    "OWN accounts; city_account = SOMEONE ELSE's Polygon Bank account; other_bank "
+                    "= an account at any other bank (BRAC, DBBL, City Bank, any bank name), NPSB, "
+                    "BEFTN or RTGS; wallets by their provider name"
+                )
+            lines.append(line)
+        prompt = (
+            f"A bank chat assistant asked the customer: \"{last.get('question')}\"\n"
+            "It needs these details:\n" + "\n".join(lines) + "\n\n"
+            f"The customer replied (English, Bangla or Banglish): \"{_LONG_DIGITS_RE.sub(_mask_digit_run, message)}\"\n\n"
+            "Fill ONLY the details the reply actually gives; leave out anything it doesn't. "
+            "If the reply is about something else entirely, return {}. "
+            "Respond only with a JSON object of the filled details."
+        )
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                resp = await client.post(
+                    f"{settings.OLLAMA_BASE_URL}/api/generate",
+                    json={
+                        "model": settings.OLLAMA_MODEL, "prompt": prompt, "stream": False,
+                        "format": "json", "think": settings.OLLAMA_THINK,
+                        "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0},
+                    },
+                )
+                resp.raise_for_status()
+                extracted = json.loads(resp.json().get("response") or "{}")
+        except Exception:
+            extracted = {}
+        if isinstance(extracted, dict):
+            for field in missing:
+                value = extracted.get(field)
+                if value in (None, "", [], {}):
+                    continue
+                if field == "transactionType":
+                    value = re.sub(r"[\s-]+", "_", str(value).strip().lower())
+                    if value not in valid_types:
+                        continue
+                    # a wallet must be named by the customer, never assumed
+                    if value in _WALLET_PROVIDERS and value not in message.lower():
+                        continue
+                filled[field] = value
+    if not filled:
+        return None
+    return BankingService(last["category"], last["service"], last.get("subservice"), {**payload, **filled})
 
 
 def _candidate_number(candidate: dict) -> str:
@@ -2920,7 +2993,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
     else:
         result = await _try_account_selection_completion(recent_turns, req.message, req.payload)
         if result is None:
-            result = _try_deterministic_payload_completion(recent_turns, req.message)
+            result = await _llm_fill_pending_fields(recent_turns, req.message)
         if result is not None:
             # A bare follow-up ("500", "the savings one") answered our question; the reply
             # must still answer what the customer originally asked.
