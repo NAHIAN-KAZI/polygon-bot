@@ -120,7 +120,8 @@ SERVICE_DESCRIPTIONS: dict[tuple[str, str], tuple[str, tuple[str, ...]]] = {
         ("startDate", "endDate"),
     ),
     ("polygon_services", "beneficiary"): (
-        "send money to an EXISTING saved beneficiary by their name, or list beneficiaries",
+        "send money to an EXISTING saved beneficiary by their name, or list beneficiaries "
+        "(never for saving/adding a new one -- that is beneficiary_add)",
         ("nameQuery", "amount"),
     ),
     ("beneficiary_management", "beneficiary_add"): (
@@ -170,12 +171,15 @@ SERVICE_DESCRIPTIONS: dict[tuple[str, str], tuple[str, tuple[str, ...]]] = {
         ("accountNumber", "transactionReferenceNo", "remarks"),
     ),
     ("card_requests", "report_lost_card"): (
-        "the customer's card is lost or stolen (or damaged) and they want to report it / get "
-        "it replaced; reasonCode is one of LOST, STOLEN, DAMAGED, EXPIRED, OTHER",
+        "the customer says their card is LOST or STOLEN (or was used by someone else) and "
+        "wants to report it / get it replaced. A card that just doesn't work is NOT this "
+        "(ask_clarification). reasonCode is one of LOST, STOLEN, DAMAGED, EXPIRED, OTHER",
         ("reasonCode",),
     ),
     ("support", "submit_complaint"): (
-        "make/file/lodge a NEW complaint about the bank's service, staff, app, an account, a "
+        "ANY message saying they want to make/file/lodge a complaint or complain (route it "
+        "even if the complaint text is short, odd or a test; never ask_clarification for it) "
+        "-- a NEW complaint about the bank's service, staff, app, an account, a "
         "card or a loan (a money problem with one specific transaction is raise_dispute "
         "instead). category is one of ACCOUNT, CARD, TRANSACTION, LOAN_DEPOSIT, "
         "MOBILE_APP_TECHNICAL, SERVICE_QUALITY, OTHER; description = what they are "

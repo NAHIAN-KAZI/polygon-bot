@@ -1195,6 +1195,10 @@ def _clean_extracted_fields(result):
                 continue
             if key == "accountNumber" and len(re.sub(r"\D", "", text)) < 6:
                 continue
+            # A reference is an id (live: the model put "bKash transaction on 29 September"
+            # here, which skipped the real transaction lookup).
+            if key == "transactionReferenceNo" and re.search(r"\s", text):
+                continue
             if key == "walletNumber":
                 value = _bd_mobile(text)
                 if not value:
@@ -1512,7 +1516,15 @@ async def _llm_fill_pending_fields(recent_turns: list[ChatTurn], message: str) -
     if not recent_turns:
         return None
     last = recent_turns[-1].classification or {}
-    if last.get("type") != "CLARIFICATION_REQUIRED" or not last.get("category") or not last.get("service"):
+    if not last.get("category") or not last.get("service"):
+        return None
+    if last.get("type") == "BANKING_SERVICE" and (last["category"], last["service"]) == ("fees", "fee_quote"):
+        # An ANSWERED fee quote: a short follow-up may change its type or amount
+        # ("rocket", "and for nagad?", "2 lakh") -- same slot filling, over both fields.
+        last = {**last, "missingFields": ["transactionType", "amount"],
+                "payload": last.get("request") or {},
+                "question": "Which transfer type and amount should the fee be for? (follow-up to the last fee quote)"}
+    elif last.get("type") != "CLARIFICATION_REQUIRED":
         return None
     missing = [f for f in (last.get("missingFields") or []) if f != "amount"]
     payload = dict(last.get("payload") or {})
@@ -1792,10 +1804,21 @@ async def _ground_freeze_request(result, message: str, recent_turns: list[ChatTu
     vague card problems ("my card isn't working", "reset my PIN") to freeze. Keep the
     freeze only if the customer asked to block the card or said why; the reason is
     the customer's own words, never the classifier's guess."""
-    if not (isinstance(result, BankingService) and (result.category, result.service) == _FREEZE_KEY):
+    key = (result.category, result.service) if isinstance(result, BankingService) else None
+    if key not in (_FREEZE_KEY, ("card_requests", "report_lost_card")):
         return result
     messages = [t.message for t in (recent_turns or [])[-2:] if t.message] + [message]
     reason, block_request = await _freeze_request_facts(messages)
+    if key != _FREEZE_KEY:
+        # Report lost/stolen (redirect to destroy + replace): only when the customer's
+        # own words say what happened -- "my card isn't working" went here live.
+        if reason or block_request:
+            return result
+        return Clarification(question=await _phrase(
+            "Reporting a card lost or stolen is only for a card that is lost, stolen or "
+            "misused. What's happening with your card, and what would you like me to help with?",
+            message,
+        ))
     if not reason and not block_request:
         question = await _phrase(
             "Freezing a card is only for a lost, stolen or misused card. What's happening "
@@ -2144,6 +2167,8 @@ def _fee_quote_for_prompt(data: dict) -> dict:
         return data
     fees = data.get("fees") if isinstance(data.get("fees"), dict) else {}
     return {
+        "whatThisIs": "a fee ESTIMATE only — no money has been sent; nothing has happened yet. "
+                      "Describe it as what they WOULD pay if they send this amount.",
         "amountSent": data.get("principalAmount"),
         "charge": fees.get("charge"),
         "vat": fees.get("vat"),
@@ -2912,7 +2937,12 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                 # A readable refusal from the bank (e.g. "already saved", missing
                 # field) is passed on verbatim; nothing was changed either way.
                 if isinstance(exc, AdapterRejectedError):
-                    confirm_unavailable_token = f"The bank didn't accept that: {exc.bank_message} Nothing has been changed."
+                    # Not "nothing changed": live, the address PATCH saved and still answered
+                    # 409 "A record with the given value already exists".
+                    confirm_unavailable_token = (
+                        f"The bank reported a problem: {exc.bank_message} Please check in the app "
+                        "whether the change was saved."
+                    )
                 else:
                     confirm_unavailable_token = "That service isn't available right now. Please try again shortly."
                     confirm_unavailable_token = await _phrase(confirm_unavailable_token, req.message)
@@ -2993,7 +3023,12 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
     else:
         result = await _try_account_selection_completion(recent_turns, req.message, req.payload)
         if result is None:
-            result = await _llm_fill_pending_fields(recent_turns, req.message)
+            fill_context = recent_turns
+            if not recent_turns and session_turns and (
+                    last_session_classification.get("type"), last_session_classification.get("category"),
+                    last_session_classification.get("service")) == ("BANKING_SERVICE", "fees", "fee_quote"):
+                fill_context = session_turns[-1:]
+            result = await _llm_fill_pending_fields(fill_context, req.message)
         if result is not None:
             # A bare follow-up ("500", "the savings one") answered our question; the reply
             # must still answer what the customer originally asked.
@@ -3002,8 +3037,12 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
             # Nothing pending, but the last turn was ANSWERED: hand it over as context so
             # a follow-up that only changes a detail ("and for nagad?") stays on it.
             classify_context = recent_turns
+            # Only after a fee quote (for "ok send it"): passing every answered turn
+            # derailed new requests live (a beneficiary add after a dispute answer).
             if (not recent_turns and session_turns
                     and last_session_classification.get("type") == "BANKING_SERVICE"
+                    and (last_session_classification.get("category"),
+                         last_session_classification.get("service")) == ("fees", "fee_quote")
                     and last_session_classification.get("request") is not None):
                 classify_context = session_turns[-1:]
             result = await classify(req.message, recent_turns=classify_context)

@@ -478,7 +478,9 @@ def test_confirmation_yes_rejected_by_bank_shows_its_message(client, bank):
     bank.fulfill_errors[("profile_update", "update_nickname")] = AdapterRejectedError(
         "PATCH ... returned 409: Nickname already taken.", "Nickname already taken.")
     events = _post(client, "yes")
-    assert _token(events) == "The bank didn't accept that: Nickname already taken. Nothing has been changed."
+    assert _token(events) == (
+        "The bank reported a problem: Nickname already taken. Please check in the app whether "
+        "the change was saved.")
     assert _result(events)["type"] == "SERVICE_UNAVAILABLE"
 
 
