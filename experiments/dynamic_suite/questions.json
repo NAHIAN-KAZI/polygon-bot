@@ -32,7 +32,10 @@
  "1.5": {
   "intent": "ACCOUNT_INFO",
   "name": "1.5 Star account",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "quick_view_star"
+  ],
   "questions": {
    "one_word": "star",
    "two_words": "get star",
@@ -119,7 +122,10 @@
  "2.1": {
   "intent": "ATM_SUPPORT",
   "name": "2.1 Cash by code",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "cash_by_code"
+  ],
   "questions": {
    "one_word": "Cash",
    "two_words": "Withdraw cash",
@@ -161,7 +167,10 @@
  "3.1": {
   "intent": "CARD_ISSUE",
   "name": "3.1 Reset card PIN",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "card_pin_reset"
+  ],
   "questions": {
    "one_word": "Reset",
    "two_words": "Change PIN",
@@ -173,7 +182,10 @@
  "3.2": {
   "intent": "CARD_ISSUE",
   "name": "3.2 Unfreeze card",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "card_unfreeze"
+  ],
   "questions": {
    "one_word": "Unfreeze",
    "two_words": "Card Unfrozen",
@@ -260,7 +272,10 @@
  "4.2": {
   "intent": "CARD_MANAGEMENT",
   "name": "4.2 Unfreeze card",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "card_unfreeze"
+  ],
   "questions": {
    "one_word": "unfreeze",
    "two_words": "free my card",
@@ -272,7 +287,10 @@
  "4.3": {
   "intent": "CARD_MANAGEMENT",
   "name": "4.3 Close card",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "card_close"
+  ],
   "questions": {
    "one_word": "CLOSE",
    "two_words": "Close card",
@@ -284,7 +302,10 @@
  "4.4": {
   "intent": "CARD_MANAGEMENT",
   "name": "4.4 Contactless on/off",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "card_contactless"
+  ],
   "questions": {
    "one_word": "Disable",
    "two_words": "Contactless off",
@@ -296,7 +317,10 @@
  "4.5": {
   "intent": "CARD_MANAGEMENT",
   "name": "4.5 International transaction on/off",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "card_international"
+  ],
   "questions": {
    "one_word": "Turn",
    "two_words": "On/Off",
@@ -308,7 +332,10 @@
  "4.6": {
   "intent": "CARD_MANAGEMENT",
   "name": "4.6 Reset card PIN",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "card_pin_reset"
+  ],
   "questions": {
    "one_word": "Reset",
    "two_words": "Change PIN",
@@ -320,7 +347,10 @@
  "4.7": {
   "intent": "CARD_MANAGEMENT",
   "name": "4.7 Limit change — submit",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "card_limit_change"
+  ],
   "questions": {
    "one_word": "Submit",
    "two_words": "Change limit",
@@ -347,7 +377,10 @@
  "4.9": {
   "intent": "CARD_MANAGEMENT",
   "name": "4.9 Limit change — cancel",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "card_limit_cancel"
+  ],
   "questions": {
    "one_word": "Cancel",
    "two_words": "Limit change",
@@ -374,7 +407,10 @@
  "4.11": {
   "intent": "CARD_MANAGEMENT",
   "name": "4.11 Apply for debit card",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "card_apply"
+  ],
   "questions": {
    "one_word": "Card",
    "two_words": "Debit card",
@@ -386,7 +422,10 @@
  "4.13": {
   "intent": "CARD_MANAGEMENT",
   "name": "4.13 Apply for prepaid card",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "card_apply"
+  ],
   "questions": {
    "one_word": "Card",
    "two_words": "Prepaid Card",
@@ -398,7 +437,10 @@
  "4.15": {
   "intent": "CARD_MANAGEMENT",
   "name": "4.15 Virtual card — submit",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "card_apply"
+  ],
   "questions": {
    "one_word": "Card",
    "two_words": "Virtual card",
@@ -425,7 +467,10 @@
  "4.17": {
   "intent": "CARD_MANAGEMENT",
   "name": "4.17 Virtual card — cancel",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "card_virtual_cancel"
+  ],
   "questions": {
    "one_word": "Cancel",
    "two_words": "Virtual card",
@@ -437,7 +482,10 @@
  "4.19": {
   "intent": "CARD_MANAGEMENT",
   "name": "4.19 Star card",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "quick_view_star"
+  ],
   "questions": {
    "one_word": "Star",
    "two_words": "Get Star card",
@@ -449,7 +497,10 @@
  "4.20": {
   "intent": "CARD_MANAGEMENT",
   "name": "4.20 Credit card bill payment (card service)",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "credit_card_pay"
+  ],
   "questions": {
    "one_word": "Pay",
    "two_words": "card bill",
@@ -461,7 +512,10 @@
  "4.21": {
   "intent": "CARD_MANAGEMENT",
   "name": "4.21 Credit card bill payment (bill service)",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "other_card_pay"
+  ],
   "questions": {
    "one_word": "Pay",
    "two_words": "CC bill",
@@ -473,7 +527,10 @@
  "4.22": {
   "intent": "CARD_MANAGEMENT",
   "name": "4.22 QR payment cards — list",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "qr_payment_cards"
+  ],
   "questions": {
    "one_word": "cards",
    "two_words": "payment list",
@@ -485,7 +542,10 @@
  "4.23": {
   "intent": "CARD_MANAGEMENT",
   "name": "4.23 QR payment card — enable/disable",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "qr_payment_cards"
+  ],
   "questions": {
    "one_word": "Enable",
    "two_words": "Turn off QR",
@@ -512,7 +572,10 @@
  "5.2": {
   "intent": "CARD_REPLACEMENT",
   "name": "5.2 Cancel replacement request",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "replacement_cancel"
+  ],
   "questions": {
    "one_word": "Cancel",
    "two_words": "Replace now",
@@ -659,7 +722,10 @@
  "7.9": {
   "intent": "EDIT_PERSONAL_DETAILS",
   "name": "7.9 Submit KYC",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "kyc_submit"
+  ],
   "questions": {
    "one_word": "Submit",
    "two_words": "Do KYC",
@@ -686,7 +752,10 @@
  "7.11": {
   "intent": "EDIT_PERSONAL_DETAILS",
   "name": "7.11 Profile change — submit",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "profile_change_request"
+  ],
   "questions": {
    "one_word": "Update",
    "two_words": "Profile info",
@@ -713,7 +782,10 @@
  "7.13": {
   "intent": "EDIT_PERSONAL_DETAILS",
   "name": "7.13 Contact priority — submit",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "contact_priority_change"
+  ],
   "questions": {
    "one_word": "help",
    "two_words": "need assistance",
@@ -953,7 +1025,10 @@
  "14.4": {
   "intent": "TRANSFER",
   "name": "14.4 Other banks list",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "other_banks_list"
+  ],
   "questions": {
    "one_word": "List",
    "two_words": "Other banks",
@@ -965,7 +1040,10 @@
  "14.5": {
   "intent": "TRANSFER",
   "name": "14.5 Gift transfer",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "gift_transfer"
+  ],
   "questions": {
    "one_word": "Transfer",
    "two_words": "Gift money",
@@ -1016,7 +1094,10 @@
  "14.9": {
   "intent": "TRANSFER",
   "name": "14.9 Email transfer — create",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "email_transfer_create"
+  ],
   "questions": {
    "one_word": "Transfer",
    "two_words": "Money to account",
@@ -1058,7 +1139,10 @@
  "14.12": {
   "intent": "TRANSFER",
   "name": "14.12 Email transfer — cancel",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "email_transfer_manage"
+  ],
   "questions": {
    "one_word": "Cancel",
    "two_words": "Transfer Email",
@@ -1070,7 +1154,10 @@
  "14.13": {
   "intent": "TRANSFER",
   "name": "14.13 Email transfer — resend",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "email_transfer_manage"
+  ],
   "questions": {
    "one_word": "Transfer",
    "two_words": "Resend Money",
@@ -1097,7 +1184,10 @@
  "14.16": {
   "intent": "TRANSFER",
   "name": "14.16 QR pay",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "qr_payment"
+  ],
   "questions": {
    "one_word": "Pay",
    "two_words": "Quick Pay",
@@ -1109,7 +1199,10 @@
  "14.17": {
   "intent": "TRANSFER",
   "name": "14.17 QR parse",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "qr_payment"
+  ],
   "questions": {
    "one_word": "QRP",
    "two_words": "Scan QR",
@@ -1166,7 +1259,10 @@
  "14.21": {
   "intent": "TRANSFER",
   "name": "14.21 Beneficiary — edit",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "beneficiary_edit"
+  ],
   "questions": {
    "one_word": "Beneficiary",
    "two_words": "Edit beneficiary",
@@ -1178,7 +1274,10 @@
  "14.22": {
   "intent": "TRANSFER",
   "name": "14.22 Beneficiary — delete",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "beneficiary_delete"
+  ],
   "questions": {
    "one_word": "Delete",
    "two_words": "Remove it",
@@ -1190,7 +1289,10 @@
  "14.23": {
   "intent": "TRANSFER",
   "name": "14.23 Beneficiary — upload/change photo",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "beneficiary_photo"
+  ],
   "questions": {
    "one_word": "Photo",
    "two_words": "Beneficiary photo",
@@ -1202,7 +1304,10 @@
  "14.24": {
   "intent": "TRANSFER",
   "name": "14.24 Beneficiary — remove photo",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "beneficiary_photo"
+  ],
   "questions": {
    "one_word": "Remove",
    "two_words": "photo gone",
@@ -1214,7 +1319,10 @@
  "14.25": {
   "intent": "TRANSFER",
   "name": "14.25 Beneficiary — pin/unpin",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "beneficiary_pin"
+  ],
   "questions": {
    "one_word": "Beneficiary",
    "two_words": "unpin beneficiary",
@@ -1241,7 +1349,10 @@
  "14.28": {
   "intent": "TRANSFER",
   "name": "14.28 My transfer limit — request change",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "transfer_limit_change"
+  ],
   "questions": {
    "one_word": "Raise",
    "two_words": "Transfer limit increase",
@@ -1253,7 +1364,10 @@
  "14.29": {
   "intent": "TRANSFER",
   "name": "14.29 My transfer limit — cancel pending change",
-  "expected": "NOT_IN_CHAT",
+  "expected": [
+   "app_actions",
+   "transfer_limit_change"
+  ],
   "questions": {
    "one_word": "Cancel",
    "two_words": "Transfer limit",

@@ -6,6 +6,8 @@ expectations only -- the bot itself has no such table).
   KB                                  knowledge-base / off-topic / greeting style answer
 Keyed by the row's number prefix ("1.6") or its name for unnumbered rows.
 """
+from app.banking import ui_actions
+
 NOT_IN_CHAT = "NOT_IN_CHAT"
 KB = "KB"
 
@@ -58,3 +60,9 @@ EXTRA_ROWS = [
 
 def key_of(name: str) -> str:
     return name if name.startswith("—") else name.split(" ", 1)[0]
+
+
+# T-79: rows the chat hands to the app are expected to return the matching app action.
+for _action in ui_actions.UI_ACTIONS.values():
+    for _row in _action.rows:
+        EXPECT[_row] = (ui_actions.CATEGORY, _action.id)

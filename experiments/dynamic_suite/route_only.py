@@ -14,6 +14,7 @@ from collections import Counter
 from pathlib import Path
 
 import app.banking.taxonomy as taxonomy_module
+from app.banking import ui_actions
 from app.banking.routing import BankingService, Clarification, KbQuestion, UnknownService, classify
 from experiments.dynamic_suite.checks import judge
 
@@ -38,6 +39,8 @@ async def main():
     arg = lambda name: set(sys.argv[sys.argv.index(name) + 1].split(",")) if name in sys.argv else set()
     only, styles = arg("--only"), arg("--styles")
     cached = json.loads(SNAPSHOT.read_text())
+    if not any(c['id'] == ui_actions.CATEGORY for c in cached['categories']):  # snapshot predates the registry
+        cached['categories'].append(ui_actions.catalog_category())
     taxonomy_module._cache = cached
     taxonomy_module._index = taxonomy_module._build_index(cached["categories"])
     rows = json.loads(QUESTIONS.read_text())

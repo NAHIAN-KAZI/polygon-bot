@@ -1,7 +1,7 @@
 """Single-turn live suite: every row of INTENT_IMPLEMENTATION_STATUS.md x 5 question
 styles, each in a fresh conversation, scored on the route and the reply.
 
-  python -m experiments.dynamic_suite.run_single [--only 1.6,4.8] [--styles one_word,casual] [--through FEES]
+  python -m experiments.dynamic_suite.run_single [--only 1.6,4.8] [--styles one_word,casual] [--through FEES] [--rerun-not-passed earlier.jsonl]
 
 Needs EVAL_USERNAME / EVAL_PASSWORD (EVAL_API_KEY defaults to the app's key). Nothing
 is ever confirmed or submitted: a question that opens a change flow is dropped by the
@@ -43,6 +43,10 @@ async def ask(client, state, message):
 async def main():
     only = set(sys.argv[sys.argv.index("--only") + 1].split(",")) if "--only" in sys.argv else set()
     styles = set(sys.argv[sys.argv.index("--styles") + 1].split(",")) if "--styles" in sys.argv else set()
+    rerun = None
+    if "--rerun-not-passed" in sys.argv:  # re-ask only what did not pass in an earlier run
+        earlier = Path(sys.argv[sys.argv.index("--rerun-not-passed") + 1])
+        rerun = {(r["row"], r["style"]) for r in map(json.loads, earlier.read_text().splitlines()) if r["status"] != "PASS"}
     through = sys.argv[sys.argv.index("--through") + 1] if "--through" in sys.argv else None  # last intent to run, in doc order
     rows = json.loads(QUESTIONS.read_text())
     OUT.mkdir(parents=True, exist_ok=True)
@@ -64,7 +68,7 @@ async def main():
                     finished = True  # first row after the last wanted intent
                     continue
                 for style, question in row["questions"].items():
-                    if (styles and style not in styles) or (key, style) in done:
+                    if (styles and style not in styles) or (key, style) in done or (rerun is not None and (key, style) not in rerun):
                         continue
                     text, result, secs = await ask(client, state, question)
                     expected = tuple(row["expected"]) if isinstance(row["expected"], list) else row["expected"]
