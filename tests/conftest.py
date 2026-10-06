@@ -82,6 +82,20 @@ def _no_generated_clarifications(monkeypatch):
 
     monkeypatch.setattr(chat_module, "_llm_fill_pending_fields", _no_fill)
 
+    # Looking for still-missing required fields in the SAME message is a model call too:
+    # off by default (the classification stands); tests of it capture the real function.
+    async def _unchanged(result, message):
+        return result
+
+    monkeypatch.setattr(chat_module, "_fill_known_from_message", _unchanged)
+
+    # Telling "unfreeze" apart from "freeze" is a model call: off by default (never an
+    # undo request); tests of it patch httpx or this function explicitly.
+    async def _no_undo(messages):
+        return None
+
+    monkeypatch.setattr(chat_module, "_undo_request", _no_undo)
+
     # Streamed reply: tests use the non-streamed path (same prompt and checks),
     # which they already fake via httpx.AsyncClient.post.
     async def _one_piece(message, service, subservice, data):

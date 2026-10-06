@@ -258,11 +258,14 @@ def test_foreign_script_and_repeated_quote_guards():
 
 def test_dispute_summary_shows_only_the_account_ending():
     kind, facts, must = chat._dispute_summary_say(
-        {"accountNumber": "100126000056", "transactionReferenceNo": "TXN1", "remarks": "not received"})
+        {"accountNumber": "100126000056", "transactionReferenceNo": "TXN1",
+         "transactionSummary": "Tk 5.00 ATM debit on 2026-10-01", "remarks": "not received"})
     assert kind == "summary"
     assert must == {"account ending": "0056"}
     assert "100126000056" not in repr((facts, must))
-    assert facts["transaction"] == "TXN1"
+    # the customer sees what the transaction was, never its raw reference id
+    assert facts["transaction"] == "Tk 5.00 ATM debit on 2026-10-01"
+    assert "TXN1" not in repr((facts, must))
     assert facts["their reason"] == "not received"
     assert facts["done in chat"].startswith("no")
 

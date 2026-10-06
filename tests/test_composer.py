@@ -240,7 +240,7 @@ def test_build_messages_order_example_then_customer_then_facts_then_task_then_re
     user = _user(build_messages("answer", {"balance": "Tk 500"}, "what is my balance",
                                 [("Assistant", "earlier")], {}))
     marks = [user.index(x) for x in (
-        "Here is an example", "Now the real one.", "Conversation so far:",
+        "Here is an example", "Now the real one.", "Earlier in this chat",
         "Customer: what is my balance", 'Facts (JSON): {"balance": "Tk 500"}', "Your task:")]
     assert marks == sorted(marks)
     assert user.endswith("Reply:")

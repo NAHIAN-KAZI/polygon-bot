@@ -35,6 +35,7 @@ from app.banking.routing import (
     fee_transaction_types,
     _CLARIFICATION_FALLBACK,
 )
+from app.banking import ui_actions
 from app.banking.session import ChatTurn, get_classification_context, get_session, record_turn
 from app.banking.taxonomy import get_taxonomy, is_valid_path
 from app.config import settings
@@ -209,6 +210,9 @@ def _missing_payload_fields(category: str, service: str, payload: dict | None) -
     required = _REQUIRED_PAYLOAD_FIELDS.get((category, service))
     if not required:
         return []
+    # What the bank already knows is never asked of the customer, even if the lookup failed:
+    # the app screen lets them pick the account and transaction.
+    required = tuple(f for f in required if f not in _BANK_KNOWN_FIELDS.get((category, service), ()))
     payload = payload or {}
     return [field for field in required if not payload.get(field)]
 
@@ -270,7 +274,7 @@ def _known_field_phrases(payload: dict | None) -> list[str]:
         phrases.append(f"card ending {str(card_last4)[-4:]}")
     for field, label in (
         ("nickname", "beneficiary name"),
-        ("transactionReferenceNo", "transaction reference"),
+        ("transactionSummary", "transaction"),
         ("reason", "reason"),
         ("remarks", "dispute reason"),
     ):
@@ -843,6 +847,58 @@ def _profile_photo_outcome(category, service, subservice) -> _TurnOutcome:
     )
 
 
+_UI_AMOUNT_FIELDS = ("amount", "requestedLimit", "newLimit")
+
+
+def _ui_prefill(action: "ui_actions.UiAction", payload: dict | None, message: str) -> dict:
+    """The optional fields the screen can start with: only values the customer actually wrote
+    (an amount is a number they wrote times a power of ten; digits appear in their message; free
+    text is in their own words). Anything else the classifier guessed is dropped."""
+    out: dict = {}
+    wrote_digits = re.sub(r"\D", "", message or "")
+    for field, _meaning in action.prefill:
+        value = (payload or {}).get(field)
+        if value in (None, "", [], {}):
+            continue
+        text = str(value).strip()
+        if field in _UI_AMOUNT_FIELDS:
+            if not _amount_supported(value, message):
+                continue
+        elif field.endswith("Last4") or field == "recipientMobile":
+            digits = re.sub(r"\D", "", text)
+            digits = digits[-4:] if field.endswith("Last4") else digits
+            if not digits or digits not in wrote_digits:
+                continue
+            value = digits
+        elif not _grounded(text, message):
+            continue
+        out[field] = value
+    return out
+
+
+def _ui_action_outcome(action: "ui_actions.UiAction", payload: dict | None, message: str) -> _TurnOutcome:
+    """A request the chat does not carry out (T-79): no bank call. The app gets the screen to open
+    (with whatever the customer already said), or the information to show; the reply is composed."""
+    prefill = _ui_prefill(action, payload, message)
+    ui = {"kind": action.kind, "title": action.name, "screen": action.screen, "route": action.route,
+          "prefill": prefill or None, "needs": action.needs}
+    if action.kind == "screen":
+        say = _say("redirect", screen=f"the {action.name} screen in the app, which opens next",
+                   what_they_will_do_there=action.needs, already_filled_in=prefill or None,
+                   done_in_chat="no; they finish it in the app")
+    elif action.kind == "unavailable":
+        say = _say("not_done", what=action.name, why=action.needs, changed="nothing")
+    else:
+        say = _say("not_in_chat", request=action.name, what_to_know=action.needs,
+                   where="inside the app")
+    return _TurnOutcome(
+        "APP_ACTION", say, ui_actions.CATEGORY, action.id, None,
+        result_payload={"ui": ui, "executed": False},
+        routing={"category": ui_actions.CATEGORY, "service": action.id, "subservice": None,
+                 "action": action.id},
+    )
+
+
 def _contact_otp_phone(customer_identity, key: tuple[str, str], payload: dict | None) -> str | None:
     """Where the code goes: always the customer's CURRENT registered phone (from the
     verified JWT, never request input). The bank binds the verification token to the
@@ -1059,6 +1115,43 @@ async def _llm_fill_pending_fields(recent_turns: list[ChatTurn], message: str) -
     fields = list(last.get("missingFields") or [])
     if not fields:
         return None
+    return await _fill_fields(key, last.get("subservice"), dict(last.get("payload") or {}), fields,
+                              str(last.get("question")), message)
+
+
+# Fields that are free text in the customer's own words: a value must come from what they wrote.
+_OWN_WORDS_FIELDS = ("remarks", "reason", "description", "nickname", "nickName")
+# Fields the bank already knows (looked up from their own data), so they're never asked of the customer.
+_BANK_KNOWN_FIELDS = {("service_requests", "raise_dispute"): ("accountNumber", "transactionReferenceNo")}
+
+
+async def _fill_known_from_message(result, message: str):
+    """The customer often says it all in one message ("my money didn't reach my bKash
+    account on 10 Feb"), but the classifier only fills some fields. Before asking for
+    a missing required field, let the model look for it in the SAME message -- so the
+    bot never asks what they already told it. Returns the result unchanged when nothing
+    more is found."""
+    if not isinstance(result, BankingService):
+        return result
+    key = (result.category, result.service)
+    required = _REQUIRED_PAYLOAD_FIELDS.get(key)
+    if not required or key in _NO_FOLLOW_UP_KEYS:
+        return result
+    payload = dict(result.payload or {})
+    skip = _BANK_KNOWN_FIELDS.get(key, ())
+    missing = [f for f in required if not payload.get(f) and f not in skip]
+    if not missing:
+        return result
+    filled = await _fill_fields(key, result.subservice, payload, missing,
+                                "(the customer's request; nothing has been asked yet)", message)
+    return filled if filled is not None else result
+
+
+async def _fill_fields(key: tuple, subservice, payload: dict, fields: list[str], question: str,
+                       message: str) -> BankingService | None:
+    """The model fills only `fields` from `message`; every value is checked (a transfer type is
+    a live id, a wallet was named, an amount is a number they wrote times a power of ten, free
+    text comes from their own words). Nothing filled -> None."""
     valid_types = fee_transaction_types() if "transactionType" in fields else []
     lines = []
     for field in fields:
@@ -1069,7 +1162,7 @@ async def _llm_fill_pending_fields(recent_turns: list[ChatTurn], message: str) -
             line += f" — {AMOUNT_GUIDANCE}"
         lines.append(line)
     prompt = (
-        f"A bank chat assistant asked the customer: \"{last.get('question')}\"\n"
+        f"A bank chat assistant asked the customer: \"{question}\"\n"
         "It needs these details:\n" + "\n".join(lines) + "\n\n"
         f"The customer replied: \"{_LONG_DIGITS_RE.sub(_mask_digit_run, message)}\"\n\n"
         "Fill ONLY the details the reply actually gives; leave out anything it doesn't. "
@@ -1107,11 +1200,12 @@ async def _llm_fill_pending_fields(recent_turns: list[ChatTurn], message: str) -
                 if value in wallets and not _grounded(
                         _subservice_name("transfer", "wallet_transfer", value) or value, message):
                     continue
+            if field in _OWN_WORDS_FIELDS and not _grounded(str(value), message):
+                continue
             filled[field] = value
     if not filled:
         return None
-    payload = dict(last.get("payload") or {})
-    return BankingService(key[0], key[1], last.get("subservice"), {**payload, **filled})
+    return BankingService(key[0], key[1], subservice, {**payload, **filled})
 
 
 def _candidate_number(candidate: dict) -> str:
@@ -1317,6 +1411,37 @@ async def _freeze_request_facts(messages: list[str]) -> tuple[str | None, str | 
     )
 
 
+async def _undo_request(messages: list[str]) -> str | None:
+    """The customer's own words asking for a blocked card to be made usable again
+    (unfreeze, unblock, reactivate, release), or None. The bank's service is named
+    "freeze/unfreeze", so the classifier sends both here; this is the one place that
+    tells them apart, by extracting a quote (which the 8B does reliably) rather than
+    judging yes/no. Any failure returns None."""
+    said = "\n".join(f'- "{_LONG_DIGITS_RE.sub(_mask_digit_run, m)}"' for m in messages)
+    prompt = (
+        f"A bank customer wrote these chat messages:\n{said}\n\n"
+        "Copy, exactly as written, the words in which the customer asks for a blocked or frozen "
+        "card to be made usable again (unfreeze, unblock, reactivate, release). Use null when "
+        "they do not ask for that.\n"
+        'Reply only with JSON: {"undo_request": "<words>" or null}'
+    )
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.post(
+                f"{settings.OLLAMA_BASE_URL}/api/generate",
+                json={"model": settings.OLLAMA_MODEL, "prompt": prompt, "stream": False, "format": "json",
+                      "think": settings.OLLAMA_THINK,
+                      "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0}},
+            )
+            resp.raise_for_status()
+            parsed = json.loads(resp.json().get("response") or "{}")
+    except Exception:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    return _grounded(_quoted(parsed.get("undo_request")), " ".join(messages))
+
+
 def _grounded(quote: str | None, said: str) -> str | None:
     """Keep a quote only if most of its words really appear in what the customer
     wrote -- the model otherwise invents "my card was stolen" for "freeze my card"."""
@@ -1329,6 +1454,12 @@ def _grounded(quote: str | None, said: str) -> str | None:
     return quote if sum(w in said_words for w in words) / len(words) >= 0.7 else None
 
 
+# A hint (not a sentence) for the composer, plus what they could mean: the generic clarification
+# block in _chat_stream words it once, for this message.
+_CARD_PROBLEM_HINT = "what is happening with their card (freezing or reporting is for a lost, stolen or misused card)"
+_CARD_PROBLEM_OPTIONS = ("a lost or stolen card", "freezing a card", "card details and requests")
+
+
 async def _ground_freeze_request(result, message: str, recent_turns: list[ChatTurn]):
     """Freeze only. The classifier invents a plausible reason ("lost") and routes
     vague card problems ("my card isn't working", "reset my PIN") to freeze. Keep the
@@ -1338,23 +1469,18 @@ async def _ground_freeze_request(result, message: str, recent_turns: list[ChatTu
     if key not in (_FREEZE_KEY, ("card_requests", "report_lost_card")):
         return result
     messages = [t.message for t in (recent_turns or [])[-2:] if t.message] + [message]
+    if key == _FREEZE_KEY and await _undo_request([message]):
+        # Unfreezing is done in the app: hand over to that app action (never start a freeze for it).
+        return BankingService(ui_actions.CATEGORY, "card_unfreeze", None, None)
     reason, block_request = await _freeze_request_facts(messages)
     if key != _FREEZE_KEY:
         # Report lost/stolen (redirect to destroy + replace): only when the customer's
         # own words say what happened -- "my card isn't working" went here live.
         if reason or block_request:
             return result
-        return Clarification(question=await compose("clarify", {
-            "what is unclear": "what is happening with their card",
-            "note": "reporting a card is only for a card that is lost, stolen or misused",
-            "can help with": ["a lost or stolen card", "freezing a card", "card details and requests"],
-        }, message=message))
+        return Clarification(_CARD_PROBLEM_HINT, _CARD_PROBLEM_OPTIONS)
     if not reason and not block_request:
-        return Clarification(question=await compose("clarify", {
-            "what is unclear": "what is happening with their card",
-            "note": "freezing is for a lost, stolen or misused card",
-            "can help with": ["a lost or stolen card", "freezing a card", "card details and requests"],
-        }, message=message))
+        return Clarification(_CARD_PROBLEM_HINT, _CARD_PROBLEM_OPTIONS)
     payload = dict(result.payload or {})
     payload.pop("reason", None)
     if reason:
@@ -2010,7 +2136,7 @@ def _dispute_summary_say(payload: dict) -> tuple:
     """The dispute is never submitted in chat: the customer finishes it in the app."""
     return _say("summary", {"account ending": _tail(payload.get("accountNumber"))},
                 request="raise a dispute about a transaction",
-                transaction=payload.get("transactionSummary") or payload.get("transactionReferenceNo"),
+                transaction=payload.get("transactionSummary"),
                 their_reason=payload.get("remarks"),
                 where_to_finish="the dispute screen in the app, which opens next",
                 done_in_chat="no; they submit it in the app")
@@ -2465,6 +2591,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
             result = _carry_forward_gathered(result, classify_context)
             result = await _ground_freeze_request(result, req.message, recent_turns)
             result = _normalize_fee_type(result, req.message)
+            result = await _fill_known_from_message(result, req.message)
 
     result = _clean_extracted_fields(result)
     result = _normalize_change_request(result)
@@ -2483,13 +2610,17 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
     if isinstance(result, Clarification) and _foreign_script(result.question, req.message):
         # Live: Banglish typed in Latin letters came back as garbled Bengali script.
         result = Clarification(question=_CLARIFICATION_FALLBACK)
-    if isinstance(result, Clarification) and result.question == _CLARIFICATION_FALLBACK:
-        # The classifier couldn't word a question (or its wording was rejected):
-        # compose one for this message instead of a fixed sentence.
+    if isinstance(result, Clarification):
+        # Always worded by the composer for THIS message: the classifier's own question is only
+        # a hint of what is unclear, and the options (the services it could have meant) let the
+        # reply offer concrete choices instead of "what do you need?".
+        hint = None if result.question == _CLARIFICATION_FALLBACK else result.question
         result = Clarification(question=await say_text(_say(
-            "clarify", what_is_unclear="what the customer would like to do",
-            can_help_with=["balance and transactions", "transfers and fees", "cards",
-                           "disputes and complaints", "profile details"])))
+            "clarify", what_is_unclear=hint or "what the customer would like to do",
+            could_mean=list(result.options) or None,
+            can_help_with=None if result.options else [
+                "balance and transactions", "transfers and fees", "cards",
+                "disputes and complaints", "profile details"])), options=result.options)
     if isinstance(result, Clarification):
         yield _sse("token", {"token": result.question})
         yield _result_event("CLARIFICATION_REQUIRED", None, None, None)
@@ -2804,6 +2935,11 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                         latency_ms=(time.monotonic() - turn_started_at) * 1000,
                         request_id=request_id,
                     )
+                elif category == ui_actions.CATEGORY and ui_actions.get(service) is not None:
+                    app_outcome = _ui_action_outcome(ui_actions.get(service), payload, req.message)
+                    async for chunk in _emit_outcome(app_outcome, request_id, customer_identity, turn_started_at, message=composer_message, history=history):
+                        yield chunk
+                    turn_classification = app_outcome.classification()
                 elif (category, service) in (_REPORT_LOST_KEY, _PHOTO_KEY) or (category, service) in _CONTACT_KEYS:
                     # T-75: report lost card / profile photo = redirect only (no bank
                     # call); email/mobile = OTP first. Fixed wording (caution / security).

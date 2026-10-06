@@ -3,6 +3,7 @@ import logging
 
 import httpx
 
+from app.banking import ui_actions
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -145,6 +146,9 @@ _SYNTHETIC_CATEGORIES = [
         ],
     },
 ]
+
+# T-79: requests the chat does not carry out; each hands the app a screen or information.
+_SYNTHETIC_CATEGORIES.append(ui_actions.catalog_category())
 
 
 async def _fetch_json(client: httpx.AsyncClient, path: str) -> dict:

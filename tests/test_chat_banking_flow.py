@@ -120,7 +120,9 @@ def test_clarification_yields_question_then_result(client, monkeypatch):
     assert [name for name, _ in events] == ["token", "result", "done"]
 
     token_event = next(data for name, data in events if name == "token")
-    assert token_event["token"] == "Which account would you like to check?"
+    # Composed for this message: the classifier's question is only the hint of what is unclear.
+    assert token_event["token"].startswith("clarify:")
+    assert "what is unclear: Which account would you like to check?" in token_event["token"]
 
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "CLARIFICATION_REQUIRED"
@@ -830,7 +832,8 @@ def test_audit_called_once_for_clarification_includes_question(client, monkeypat
     assert len(audit_spy.calls) == 1
     args, kwargs = audit_spy.calls[0]
     _, turn_classification = args
-    assert turn_classification["question"] == "Which account would you like to check?"
+    assert turn_classification["question"].startswith("clarify:")
+    assert "Which account would you like to check?" in turn_classification["question"]
 
 
 def test_audit_called_once_for_unknown_service(client, monkeypatch):
@@ -1947,7 +1950,8 @@ def test_clarification_logs_type_and_token(client, monkeypatch):
     assert resp.status_code == 200
     branch_log = next(json.loads(msg) for _lvl, msg in log_calls if '"type"' in msg)
     assert branch_log["type"] == "CLARIFICATION_REQUIRED"
-    assert branch_log["token"] == "Which account would you like to check?"
+    assert branch_log["token"].startswith("clarify:")
+    assert "Which account would you like to check?" in branch_log["token"]
 
 
 def test_auth_required_logs_type_and_token(client, monkeypatch):

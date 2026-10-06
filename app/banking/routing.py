@@ -15,6 +15,7 @@ from dataclasses import dataclass
 import httpx
 
 from app.banking.session import ChatTurn
+from app.banking import ui_actions
 from app.banking.taxonomy import get_taxonomy, is_valid_path
 from app.config import settings
 
@@ -35,6 +36,9 @@ class BankingService:
 @dataclass(frozen=True)
 class Clarification:
     question: str
+    # Names of the services the customer could have meant (the stage-1 domain's services),
+    # so the reply can offer concrete choices instead of "what do you need?".
+    options: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -136,27 +140,27 @@ SERVICE_DESCRIPTIONS: dict[tuple[str, str], tuple[str, tuple[str, ...]]] = {
     # overlaps transaction_history (which already resolves/asks which account), and
     # two near-identical choices made llama3.1:8b ask "what do you mean" instead.
     # It stays in the taxonomy for explicit category+service requests.
-    ("card_info", "card_limit_requests"): ("status of their card limit-change requests", ()),
+    ("card_info", "card_limit_requests"): ('view the status of limit-change requests the customer has already submitted (it only shows existing requests)', ()),
     ("card_info", "card_products"): (
         "which cards the bank offers: any question about the card types/products available "
         "(not general knowledge — this bank's own live catalog)",
         (),
     ),
-    ("card_info", "virtual_card_requests"): ("status of their virtual card requests", ()),
-    ("card_info", "replacement_requests"): ("status of their card replacement requests", ()),
+    ("card_info", "virtual_card_requests"): ('view the status of virtual-card requests the customer has already submitted (it only shows existing requests)', ()),
+    ("card_info", "replacement_requests"): ('view the status of card replacement requests the customer has already submitted (it only shows existing requests)', ()),
     ("card_info", "credit_card_summary"): (
-        "credit card limit, outstanding/due amount, available credit",
+        "view the credit card's limit, outstanding or due amount and available credit (information only, no payment)",
         ("cardId",),
     ),
     ("card_info", "credit_card_statement"): (
-        "credit card statement (billed or unbilled) for a month",
+        'view the credit card statement (billed or unbilled) for a month (information only, no payment)',
         ("cardId", "month", "isBilled"),
     ),
     ("profile", "profile"): ("the customer's own profile details (name, email, phone)", ()),
     ("profile", "address"): ("the customer's registered address / KYC status", ()),
     ("profile", "contacts"): ('the phone numbers and email addresses registered for the customer (which numbers or emails are on their account)', ()),
-    ("profile", "profile_change_requests"): ("status of their profile change requests", ()),
-    ("profile", "contact_priority_requests"): ("status of their primary-contact change requests", ()),
+    ("profile", "profile_change_requests"): ('view the status of profile-change requests the customer has already submitted (it only shows existing requests)', ()),
+    ("profile", "contact_priority_requests"): ('view the status of primary-contact change requests the customer has already submitted (it only shows existing requests)', ()),
     ("transfer_info", "gifts_received"): ("money gifts the customer has RECEIVED from others (incoming only, never sending)", ()),
     ("transfer_info", "email_transfers"): ("history/status of their email transfers", ()),
     ("transfer_info", "qr_payment_history"): ("history of their QR payments", ()),
@@ -224,6 +228,13 @@ SERVICE_DESCRIPTIONS: dict[tuple[str, str], tuple[str, tuple[str, ...]]] = {
 # Stage 1 of classification: the model first picks ONE domain (small, easy
 # choice), then stage 2 picks the service among only that domain's services.
 # One prompt holding all ~35 services confused llama3.1:8b (90/107 on the eval).
+# T-79: every request the chat hands to the app (see ui_actions.py) is described like any service,
+# with the optional fields the model may fill from what the customer wrote.
+for _action in ui_actions.UI_ACTIONS.values():
+    SERVICE_DESCRIPTIONS[(ui_actions.CATEGORY, _action.id)] = (
+        _action.description, tuple(field for field, _ in _action.prefill))
+
+
 DOMAINS: dict[str, tuple[str, frozenset[tuple[str, str]]]] = {
     "accounts": (
         "their balance, their list of accounts, transaction history, statements and what they spent, their login activity, and which devices are logged in",
@@ -285,6 +296,10 @@ DOMAINS: dict[str, tuple[str, frozenset[tuple[str, str]]]] = {
         frozenset(),
     ),
 }
+
+
+for _domain, (_desc, _keys) in list(DOMAINS.items()):
+    DOMAINS[_domain] = (_desc, _keys | ui_actions.keys_for_domain(_domain))
 
 
 def fee_transaction_types(taxonomy: dict | None = None) -> list[str]:
@@ -404,11 +419,12 @@ def build_system_prompt(
         "and nothing the customer wants done) -> ask_clarification asking what exactly they "
         "need. Wanting to change a profile detail -> the matching profile_update service, "
         "never a lookup, with a new value in payload only if they wrote it.\n"
-        "6. The customer asks for something none of the services below does (for example "
-        "starring an account, closing a card, resetting a PIN, unfreezing a card, applying "
-        "for a product, cash by code) -> ask_clarification, saying in your own words that "
-        "this can be done in the app and asking what else they need. Never pick the "
-        "nearest-looking lookup for it.\n"
+        "6. The customer wants to DO something in the app that the app_actions services below "
+        "cover (change, cancel, apply, pay, reset, unfreeze, star, delete, submit...) -> the "
+        "matching app_actions service, with any detail they gave in payload. A lookup of what "
+        "they already have or submitted stays a lookup. Something no service below covers at "
+        "all -> ask_clarification, saying in your own words that this can be done in the app "
+        "and asking what else they need; never pick the nearest-looking lookup for it.\n"
         "7. General banking knowledge (other than fees), non-banking topics and abuse with no "
         "request -> answer_kb_question. A greeting, or a message with nothing to act on -> "
         "ask_clarification.\n\n"
@@ -524,11 +540,31 @@ async def _post_classification(messages: list[dict]) -> list[dict]:
     return data.get("message", {}).get("tool_calls") or []
 
 
+class _Domain(str):
+    """A DOMAINS key that also remembers what the customer wants from it: "see" (look at
+    information they have) or "do" (have something changed, created, cancelled, paid or sent).
+    A plain str everywhere else, so existing callers and test patches are unaffected."""
+    wants: str | None = None
+
+
+# Services that DO something (or start doing it); everything else in a domain only shows
+# information. Used to keep "I want to change my limit" away from "status of my limit requests".
+_DO_KEYS = frozenset({
+    ("card_services", "frezz_unfrezz"), ("card_requests", "report_lost_card"),
+    ("transfer", "bank_transfer"), ("transfer", "wallet_transfer"),
+    ("polygon_services", "beneficiary"), ("beneficiary_management", "beneficiary_add"),
+    ("support", "submit_complaint"), ("service_requests", "raise_dispute"),
+    ("profile_update", "update_nickname"), ("profile_update", "update_address"),
+    ("profile_update", "update_email"), ("profile_update", "update_mobile"),
+    ("profile_update", "update_profile_image"),
+}) | ui_actions.keys()
+
+
 _DOMAIN_EXAMPLES = (
-    ("blance", "accounts"),
-    ("amar card ta hariye gese", "cards"),
-    ("hi, last week i paid a shop and it got charged twice, what do i do", "disputes"),
-    ("what's the weather like", "general"),
+    ("blance", "accounts", "see"),
+    ("amar card ta hariye gese", "cards", "do"),
+    ("hi, last week i paid a shop and it got charged twice, what do i do", "disputes", "do"),
+    ("what's the weather like", "general", "see"),
 )
 
 
@@ -551,16 +587,19 @@ async def _pick_domain(message: str, recent_turns: list[ChatTurn] | None) -> str
         "two words, with typos or missing letters. Read a word by how it sounds, and Banglish "
         "by its English meaning.\n"
         "2. A banking word on its own belongs to its banking domain.\n"
-        "3. Choose the domain whose description covers what they want to see, do or fix.\n\n"
+        "3. Choose the domain whose description covers what they want to see, do or fix.\n"
+        '4. Also say what they want: "see" when they want to look at information they have (a '
+        'balance, a list, a status, a statement), or "do" when they want something changed, '
+        'created, cancelled, applied for, paid, sent, reset or fixed.\n\n'
         f"Domains:\n{domains}\n{context}\n"
-        'Reply only with JSON: {"domain": "<one domain key>"}'
+        'Reply only with JSON: {"domain": "<one domain key>", "wants": "see" or "do"}'
     )
     # Worked examples as earlier turns (a typo, Banglish, a messy request, a non-banking
     # message): the shape of a good answer for the 8B, not an exhaustive list.
     messages = [{"role": "system", "content": system}]
-    for sample, answer in _DOMAIN_EXAMPLES:
+    for sample, answer, wants in _DOMAIN_EXAMPLES:
         messages += [{"role": "user", "content": sample},
-                     {"role": "assistant", "content": json.dumps({"domain": answer})}]
+                     {"role": "assistant", "content": json.dumps({"domain": answer, "wants": wants})}]
     messages.append({"role": "user", "content": message})
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
@@ -576,10 +615,15 @@ async def _pick_domain(message: str, recent_turns: list[ChatTurn] | None) -> str
                 },
             )
             resp.raise_for_status()
-            domain = json.loads((resp.json().get("message") or {}).get("content") or "{}").get("domain")
+            parsed = json.loads((resp.json().get("message") or {}).get("content") or "{}")
+            domain = parsed.get("domain")
     except Exception:
         return None
-    return domain if domain in DOMAINS else None
+    if domain not in DOMAINS:
+        return None
+    picked = _Domain(domain)
+    picked.wants = parsed.get("wants") if parsed.get("wants") in ("see", "do") else None
+    return picked
 
 
 async def _domain_scope(
@@ -593,6 +637,13 @@ async def _domain_scope(
     if domain is None or domain in ("general", "other"):
         return None, True
     allowed = set(DOMAINS[domain][1])
+    wants = getattr(domain, "wants", None)
+    if wants == "do":
+        # Something to be changed, created or sent: not the lookups that only show status.
+        # (Kept only when the domain has such services, so a misjudgement can't empty the menu.)
+        allowed = (allowed & _DO_KEYS) or allowed
+    elif wants == "see":
+        allowed -= ui_actions.keys()
     # Fees and transfers are always offered together: "how much does it cost to send
     # 5000 to nagad?" reads like a transfer, and with the fee service missing from
     # stage 2 the model could only pick a transfer or ask.
@@ -637,10 +688,31 @@ def _send_after_fee_hint(previous: dict) -> str:
     )
 
 
+def _option_names(allowed: frozenset | None, limit: int = 8) -> tuple[str, ...]:
+    """Plain names (from the live catalog) of the services in `allowed`, for offering choices."""
+    if not allowed:
+        return ()
+    names: list[str] = []
+    for category in (get_taxonomy() or {}).get("categories", []):
+        for service in category.get("services", []):
+            if (category.get("id"), service.get("id")) in allowed and service.get("name") not in names:
+                names.append(service["name"])
+    return tuple(names[:limit])
+
+
 async def classify(
     message: str, recent_turns: list[ChatTurn] | None = None
 ) -> ClassificationResult:
     allowed, include_other = await _domain_scope(message, recent_turns)
+    result = await _classify_scoped(message, recent_turns, allowed, include_other)
+    if isinstance(result, Clarification) and not result.options:
+        return Clarification(result.question, _option_names(allowed))
+    return result
+
+
+async def _classify_scoped(
+    message: str, recent_turns: list[ChatTurn] | None, allowed: frozenset | None, include_other: bool
+) -> ClassificationResult:
     messages = [{
         "role": "system",
         "content": build_system_prompt(get_taxonomy(), allowed, include_other),

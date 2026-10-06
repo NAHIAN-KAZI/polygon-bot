@@ -124,7 +124,8 @@ def _history_block(history: Sequence[tuple[str, str]] | None) -> str:
     if not history:
         return ""
     lines = [f"{who}: {LONG_DIGITS_RE.sub(mask_digit_run, said)[:300]}" for who, said in history[-6:]]
-    return "Conversation so far:\n" + "\n".join(lines) + "\n\n"
+    return ("Earlier in this chat (context only; answer the customer's latest message below, "
+            "not these):\n" + "\n".join(lines) + "\n\n")
 
 
 # Kinds where every fact matters (safety, consent, irreversible steps): the model is
