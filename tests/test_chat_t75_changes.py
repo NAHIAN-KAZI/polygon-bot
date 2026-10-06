@@ -366,15 +366,6 @@ def bank(monkeypatch):
     return fake
 
 
-def _no_phrase(monkeypatch):
-    """_phrase must never reword a confirmation question -- fail loudly if called on one."""
-    async def guard(facts, customer_message):
-        assert "(yes/no)" not in facts, f"confirmation question was sent through _phrase: {facts}"
-        return facts
-
-    monkeypatch.setattr(chat_module, "_phrase", guard)
-
-
 # --- yes/no confirmations: complaint / nickname / address -------------------------
 
 CONFIRM_CASES = [
@@ -382,15 +373,15 @@ CONFIRM_CASES = [
         BankingService("support", "submit_complaint", None,
                        {"category": "service_quality", "description": "The branch staff were rude"}),
         ("support", "submit_complaint", {"category": "SERVICE_QUALITY", "description": "The branch staff were rude"}),
-        ['"The branch staff were rude"', "service quality"],
-        "Okay, I won't submit the complaint.",
+        ["complaint: The branch staff were rude", "complaint type: service quality"],
+        "submit complaint",
         id="complaint",
     ),
     pytest.param(
         BankingService("profile_update", "update_nickname", None, {"nickName": "Rafi"}),
         ("profile_update", "update_nickname", {"nickName": "Rafi"}),
-        ['"Rafi"'],
-        "Okay, I won't change your nickname.",
+        ["nickname: Rafi"],
+        "update nickname",
         id="nickname",
     ),
     pytest.param(
@@ -398,28 +389,29 @@ CONFIRM_CASES = [
                        {"presentAddress": "House 5, Road 7, Dhanmondi", "district": "Dhaka"}),
         ("profile_update", "update_address", {"presentAddress": "House 5, Road 7, Dhanmondi", "district": "Dhaka"}),
         ["present address: House 5, Road 7, Dhanmondi", "district: Dhaka"],
-        "Okay, I won't change your address.",
+        "update address",
         id="address",
     ),
 ]
 
 
 @pytest.mark.parametrize("route,expected_call,question_bits,decline", CONFIRM_CASES)
-def test_confirmation_yes_executes_once_with_payload(client, bank, monkeypatch, route, expected_call, question_bits, decline):
-    _no_phrase(monkeypatch)
+def test_confirmation_yes_executes_once_with_payload(client, bank, route, expected_call, question_bits, decline):
     bank.routes["please change"] = route
     events = _post(client, "please change this")
     result = _result(events)
     assert result["type"] == "CONFIRMATION_REQUIRED"
     question = _token(events)
-    assert question.endswith("(yes/no)")
+    # A yes/no that carries the exact values that will be saved.
+    assert question.startswith("confirm:")
+    assert "to confirm: say yes" in question and "to cancel: say no" in question
     for bit in question_bits:
         assert bit in question
     assert bank.mutating_calls() == []
 
     events = _post(client, "yes")
     assert _result(events)["type"] == "BANKING_SERVICE"
-    assert _token(events).startswith("Done")
+    assert _token(events).startswith("done:")
     assert bank.mutating_calls() == [expected_call]
     assert bank.classify_calls == ["please change this"]
 
@@ -429,7 +421,7 @@ def test_confirmation_no_never_executes(client, bank, route, expected_call, ques
     bank.routes["please change"] = route
     _post(client, "please change this")
     events = _post(client, "no")
-    assert _token(events) == decline
+    assert _token(events) == f"declined: what: {decline}"
     assert _result(events)["payload"] == {"executed": False, "cancelled": True}
     assert bank.mutating_calls() == []
     # Flow is over: a later "yes" doesn't revive it.
@@ -481,7 +473,8 @@ def test_short_unclear_reply_reasks_without_classifying(client, bank, reply):
     question = _token(first)
     events = _post(client, reply)
     assert _result(events)["type"] == "CONFIRMATION_REQUIRED"
-    assert _token(events) == f"Sorry, I didn't quite catch that — {question}"
+    # Re-asks the same yes/no, with the same exact values.
+    assert _token(events) == question
     assert bank.classify_calls == ["change my nickname"]
     assert bank.mutating_calls() == []
     # Still pending: a yes now executes.
@@ -503,8 +496,12 @@ def test_report_lost_card_with_card_known_never_calls_bank(client, bank):
     assert result["type"] == "BANKING_SERVICE"
     assert result["routing"]["action"] == "report_lost_card"
     assert result["payload"] == {"cardId": "41", "cardLast4": "0251", "reasonCode": "STOLEN", "executed": False}
-    assert "card ending 0251 is stolen" in _token(events)
-    assert "can't be undone" in _token(events)
+    token = _token(events)
+    assert token.startswith("caution:")
+    assert "card ending: 0251" in token
+    assert "reason: stolen" in token
+    assert "can it be undone: no" in token
+    assert "gentler option: freeze the card" in token
 
 
 def test_report_lost_card_resolves_single_card_via_lookup_only(client, bank):
@@ -535,7 +532,7 @@ def test_report_lost_card_without_cards(client, bank):
     bank.cards = []
     bank.routes["lost"] = BankingService("card_requests", "report_lost_card", None, {})
     events = _post(client, "I lost my card")
-    assert _token(events) == "You don't have any cards on file."
+    assert _token(events) == "answer: cards on file: none"
     assert _result(events)["payload"] == {"cards": []}
     assert bank.mutating_calls() == []
 
@@ -626,7 +623,8 @@ def test_wrong_code_reports_attempts_and_does_not_execute(client, bank, starter)
     assert result["type"] == "OTP_REQUIRED"
     assert result["payload"]["verificationStatus"] == "OTP_INCORRECT"
     assert result["payload"]["attemptsRemaining"] == 2
-    assert "2 attempts left" in _token(events)
+    assert _token(events).startswith("verify:")
+    assert "attempts left: 2" in _token(events)
     assert bank.fulfills == []
     assert len(bank.sends) == 1
     # Still pending: the right code then succeeds.
@@ -636,13 +634,14 @@ def test_wrong_code_reports_attempts_and_does_not_execute(client, bank, starter)
 
 
 @pytest.mark.parametrize("starter,decline", [
-    (_start_email, "Okay, I won't change your email address."),
-    (_start_mobile, "Okay, I won't change your mobile number."),
+    (_start_email, "new email: new@example.com"),
+    (_start_mobile, f"new mobile number: {NEW_PHONE}"),
 ])
 def test_cancel_stops_without_verify_or_change(client, bank, starter, decline):
     starter(client, bank)
     events = _post(client, "cancel")
-    assert _token(events) == decline
+    assert _token(events).startswith("declined:")
+    assert decline in _token(events)
     assert _result(events)["payload"] == {"executed": False, "cancelled": True}
     assert bank.verifies == [] and bank.fulfills == []
 
@@ -693,4 +692,6 @@ def test_change_failure_after_verified_otp_never_claims_success(client, bank, mo
     monkeypatch.setattr(chat_module, "fulfill_banking_service", failing)
     events = _post(client, "submit", {"otp": "123456"})
     assert _result(events)["type"] == "SERVICE_UNAVAILABLE"
-    assert "nothing has been changed" in _token(events)
+    token = _token(events)
+    assert token.startswith("unavailable:")
+    assert not token.startswith("done:")

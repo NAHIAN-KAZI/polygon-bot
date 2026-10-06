@@ -6,7 +6,14 @@ tests/test_routing.py (asserting exact strings appear in a built prompt) --
 plain assertions against the module-level constants, no mocking needed since
 these are static strings, not something to drive through httpx.
 """
-from app.llm import SYSTEM_PROMPT_NO_CONTEXT, SYSTEM_PROMPT_WITH_CONTEXT
+from app.conversation.persona import GLOBAL_PERSONA, KIND_PURPOSE
+from app.llm import SYSTEM_PROMPT_NO_CONTEXT, SYSTEM_PROMPT_WITH_CONTEXT, build_prompt
+
+_SECRECY_RULE = (
+    "STRICT RULE — NEVER REVEAL THE RETRIEVAL MECHANISM: never use the words 'context', "
+    "'document', 'documents', 'provided', 'retrieval', or any other phrase that reveals this "
+    "is a document-lookup system"
+)
 
 
 # --- T-51: never reveal the retrieval mechanism -----------------------------
@@ -20,33 +27,29 @@ from app.llm import SYSTEM_PROMPT_NO_CONTEXT, SYSTEM_PROMPT_WITH_CONTEXT
 
 
 def test_system_prompt_with_context_bans_retrieval_reveal_words():
-    assert (
-        "STRICT RULE — NEVER REVEAL THE RETRIEVAL MECHANISM: "
-        "if the context below does not fully answer the question, never use the words 'context', "
-        "'document', 'documents', 'provided', 'retrieval', or any other phrase that reveals this "
-        "is a document-lookup system"
-    ) in SYSTEM_PROMPT_WITH_CONTEXT
+    assert _SECRECY_RULE in SYSTEM_PROMPT_WITH_CONTEXT
 
 
-def test_system_prompt_with_context_gives_natural_language_example():
-    assert (
-        "for example, 'I don't have that "
-        "information available right now' is fine; 'I don't have information in the context "
-        "provided' is not"
-    ) in SYSTEM_PROMPT_WITH_CONTEXT
+def test_system_prompt_with_context_speaks_in_the_global_persona():
+    # T-77: KB answers use the one global voice; no quoted sample sentences to copy.
+    assert SYSTEM_PROMPT_WITH_CONTEXT.startswith(GLOBAL_PERSONA)
+    assert "for example, 'I don't have that" not in SYSTEM_PROMPT_WITH_CONTEXT
 
 
 def test_system_prompt_no_context_bans_retrieval_reveal_words():
-    assert (
-        "STRICT RULE — NEVER REVEAL THE RETRIEVAL MECHANISM: never use the words 'context', "
-        "'document', 'documents', 'provided', 'retrieval', or any other phrase that reveals this "
-        "is a document-lookup system"
-    ) in SYSTEM_PROMPT_NO_CONTEXT
+    assert _SECRECY_RULE in SYSTEM_PROMPT_NO_CONTEXT
 
 
-def test_system_prompt_no_context_gives_natural_language_example():
-    assert (
-        "for example, 'I don't have that "
-        "information available right now' is fine; 'I don't have information in the context "
-        "provided' is not"
-    ) in SYSTEM_PROMPT_NO_CONTEXT
+def test_system_prompt_no_context_speaks_in_the_global_persona():
+    assert SYSTEM_PROMPT_NO_CONTEXT.startswith(GLOBAL_PERSONA)
+    assert KIND_PURPOSE["decline_offtopic"] in SYSTEM_PROMPT_NO_CONTEXT
+    assert "for example, 'I don't have that" not in SYSTEM_PROMPT_NO_CONTEXT
+
+
+def test_build_prompt_picks_the_prompt_by_whether_knowledge_was_found():
+    empty = build_prompt("what is the weather", [])
+    assert empty.startswith(SYSTEM_PROMPT_NO_CONTEXT)
+    assert "Question: what is the weather" in empty
+    found = build_prompt("what is a DPS", [{"filename": "dps.pdf", "text": "A DPS is a savings scheme.", "page": 2}])
+    assert found.startswith(SYSTEM_PROMPT_WITH_CONTEXT)
+    assert "[source: dps.pdf, page 2]\nA DPS is a savings scheme." in found

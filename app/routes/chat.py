@@ -6,7 +6,6 @@ import re
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Callable
 
 import httpx
 from fastapi import APIRouter, Depends, Header
@@ -25,17 +24,24 @@ from app.banking.adapters.base import (
 )
 from app.banking.identity import extract_jwt, verify_jwt
 from app.banking.routing import (
+    AMOUNT_GUIDANCE,
+    SERVICE_DESCRIPTIONS,
     BankingService,
     Clarification,
     KbQuestion,
     UnknownService,
+    _subservice_ids,
     classify,
     fee_transaction_types,
     _CLARIFICATION_FALLBACK,
 )
 from app.banking.session import ChatTurn, get_classification_context, get_session, record_turn
-from app.banking.taxonomy import is_valid_path
+from app.banking.taxonomy import get_taxonomy, is_valid_path
 from app.config import settings
+from app.conversation.composer import (
+    _FOREIGN_CURRENCY, build_messages, check_reply, compose, compose_stream, facts_listing, generate_chat,
+    unsupported_numbers,
+)
 from app.embeddings import embed_text
 from app.llm import build_prompt, stream_generate
 from app.vectorstore import search
@@ -207,192 +213,10 @@ def _missing_payload_fields(category: str, service: str, payload: dict | None) -
     return [field for field in required if not payload.get(field)]
 
 
-def _fee_quote_clarification_question(payload: dict | None, subservice: str | None = None) -> str:
-    """Customer-friendly clarifying question for an incomplete fees/fee_quote payload,
-    mirroring the tone/wording of the fee_quote few-shot examples in
-    app/banking/routing.py's build_system_prompt() so this code-level guard's question is
-    indistinguishable in style from one the classifier itself would ask."""
-    payload = payload or {}
-    transaction_type = payload.get("transactionType")
-    amount = payload.get("amount")
-
-    if transaction_type and not amount:
-        friendly_type = str(transaction_type).replace("_", " ")
-        return (
-            f"Sure — how much would you like to send via {friendly_type}? I can give you "
-            "the exact fee once I know the amount."
-        )
-    if amount and not transaction_type:
-        amount_formatted = _format_bdt(amount) or str(amount)
-        return (
-            f"Sure — you'd like a fee quote for {amount_formatted}. Which transaction type "
-            "would you like that for? For example, a bank transfer, bKash, or another wallet?"
-        )
-    return (
-        "Sure — which transaction type would you like a fee quote for, and for what "
-        "amount? For example, a bank transfer, bKash, or another wallet?"
-    )
-
-
 # T-56: transfer/bank_transfer and transfer/wallet_transfer subservice ->
 # customer-facing display name maps, shared by both the clarification-question
 # builders below and the no-adapter confirmation summary built once the
 # payload is complete (see _transfer_summary_reply in _chat_stream).
-_BANK_TRANSFER_SUBSERVICE_NAMES: dict[str, str] = {
-    "own_account": "Own Account Transfer",
-    "city_account": "City Account Transfer",
-    "other_bank": "Other Bank Transfer",
-}
-
-_WALLET_PROVIDER_NAMES: dict[str, str] = {
-    "bkash": "bKash",
-    "nagad": "Nagad",
-    "rocket": "Rocket",
-    "upay": "Upay",
-}
-
-
-def _bank_transfer_display_name(subservice: str | None) -> str:
-    return _BANK_TRANSFER_SUBSERVICE_NAMES.get(subservice or "", "Bank Transfer")
-
-
-def _wallet_provider_display_name(subservice: str | None) -> str:
-    return _WALLET_PROVIDER_NAMES.get(subservice or "", (subservice or "wallet").replace("_", " ").title())
-
-
-def _bank_transfer_clarification_question(payload: dict | None, subservice: str | None = None) -> str:
-    """Clarifying question for an incomplete transfer/bank_transfer payload
-    (own_account/city_account/other_bank), mirroring _fee_quote_clarification_question's
-    style: names back whichever of accountNumber/amount is already known, or the
-    subservice itself if both are still missing."""
-    payload = payload or {}
-    account_number = payload.get("accountNumber")
-    amount = payload.get("amount")
-
-    if account_number and not amount:
-        return f"Sure — how much would you like to send to account {account_number}?"
-    if amount and not account_number:
-        amount_formatted = _format_bdt(amount) or str(amount)
-        return f"Sure — which account number would you like to send {amount_formatted} to?"
-    transfer_name = _bank_transfer_display_name(subservice)
-    return (
-        f"Sure — which account number would you like to send money to via {transfer_name}, "
-        "and how much?"
-    )
-
-
-def _wallet_transfer_clarification_question(payload: dict | None, subservice: str | None = None) -> str:
-    """Clarifying question for an incomplete transfer/wallet_transfer payload
-    (bkash/nagad/rocket/upay), mirroring _bank_transfer_clarification_question."""
-    payload = payload or {}
-    wallet_number = payload.get("walletNumber")
-    amount = payload.get("amount")
-    provider_name = _wallet_provider_display_name(subservice)
-
-    if wallet_number and not amount:
-        return f"Sure — how much would you like to send to your {provider_name} number {wallet_number}?"
-    if amount and not wallet_number:
-        amount_formatted = _format_bdt(amount) or str(amount)
-        return f"Sure — which {provider_name} number would you like to send {amount_formatted} to?"
-    return f"Sure — to which {provider_name} number would you like to send money, and how much?"
-
-
-def _freeze_card_reason_clarification_question(payload: dict | None, subservice: str | None = None) -> str:
-    """Clarifying question for a card-freeze request that's missing a reason.
-    Free-text, deliberately not a fixed enum -- the real FreezeCardRequest's
-    own `reasonCode` enum only has one value ("OTHER") today, so there's
-    nothing meaningful to offer as choices; the adapter sends "OTHER"
-    regardless (see FreezeCardAdapter's docstring) and this free-text reason
-    is for the customer-facing confirmation/audit trail only."""
-    payload = payload or {}
-    card_last4 = payload.get("cardLast4")
-    card_ref = f"card ending {card_last4}" if card_last4 else "card"
-    return f"Sure — what's the reason for freezing this {card_ref}?"
-
-
-def _beneficiary_add_clarification_question(payload: dict | None, subservice: str | None = None) -> str:
-    """Clarifying question for an incomplete beneficiary-add payload, mirroring
-    _bank_transfer_clarification_question's style: names back whichever of
-    nickname/accountNumber is already known."""
-    payload = payload or {}
-    nickname = payload.get("nickname")
-    account_number = payload.get("accountNumber")
-
-    if nickname and not account_number:
-        return f"Sure — what's the account number for {nickname}?"
-    if account_number and not nickname:
-        return "Sure — what name would you like to save this beneficiary under?"
-    return (
-        "Sure — what name would you like to save this beneficiary under, and what's their "
-        "account number?"
-    )
-
-
-def _dispute_clarification_question(payload: dict | None, subservice: str | None = None) -> str:
-    """Clarifying question for an incomplete service_requests/raise_dispute payload.
-    Mirrors the naming-back style of the other builders above, extended to this flow's
-    three gatherable fields (accountNumber, transactionReferenceNo, remarks) -- names back
-    whichever are already known, and asks only for whatever's still missing."""
-    payload = payload or {}
-    account_number = payload.get("accountNumber")
-    transaction_ref = payload.get("transactionReferenceNo")
-    remarks = payload.get("remarks")
-
-    known_parts = []
-    if account_number:
-        known_parts.append(f"account {account_number}")
-    if transaction_ref:
-        known_parts.append(f"transaction {transaction_ref}")
-    if remarks:
-        known_parts.append(f"reason: {remarks}")
-
-    missing_parts = []
-    if not account_number:
-        missing_parts.append("the account number")
-    if not transaction_ref:
-        missing_parts.append("the transaction reference number")
-    if not remarks:
-        missing_parts.append(
-            "the reason for the dispute (for example, you were charged but didn't get the "
-            "cash or service, or the amount looks wrong)"
-        )
-
-    if not missing_parts:
-        return "Could you share a few more details so I can help with that?"
-
-    if len(missing_parts) == 1:
-        missing_sentence = missing_parts[0]
-    elif len(missing_parts) == 2:
-        missing_sentence = " and ".join(missing_parts)
-    else:
-        missing_sentence = ", ".join(missing_parts[:-1]) + f", and {missing_parts[-1]}"
-
-    if known_parts:
-        return f"Sure — I have {', '.join(known_parts)}. Could you also share {missing_sentence}?"
-    return f"Sure — to raise a dispute, could you share {missing_sentence}?"
-
-
-_PAYLOAD_CLARIFICATION_BUILDERS: dict[tuple[str, str], Callable[[dict | None, str | None], str]] = {
-    ("fees", "fee_quote"): _fee_quote_clarification_question,
-    ("transfer", "bank_transfer"): _bank_transfer_clarification_question,
-    ("transfer", "wallet_transfer"): _wallet_transfer_clarification_question,
-    ("card_services", "frezz_unfrezz"): _freeze_card_reason_clarification_question,
-    ("beneficiary_management", "beneficiary_add"): _beneficiary_add_clarification_question,
-    ("service_requests", "raise_dispute"): _dispute_clarification_question,
-}
-
-
-def _payload_clarification_question(
-    category: str, service: str, payload: dict | None, subservice: str | None = None
-) -> str:
-    """Deterministic template wording -- FALLBACK ONLY since the generated-wording
-    change (see _generate_clarification_question below). Still the sole source of
-    truth for nothing but phrasing: *which* fields are missing is always decided by
-    _missing_payload_fields, never by either of these."""
-    builder = _PAYLOAD_CLARIFICATION_BUILDERS.get((category, service))
-    if builder:
-        return builder(payload, subservice)
-    return "Could you share a few more details so I can help with that?"
 
 
 # Generated (LLM-worded) missing-field clarifications. User requirement: clarifying
@@ -401,31 +225,6 @@ def _payload_clarification_question(
 # missing, and that list is handed to the model as a fixed instruction. Security
 # confirmations (freeze OTP prompt, beneficiary-add yes/no) are deliberately NOT
 # generated -- they stay fixed text.
-def _clarification_service_description(category: str, service: str, subservice: str | None) -> str:
-    key = (category, service)
-    if key == ("fees", "fee_quote"):
-        return "getting a quote for the fee charged on a money transfer"
-    if key == ("transfer", "bank_transfer"):
-        return f"sending money to a bank account ({_bank_transfer_display_name(subservice)})"
-    if key == ("transfer", "wallet_transfer"):
-        return f"sending money to a {_wallet_provider_display_name(subservice)} mobile wallet"
-    if key == ("card_services", "frezz_unfrezz"):
-        return "freezing (temporarily blocking) one of their bank cards"
-    if key == ("beneficiary_management", "beneficiary_add"):
-        return "saving another bank account as a beneficiary for future transfers"
-    if key == ("service_requests", "raise_dispute"):
-        return "raising a dispute about a problem with a transaction"
-    if key == ("support", "submit_complaint"):
-        return "making a complaint to the bank"
-    if key == ("profile_update", "update_nickname"):
-        return "changing their nickname in the app"
-    if key == _ADDRESS_KEY:
-        return "changing the address on their profile"
-    if key == ("profile_update", "update_email"):
-        return "changing the email address on their profile"
-    if key == ("profile_update", "update_mobile"):
-        return "changing the mobile number registered with the bank"
-    return f"the {service.replace('_', ' ')} banking service"
 
 
 # Plain-English descriptions of each gatherable field, as it should be *asked for*.
@@ -481,81 +280,7 @@ def _known_field_phrases(payload: dict | None) -> list[str]:
     return phrases
 
 
-_FORBIDDEN_CLARIFICATION_RE = re.compile(
-    r"\b(pin|password|passcode|otp|one[- ]time)\b", re.IGNORECASE
-)
 # Template/placeholder artifacts ("XXXX", "[amount]", "<number>", "{x}") -- seen live.
-_PLACEHOLDER_RE = re.compile(r"[xX]{3,}|[\[\]<>{}]")
-
-
-def _clean_generated_question(text: str) -> str | None:
-    """Post-checks a generated question. Returns None (-> caller falls back to the
-    template) if it's empty, implausibly long, or mentions PIN/password/OTP; also
-    strips wrapping quotes/markdown and masks any account/phone-length (8+ digit) run it
-    may have echoed -- not shorter ones, which are amounts (live: "Tk ••0000" for 5 lakh)."""
-    text = (text or "").strip().strip('"').strip("'").strip()
-    text = re.sub(r"[*_`#]+", "", text).strip()
-    text = re.sub(r"\s+", " ", text)
-    if not text or len(text) > 400:
-        return None
-    if _FORBIDDEN_CLARIFICATION_RE.search(text) or _PLACEHOLDER_RE.search(text):
-        return None
-    return _LONG_DIGITS_RE.sub(_mask_digit_run, text)
-
-
-async def _generate_clarification_question(
-    message: str,
-    category: str,
-    service: str,
-    subservice: str | None,
-    payload: dict | None,
-    missing_fields: list[str],
-) -> str | None:
-    """One short Ollama /api/generate call wording a missing-field clarification
-    naturally. Returns None on ANY failure (timeout, HTTP error, empty/unsafe output)
-    so the caller falls back to the deterministic template. Never raises."""
-    try:
-        missing = [
-            _CLARIFICATION_FIELD_DESCRIPTIONS.get(f, f.replace("_", " ")) for f in missing_fields
-        ]
-        if service == "wallet_transfer" and "walletNumber" in missing_fields:
-            provider = _wallet_provider_display_name(subservice)
-            missing = [
-                f"the {provider} number to send to" if f == "walletNumber" else desc
-                for f, desc in zip(missing_fields, missing)
-            ]
-        known = _known_field_phrases(payload)
-        safe_message = _LONG_DIGITS_RE.sub(_mask_digit_run, message)[:500]
-        prompt = (
-            "You are a friendly banking assistant chatting with a customer.\n"
-            f"The customer said: \"{safe_message}\"\n"
-            f"They want help with: {_clarification_service_description(category, service, subservice)}.\n"
-            f"Details already known: {'; '.join(known) if known else 'none yet'}.\n"
-            f"Details still needed: {'; '.join(missing)}.\n\n"
-            "Write the next message to the customer, in English: one or two short, natural, "
-            "conversational sentences that ask ONLY for the details still needed. You may "
-            "briefly name back known details exactly as written above (an account or wallet "
-            "number only in the \"ending\" form shown). Do not guess or suggest values, never "
-            "use placeholders, do not ask for anything else or for details already known, "
-            "never ask for a PIN, password, OTP or any code, do not invent fees or facts, no "
-            "greeting, no markdown, no quotes. Output only the message."
-        )
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            resp = await client.post(
-                f"{settings.OLLAMA_BASE_URL}/api/generate",
-                json={
-                    "model": settings.OLLAMA_MODEL,
-                    "prompt": prompt,
-                    "stream": False,
-                    "think": settings.OLLAMA_THINK,
-                    "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0.3},
-                },
-            )
-            resp.raise_for_status()
-            result = resp.json()
-        return _clean_generated_question(result.get("response") or "")
-    except Exception:
-        return None
 
 
 # Numbers, taka amounts and card/account endings a reworded reply must keep verbatim.
@@ -569,151 +294,70 @@ def _number_keeps_its_label(number: str, facts: str, text: str) -> bool:
     return all(re.search(re.escape(label) + r"\W{1,2}" + re.escape(number), text, re.IGNORECASE) for label in labels)
 
 
-async def _phrase(facts: str, customer_message: str) -> str:
-    """Code decides WHAT to tell the customer (`facts`); the model decides HOW to
-    say it for this customer's message, tone and language. Every number, amount and
-    card/account ending in `facts` must appear verbatim in the reworded reply, and no
-    foreign currency may appear -- otherwise `facts` is sent as-is. Tests patch this
-    to identity (tests/conftest.py)."""
-    if not facts:
-        return facts
-    facts = facts.replace("৳", "Tk ")
-    required = [f for f in _PHRASE_FACT_RE.findall(facts) if len(re.sub(r"\D", "", f)) >= 3]
+def _ask_say(category: str, service: str, subservice: str | None, payload: dict | None,
+             missing_fields: list[str]) -> tuple:
+    """Facts for asking the missing details of a known service (T-77): what the
+    customer wants (the service's own description), what's missing, what's already
+    known, and real options from the live taxonomy where the field has them."""
+    described = SERVICE_DESCRIPTIONS.get((category, service))
+    options = None
+    if "transactionType" in missing_fields:
+        options = [_subservice_name("transfer", svc, sub) or sub
+                   for svc in ("bank_transfer", "wallet_transfer")
+                   for sub in (_subservice_ids("transfer", svc))]
+    return _say(
+        "ask",
+        request=(described[0] if described else _service_name(category, service)),
+        transfer_type=_subservice_name(category, service, subservice) if subservice else None,
+        missing=[_CLARIFICATION_FIELD_DESCRIPTIONS.get(f, f.replace("_", " ")) for f in missing_fields],
+        already_known=_known_field_phrases(payload) or None,
+        options=options,
+    )
+
+
+async def _read_pending_reply(question: str | None, message: str, payload: dict | None) -> str:
+    """How the customer answered a pending yes/no or verification step (T-77: the
+    model reads it -- no phrase lists): "confirm", "decline", "unsure" or "other" (a
+    different request). The app's buttons send payload.confirm (true/false), decided
+    without the model. Text shaped like a typed code/password is never shown to a
+    model: "secret" (stays in the secure-form step). A "confirm" only counts when the
+    model quotes the customer's own words for it (grounded); anything else that isn't
+    clearly a decline or a new request is "unsure", so nothing runs on a guess."""
+    if isinstance(payload, dict) and isinstance(payload.get("confirm"), bool):
+        return "confirm" if payload["confirm"] else "decline"
+    if _has_secret_fields(payload) or _looks_like_typed_secret(message):
+        return "secret"
     prompt = (
-        "You are Polygon Bank's chat assistant. A customer wrote:\n"
-        f"\"{_LONG_DIGITS_RE.sub(_mask_digit_run, customer_message)}\"\n\n"
-        "Tell them exactly the following, in your own natural words:\n"
-        f"{facts}\n\n"
-        "Rules: keep every number, amount, name and card/account ending exactly as written "
-        "above, each attached to the same thing it describes (never move a card ending onto "
-        "a phone number, or the like). Keep every warning and every option the customer is "
-        "given (such as how to cancel). Add no facts, steps, promises or offers that aren't "
-        "in it. Reply in English (simple English if the customer wrote Banglish). One to "
-        "four short sentences, plain text, no markdown, no greeting."
+        f'A bank assistant asked the customer: "{question or "a yes/no question"}"\n'
+        f'The customer replied: "{message}"\n\n'
+        "Did the customer: confirm (agree to go ahead), decline (say no / cancel / stop), "
+        "unsure (hesitant, unclear, or asking about the same thing), or other (a different "
+        "request or question)? Copy the customer's words that show it. "
+        'Respond only with JSON: {"answer": "confirm|decline|unsure|other", "quote": "<words>"}'
     )
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=20.0) as client:
             resp = await client.post(
                 f"{settings.OLLAMA_BASE_URL}/api/generate",
                 json={
-                    "model": settings.OLLAMA_MODEL,
-                    "prompt": prompt,
-                    "stream": False,
-                    "think": settings.OLLAMA_THINK,
-                    "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0.4},
+                    "model": settings.OLLAMA_MODEL, "prompt": prompt, "stream": False,
+                    "format": "json", "think": settings.OLLAMA_THINK,
+                    "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0},
                 },
             )
             resp.raise_for_status()
-            text = (resp.json().get("response") or "").strip().strip('"')
+            parsed = json.loads(resp.json().get("response") or "{}")
     except Exception:
-        return facts
-    if (
-        not text
-        or len(text) > 600
-        # Much longer than the facts means it added something (seen live: invented
-        # "contact the number on your statement", "refer to your welcome email").
-        or len(text) > len(facts) * 1.5 + 40
-        or "$" in text
-        or any(fact not in text for fact in required)
-        # A number repeated beyond the facts, or moved away from the word it follows
-        # in the facts, got attached to something else (seen live: "your registered
-        # phone number 0293" for a card ending 0293).
-        or any(text.count(fact) > facts.count(fact) for fact in required)
-        or any(not _number_keeps_its_label(fact, facts, text) for fact in required)
-    ):
-        return facts
-    return text
-
-
-async def _clarification_question_for(
-    message: str,
-    category: str,
-    service: str,
-    subservice: str | None,
-    payload: dict | None,
-    missing_fields: list[str],
-) -> str:
-    generated = await _generate_clarification_question(
-        message, category, service, subservice, payload, missing_fields
-    )
-    if generated:
-        return generated
-    return _payload_clarification_question(category, service, payload, subservice)
-
-
-# T-57/T-60: deterministic, code-level re-confirmation gate for this chatbot's first
-# two ever mutating platform calls (freeze a card / add a beneficiary). Same philosophy
-# as T-49/T-55's deterministic payload-completion guard above: an LLM judgment call on
-# "did the customer actually confirm?" is not an acceptable risk for a mutating action --
-# T-55's own module notes document a severity-1 regression from LLM-based pending-state
-# interpretation elsewhere in this file. A small, literal, enumerated phrase set (never
-# fuzzy/substring matching) decides yes/no/unclear; "unclear" always re-asks rather than
-# ever guessing in either direction.
-_AFFIRMATIVE_CONFIRMATION_REPLIES = {"yes", "confirm", "confirmed", "do it", "go ahead", "yes please"}
-_NEGATIVE_CONFIRMATION_REPLIES = {"no", "cancel", "nevermind", "never mind", "stop"}
-
-
-def _classify_confirmation_reply(message: str) -> str:
-    """Returns "affirmative", "negative", or "unclear" for a reply to a pending
-    CONFIRMATION_REQUIRED turn. Only exact (case-insensitive, trailing-punctuation-
-    insensitive) matches against the two phrase sets above resolve either way --
-    anything else, including a plausible-sounding variant not in either set, is
-    "unclear" so the caller re-asks instead of guessing."""
-    normalized = re.sub(r"[.!?]+$", "", message.strip().lower()).strip()
-    if normalized in _AFFIRMATIVE_CONFIRMATION_REPLIES:
-        return "affirmative"
-    if normalized in _NEGATIVE_CONFIRMATION_REPLIES:
-        return "negative"
-    return "unclear"
-
-
-def _beneficiary_add_confirmation_question(payload: dict | None) -> str:
-    payload = payload or {}
-    nickname = payload.get("nickname")
-    account_number = str(payload.get("accountNumber") or "")
-    account_ref = f"ending {account_number[-4:]}" if account_number else "that account"
-    if payload.get("accountHolderName"):
-        whose = f"{payload['accountHolderName']}'s Polygon Bank account {account_ref}"
-    elif payload.get("bankName"):
-        whose = f"account {account_ref} at {payload['bankName']}, {payload.get('branchName')} branch"
-    else:
-        whose = f"account number {account_ref}"
-    return f"You're about to add {nickname} as a beneficiary: {whose}. Shall I proceed? (yes/no)"
-
-
-def _freeze_card_success_message(payload: dict | None) -> str:
-    card_last4 = (payload or {}).get("cardLast4")
-    if card_last4:
-        return f"Done — your card ending {card_last4} has been frozen."
-    return "Done — your card has been frozen."
-
-
-def _beneficiary_add_success_message(payload: dict | None) -> str:
-    nickname = (payload or {}).get("nickname") or "that beneficiary"
-    return f"Done — {nickname} has been added as a beneficiary."
+        return "unsure"
+    answer = str(parsed.get("answer") or "").strip().lower() if isinstance(parsed, dict) else ""
+    if answer == "confirm" and not _grounded(_quoted(parsed.get("quote")), message):
+        return "unsure"
+    return answer if answer in ("confirm", "decline", "unsure", "other") else "unsure"
 
 
 # Keyed by (category, service) -- the exact pair driving the generic BankingService
-# branch below into the confirmation step instead of the normal immediate-adapter-call
-# path. Adding a future mutating exception is a one-line addition to each of these 3
-# dicts (plus _REQUIRED_PAYLOAD_FIELDS/_PAYLOAD_CLARIFICATION_BUILDERS above for its
-# gather step), never new branching logic in _chat_stream itself.
-#
-# Card freeze is deliberately NOT in _CONFIRMATION_QUESTION_BUILDERS any more: its
-# confirmation step is the bank's own OTP + PIN/password step-up (see the T-57 OTP
-# section below), not a plain yes/no. Only (category, service) pairs listed here are
-# ever treated as a pending yes/no confirmation.
-def _complaint_confirmation_question(payload: dict | None) -> str:
-    payload = payload or {}
-    category = str(payload.get("category") or "OTHER").replace("_", " ").lower()
-    return (
-        f"I'll submit this complaint to the bank ({category}): \"{payload.get('description')}\". "
-        "Shall I submit it? (yes/no)"
-    )
 
 
-def _nickname_confirmation_question(payload: dict | None) -> str:
-    return f"I'll change your nickname to \"{(payload or {}).get('nickName')}\". Shall I go ahead? (yes/no)"
 
 
 _ADDRESS_LABELS = {
@@ -722,41 +366,13 @@ _ADDRESS_LABELS = {
 }
 
 
-def _address_changes(payload: dict | None) -> str:
-    payload = payload or {}
-    return "; ".join(f"{label}: {payload[f]}" for f, label in _ADDRESS_LABELS.items() if payload.get(f))
-
-
-def _address_confirmation_question(payload: dict | None) -> str:
-    return f"I'll update your {_address_changes(payload)}. Shall I go ahead? (yes/no)"
-
-
-_CONFIRMATION_QUESTION_BUILDERS: dict[tuple[str, str], Callable[[dict | None], str]] = {
-    ("beneficiary_management", "beneficiary_add"): _beneficiary_add_confirmation_question,
-    ("support", "submit_complaint"): _complaint_confirmation_question,
-    ("profile_update", "update_nickname"): _nickname_confirmation_question,
-    _ADDRESS_KEY: _address_confirmation_question,
-}
-
-_CONFIRMATION_DECLINE_MESSAGES: dict[tuple[str, str], str] = {
-    ("card_services", "frezz_unfrezz"): "Okay, I won't freeze your card.",
-    ("beneficiary_management", "beneficiary_add"): "Okay, I won't add that beneficiary.",
-    ("support", "submit_complaint"): "Okay, I won't submit the complaint.",
-    ("profile_update", "update_nickname"): "Okay, I won't change your nickname.",
-    _ADDRESS_KEY: "Okay, I won't change your address.",
-    ("profile_update", "update_email"): "Okay, I won't change your email address.",
-    ("profile_update", "update_mobile"): "Okay, I won't change your mobile number.",
-}
-
-_CONFIRMATION_SUCCESS_MESSAGES: dict[tuple[str, str], Callable[[dict | None], str]] = {
-    ("card_services", "frezz_unfrezz"): _freeze_card_success_message,
-    ("beneficiary_management", "beneficiary_add"): _beneficiary_add_success_message,
-    ("support", "submit_complaint"): lambda p: (
-        "Done — your complaint has been submitted. You can follow it under My Tickets."),
-    ("profile_update", "update_nickname"): lambda p: (
-        f"Done — your nickname is now \"{(p or {}).get('nickName')}\"."),
-    _ADDRESS_KEY: lambda p: f"Done — your {_address_changes(p)} has been saved.",
-}
+# Changes that run after an explicit yes (card freeze uses the OTP step instead).
+_CONFIRM_CHANGE_KEYS = frozenset({
+    ("beneficiary_management", "beneficiary_add"),
+    ("support", "submit_complaint"),
+    ("profile_update", "update_nickname"),
+    ("profile_update", "update_address"),
+})
 
 
 # T-57: OTP + PIN/password step-up for card freeze. Flow, all deterministic (no LLM
@@ -770,14 +386,20 @@ _FREEZE_KEY = ("card_services", "frezz_unfrezz")
 _OTP_PENDING_TYPE = "OTP_REQUIRED"
 
 
+def _say(kind: str, must: dict | None = None, **facts) -> tuple:
+    """What a message must convey: a composer kind, structured facts (never sentences),
+    and exact values that must appear attached to their labels (T-77)."""
+    return (kind, {k.replace("_", " "): v for k, v in facts.items() if v not in (None, "")}, must or {})
+
+
 class _TurnOutcome:
-    """One fully-decided turn outcome from the freeze-OTP helpers below; the caller
-    emits token + result, logs, audits and records it uniformly."""
+    """One fully-decided turn outcome; `say` is what the message must convey. The
+    caller composes the words, emits token + result, logs, audits and records it."""
 
     def __init__(
         self,
         result_type: str,
-        token: str,
+        say: tuple,
         category: str | None,
         service: str | None,
         subservice: str | None,
@@ -787,7 +409,8 @@ class _TurnOutcome:
         stored: dict | None = None,
     ):
         self.result_type = result_type
-        self.token = token
+        self.say = say
+        self.token = ""  # set by _emit_outcome once composed
         self.category = category
         self.service = service
         self.subservice = subservice
@@ -807,11 +430,6 @@ class _TurnOutcome:
         }
 
 
-def _freeze_card_ref(payload: dict | None) -> str:
-    card_last4 = (payload or {}).get("cardLast4")
-    return f"card ending {card_last4}" if card_last4 else "card"
-
-
 def _clean_secret(value: object) -> str | None:
     if value is None:
         return None
@@ -824,7 +442,7 @@ def _freeze_otp_pending(
     service: str,
     subservice: str | None,
     payload: dict | None,
-    question: str,
+    say: tuple,
     *,
     status: str,
     otp_required: bool = True,
@@ -845,32 +463,69 @@ def _freeze_otp_pending(
     }
     if attempts_remaining is not None:
         result_payload["attemptsRemaining"] = attempts_remaining
-    stored = {"payload": public_payload, "question": question}
+    stored = {"payload": public_payload, "question": ""}  # filled with the composed text
     if verification_token:
         stored["verificationToken"] = verification_token
     return _TurnOutcome(
-        _OTP_PENDING_TYPE, question, category, service, subservice,
+        _OTP_PENDING_TYPE, say, category, service, subservice,
         result_payload=result_payload, stored=stored,
     )
 
 
 def _freeze_not_executed(
-    category: str, service: str, subservice: str | None, token: str, status: str
+    category: str, service: str, subservice: str | None, say: tuple, status: str
 ) -> _TurnOutcome:
     """Terminal, nothing-was-frozen outcome (flow ends; the next message is a fresh
     request)."""
     return _TurnOutcome(
-        "BANKING_SERVICE", token, category, service, subservice,
+        "BANKING_SERVICE", say, category, service, subservice,
         result_payload={"executed": False, "verificationStatus": status},
     )
 
 
+def _service_name(category: str | None, service: str | None) -> str:
+    """The service's own name from the live taxonomy (data), for the composer."""
+    for cat in get_taxonomy().get("categories", []):
+        if cat.get("id") == category:
+            for svc in cat.get("services", []):
+                if svc.get("id") == service:
+                    return svc.get("name") or str(service)
+    return str(service or "that service").replace("_", " ")
+
+
 def _service_unavailable(category, service, subservice) -> _TurnOutcome:
+    changes = ((category, service) in _CONFIRM_CHANGE_KEYS or (category, service) == _FREEZE_KEY
+               or category in ("profile_update", "beneficiary_management", "support"))
     return _TurnOutcome(
         "SERVICE_UNAVAILABLE",
-        "That service isn't available right now. Please try again shortly.",
+        _say("unavailable", service=_service_name(category, service),
+             request_kind="a change to their account" if changes else "a lookup, nothing was being changed"),
         category, service, subservice,
     )
+
+
+def _login_needed(category, service, subservice) -> _TurnOutcome:
+    return _TurnOutcome("AUTH_REQUIRED", _say("login_needed", request=_service_name(category, service)),
+                        category, service, subservice)
+
+
+def _card_must(payload: dict | None) -> dict:
+    last4 = (payload or {}).get("cardLast4")
+    return {"card ending": last4} if last4 else {}
+
+
+_FREEZE_FACTS = {
+    "action": "freeze (temporarily block) the card",
+    "code_sent_to": "their registered phone number",
+    "enter_in_the_app_secure_form": ["the one-time code", "either the card PIN or the login password (only one of them)"],
+    "what_freezing_does": "stops all payments and withdrawals with the card; it can be unfrozen later in the app",
+    "to_stop": "reply cancel",
+}
+
+
+def _freeze_verify_say(payload: dict | None, problem: str | None = None) -> tuple:
+    return _say("verify", _card_must(payload), **_FREEZE_FACTS,
+                reason_given=(payload or {}).get("reason"), problem=problem)
 
 
 async def _send_freeze_otp(
@@ -891,37 +546,29 @@ async def _send_freeze_otp(
         if exc.reason == "SEND_THROTTLED":
             return _freeze_not_executed(
                 category, service, subservice,
-                "I couldn't send you a verification code right now because too many codes "
-                "were requested recently. Please wait a few minutes, then ask me to freeze "
-                "your card again. Your card has not been frozen.",
+                _say("not_done", _card_must(payload), what="freezing the card",
+                     why="too many verification codes were requested recently",
+                     next_step="wait a few minutes, then ask again", card_status="not frozen"),
                 "SEND_THROTTLED",
             )
         return _service_unavailable(category, service, subservice)
     except AdapterUnavailableError:
         return _service_unavailable(category, service, subservice)
 
-    reason = (payload or {}).get("reason")
-    reason_part = f" (reason: {reason})" if reason else ""
-    question = (
-        f"{lead + ' ' if lead else ''}I've sent a one-time code to your registered phone "
-        f"number. To freeze your {_freeze_card_ref(payload)}{reason_part}, please enter that "
-        "code together with either your card PIN or your login password. Freezing will "
-        "block all transactions on this card until you unfreeze it. Say \"cancel\" if you "
-        "don't want to go ahead."
-    )
     return _freeze_otp_pending(
-        category, service, subservice, payload, question,
+        category, service, subservice, payload, _freeze_verify_say(payload, lead),
         status="OTP_RESENT" if lead else "OTP_SENT",
     )
 
 
 async def _handle_freeze_otp_reply(
-    customer_identity, jwt: str | None, pending: dict, message: str, submitted: dict | None
+    customer_identity, jwt: str | None, pending: dict, message: str, submitted: dict | None,
+    declined: bool = False,
 ) -> _TurnOutcome:
     """Resolves the customer's reply to a pending OTP_REQUIRED freeze step. Reads
     otp/pin/password ONLY from the structured `submitted` payload -- `message` is only
-    ever checked against the literal cancel phrase set, never parsed for secrets and
-    never sent to an LLM."""
+    read for a cancel/new request (secret-shaped text never reaches a
+    model), never parsed for secrets."""
     category = pending.get("category")
     service = pending.get("service")
     subservice = pending.get("subservice")
@@ -931,42 +578,32 @@ async def _handle_freeze_otp_reply(
     otp = _clean_secret(submitted.get("otp"))
     pin = _clean_secret(submitted.get("pin"))
     password = _clean_secret(submitted.get("password"))
-    card_ref = _freeze_card_ref(stored_payload)
 
-    def reask(question: str, status: str, **kw) -> _TurnOutcome:
+    def reask(problem: str, status: str, **kw) -> _TurnOutcome:
         return _freeze_otp_pending(
-            category, service, subservice, stored_payload, question, status=status,
+            category, service, subservice, stored_payload,
+            _freeze_verify_say(stored_payload, problem), status=status,
             otp_required=kw.pop("otp_required", not stored_token),
             verification_token=kw.pop("verification_token", stored_token),
             **kw,
         )
 
-    if not (otp or pin or password) and _classify_confirmation_reply(message) == "negative":
+    if not (otp or pin or password) and declined:
         return _TurnOutcome(
-            "BANKING_SERVICE", _CONFIRMATION_DECLINE_MESSAGES[_FREEZE_KEY],
+            "BANKING_SERVICE", _say("declined", _card_must(stored_payload), what="freezing the card"),
             category, service, subservice,
             result_payload={"executed": False, "cancelled": True},
         )
 
     if pin and password:
-        return reask(
-            f"Please provide either your card PIN or your login password to freeze your "
-            f"{card_ref} — just one of them, not both.",
-            "CREDENTIALS_INVALID_COMBINATION",
-        )
+        return reask("both a PIN and a password were entered; only one of them is needed",
+                     "CREDENTIALS_INVALID_COMBINATION")
     if not otp and not stored_token:
-        return reask(
-            f"To freeze your {card_ref}, please enter the one-time code we sent to your "
-            "registered phone number, together with either your card PIN or your login "
-            "password, in the secure verification form. Say \"cancel\" to stop.",
-            "CREDENTIALS_MISSING",
-        )
+        return reask("the code hasn't been entered yet; it goes in the app's secure form, "
+                     "never in the chat", "CREDENTIALS_MISSING")
     if not (pin or password):
-        return reask(
-            f"To freeze your {card_ref}, please also enter either your card PIN or your "
-            "login password along with the code.",
-            "CREDENTIALS_MISSING",
-        )
+        return reask("the card PIN or the login password is still needed with the code",
+                     "CREDENTIALS_MISSING")
 
     verification_token = stored_token
     if otp:
@@ -975,27 +612,24 @@ async def _handle_freeze_otp_reply(
         except AdapterValidationError as exc:
             if exc.reason == "OTP_INCORRECT":
                 remaining = exc.attempts_remaining
-                if remaining is not None:
-                    attempts = f"You have {remaining} attempt{'s' if remaining != 1 else ''} left."
-                else:
-                    attempts = "Please check it and try again."
+                attempts = f"; attempts left: {remaining}" if remaining is not None else ""
                 return reask(
-                    f"That code isn't correct. {attempts} Please re-enter the code we "
-                    "already sent (no new code is needed), along with your PIN or password.",
+                    f"the code entered was not correct{attempts}; re-enter the same code "
+                    "(no new code is needed) with the PIN or password",
                     "OTP_INCORRECT", otp_required=True, verification_token=None,
                     attempts_remaining=remaining,
                 )
             if exc.reason == "OTP_EXPIRED":
                 return await _send_freeze_otp(
                     customer_identity, category, service, subservice, stored_payload,
-                    lead="That code has expired, so I've sent you a new one.",
+                    lead="the earlier code expired, so a new one was sent",
                 )
             if exc.reason == "OTP_BLOCKED":
                 return _freeze_not_executed(
                     category, service, subservice,
-                    "Too many incorrect codes were entered, so verification is temporarily "
-                    "blocked for your number. Please wait about 5 minutes, then ask me to "
-                    "freeze your card again. Your card has not been frozen.",
+                    _say("not_done", _card_must(stored_payload), what="freezing the card",
+                         why="too many incorrect codes were entered, so verification is blocked for a while",
+                         next_step="wait about 5 minutes, then ask again", card_status="not frozen"),
                     "OTP_BLOCKED",
                 )
             return _service_unavailable(category, service, subservice)
@@ -1017,28 +651,24 @@ async def _handle_freeze_otp_reply(
     except AdapterValidationError as exc:
         if exc.reason == "INVALID_CREDENTIALS":
             return reask(
-                "That PIN or password wasn't correct. Your code is still valid, so just "
-                "re-enter your card PIN or your login password — no new code is needed.",
-                "INVALID_CREDENTIALS", otp_required=False,
+                "the PIN or password was not correct; the code is still valid, so only the "
+                "PIN or password needs re-entering", "INVALID_CREDENTIALS", otp_required=False,
                 verification_token=verification_token,
             )
         if exc.reason == "INVALID_VERIFICATION_TOKEN":
             return await _send_freeze_otp(
                 customer_identity, category, service, subservice, stored_payload,
-                lead="Your verification has expired, so I've sent you a new code.",
+                lead="the verification expired, so a new code was sent",
             )
         if exc.reason == "PIN_OR_PASSWORD_REQUIRED":
             return reask(
-                "Please provide either your card PIN or your login password — exactly one.",
+                "exactly one of the card PIN or the login password is needed",
                 "CREDENTIALS_INVALID_COMBINATION",
                 verification_token=verification_token,
             )
         return _service_unavailable(category, service, subservice)
     except AdapterAuthError:
-        return _TurnOutcome(
-            "AUTH_REQUIRED", "Please log in to continue with this request.",
-            category, service, subservice,
-        )
+        return _login_needed(category, service, subservice)
     except AdapterUnavailableError:
         return _service_unavailable(category, service, subservice)
 
@@ -1054,7 +684,9 @@ async def _handle_freeze_otp_reply(
         "status": card.get("status"),
     }
     return _TurnOutcome(
-        "BANKING_SERVICE", _freeze_card_success_message(stored_payload),
+        "BANKING_SERVICE",
+        _say("done", _card_must(stored_payload), what="the card was frozen",
+             can_it_be_undone="yes, it can be unfrozen in the app"),
         category, service, subservice,
         result_payload=executed_data,
         routing={"category": category, "service": service, "subservice": subservice, "action": "redirect"},
@@ -1119,20 +751,13 @@ _NO_FOLLOW_UP_KEYS = frozenset({
 # Words inside <...> placeholders of the routing prompt's patterns. A payload value
 # equal to one was copied from the prompt, not said by the customer (live: a
 # nickname became "new value").
-_PLACEHOLDER_WORDS = frozenset({
-    "amount", "number", "wallet provider", "person name", "action", "method", "topic",
-    "banking product", "new value", "detail", "provider id", "method named",
-})
-
-
-_WALLET_PROVIDERS = ("bkash", "nagad", "rocket", "upay")
 
 
 def _transfer_target(transaction_type: str | None) -> tuple[str, str] | None:
     """(service, subservice) of the transfer a fee quote's type belongs to."""
-    if transaction_type in _WALLET_PROVIDERS:
+    if transaction_type in _wallet_ids():
         return "wallet_transfer", transaction_type
-    if transaction_type in ("own_account", "city_account", "other_bank"):
+    if transaction_type in _subservice_ids("transfer", "bank_transfer"):
         return "bank_transfer", transaction_type
     return None
 
@@ -1153,34 +778,6 @@ def _service_routing(category, service, subservice, request_payload: dict | None
     return routing
 
 
-def _fee_answer_not_transfer(result, recent_turns: list[ChatTurn], message: str):
-    """We just asked a FEE question and the reply reads like a transfer ("mobile wallet
-    500 taka", "i want to transfer to bkash" -- live transcript). It's answered as the
-    fee they asked about; the fee result then offers the transfer (routing.action
-    "start_transfer"), so a customer who wants to send continues with one tap or "ok
-    send it". (An LLM "do they want to send now?" check was tried and was unreliable.)
-    Outside a pending fee question, transfer wording is always a transfer. A wallet
-    provider only counts if the customer named it (the model invented "bKash")."""
-    if not (isinstance(result, BankingService) and result.category == "transfer"
-            and result.service in ("bank_transfer", "wallet_transfer") and recent_turns):
-        return result
-    last = recent_turns[-1].classification or {}
-    if (last.get("type"), last.get("category"), last.get("service")) != (
-            "CLARIFICATION_REQUIRED", "fees", "fee_quote"):
-        return result
-    payload = dict(result.payload or {})
-    said = " ".join([t.message for t in recent_turns[-2:] if t.message] + [message]).lower()
-    fee_payload = dict(last.get("payload") or {})
-    transaction_type = result.subservice
-    if transaction_type in _WALLET_PROVIDERS and transaction_type not in said:
-        transaction_type = None
-    if transaction_type:
-        fee_payload["transactionType"] = transaction_type
-    if payload.get("amount"):
-        fee_payload["amount"] = payload["amount"]
-    return BankingService("fees", "fee_quote", None, fee_payload or None)
-
-
 def _clean_extracted_fields(result):
     """Drop extracted values that can't be real: copied prompt placeholders, an
     "account number" with no digits ("Nagad", "e"), a wallet number that isn't a
@@ -1191,7 +788,7 @@ def _clean_extracted_fields(result):
     for key, value in result.payload.items():
         if isinstance(value, str):
             text = value.strip()
-            if text.lower().strip("<>\"' ") in _PLACEHOLDER_WORDS or (text.startswith("<") and text.endswith(">")):
+            if text.startswith("<") and text.endswith(">"):  # a prompt placeholder, not a value
                 continue
             if key == "accountNumber" and len(re.sub(r"\D", "", text)) < 6:
                 continue
@@ -1212,20 +809,19 @@ def _clean_extracted_fields(result):
 def _report_lost_card_outcome(category, service, subservice, payload: dict | None) -> _TurnOutcome:
     """Lost/stolen card: never calls the bank (user decision 2026-10-04). The customer
     reports it -- and the card is destroyed/replaced -- themselves on the app's own
-    screen; this explains the consequence and hands over the pre-filled request.
-    Fixed wording: it's a caution about an irreversible step."""
+    screen; this explains the consequence (caution) and hands over the pre-filled
+    request."""
     payload = payload or {}
-    card = _freeze_card_ref(payload)
-    reason = {"STOLEN": "stolen", "LOST": "lost", "DAMAGED": "damaged"}.get(payload.get("reasonCode"))
-    what = f"Since your {card} is {reason}" if reason else f"To report your {card}"
-    token = (
-        f"{what}, the safest step is to report it so it is permanently blocked and destroyed, "
-        "and a replacement card is issued. This can't be undone — the old card will never work "
-        "again. Please confirm the report on the next screen. If you only want to pause the "
-        "card for now, tell me to freeze it instead."
+    say = _say(
+        "caution", _card_must(payload),
+        reason=(payload.get("reasonCode") or "").lower() or None,
+        reporting_means="the card is closed for good and a replacement card is issued",
+        can_it_be_undone="no",
+        where_it_happens="the report screen in the app, which opens next; the customer confirms it there",
+        gentler_option="freeze the card for now instead; freezing can be undone",
     )
     return _TurnOutcome(
-        "BANKING_SERVICE", token, category, service, subservice,
+        "BANKING_SERVICE", say, category, service, subservice,
         result_payload={
             "cardId": payload.get("cardId"), "cardLast4": payload.get("cardLast4"),
             "reasonCode": payload.get("reasonCode"), "executed": False,
@@ -1238,7 +834,8 @@ def _report_lost_card_outcome(category, service, subservice, payload: dict | Non
 def _profile_photo_outcome(category, service, subservice) -> _TurnOutcome:
     return _TurnOutcome(
         "BANKING_SERVICE",
-        "You can change your profile photo on the profile screen — I'll take you there.",
+        _say("redirect", screen="the profile photo screen in the app",
+             why="photos are uploaded there, not in the chat"),
         category, service, subservice,
         result_payload={"executed": False},
         routing={"category": category, "service": service, "subservice": subservice,
@@ -1254,21 +851,28 @@ def _contact_otp_phone(customer_identity, key: tuple[str, str], payload: dict | 
     return customer_identity.customer_id
 
 
-def _contact_target_text(key: tuple[str, str], payload: dict | None) -> str:
+def _contact_change(key: tuple[str, str], payload: dict | None) -> tuple[str, dict]:
+    """(what is being changed, exact new value) for the composer."""
     payload = payload or {}
     if key == _EMAIL_KEY:
-        return f"your email to {payload.get('newEmail')}"
-    return f"your mobile number to {payload.get('newPhone')}"
+        return "the email address on their profile", {"new email": payload.get("newEmail")}
+    return "the mobile number registered with the bank", {"new mobile number": payload.get("newPhone")}
 
 
-def _contact_otp_pending(category, service, payload, question, status, attempts=None) -> _TurnOutcome:
+def _contact_verify_say(key, payload, problem: str | None = None) -> tuple:
+    what, must = _contact_change(key, payload)
+    return _say("verify", must, action=f"change {what}", code_sent_to="their current registered phone number",
+                enter_in_the_app_secure_form="the one-time code", to_stop="reply cancel", problem=problem)
+
+
+def _contact_otp_pending(category, service, payload, say, status, attempts=None) -> _TurnOutcome:
     public = {k: v for k, v in _strip_secrets(dict(payload or {})).items() if k in ("newEmail", "newPhone")}
     result_payload = {**public, "otpRequired": True, "credentialOptions": [], "verificationStatus": status}
     if attempts is not None:
         result_payload["attemptsRemaining"] = attempts
     return _TurnOutcome(
-        _OTP_PENDING_TYPE, question, category, service, None,
-        result_payload=result_payload, stored={"payload": public, "question": question},
+        _OTP_PENDING_TYPE, say, category, service, None,
+        result_payload=result_payload, stored={"payload": public, "question": ""},
     )
 
 
@@ -1281,35 +885,32 @@ async def _send_contact_otp(customer_identity, category, service, payload, lead:
         await send_otp(phone)
     except AdapterValidationError as exc:
         if exc.reason == "SEND_THROTTLED":
+            what, must = _contact_change(key, payload)
             return _TurnOutcome(
                 "BANKING_SERVICE",
-                "Too many verification codes were requested recently. Please wait a few "
-                "minutes and ask me again. Nothing has been changed.",
+                _say("not_done", must, what=f"changing {what}",
+                     why="too many verification codes were requested recently",
+                     next_step="wait a few minutes, then ask again"),
                 category, service, None,
                 result_payload={"executed": False, "verificationStatus": "SEND_THROTTLED"},
             )
         if exc.reason == "INVALID_PHONE":
             return _TurnOutcome(
                 "CLARIFICATION_REQUIRED",
-                "That mobile number doesn't look valid. Please send the new number again "
-                "(11 digits, starting with 01).",
+                _say("ask", problem="the new mobile number given isn't a valid Bangladeshi mobile number",
+                     missing=["the new mobile number"], format="11 digits starting with 01"),
                 None, None, None,
             )
         return _service_unavailable(category, service, None)
     except AdapterUnavailableError:
         return _service_unavailable(category, service, None)
-    question = (
-        f"{lead + ' ' if lead else ''}I've sent a one-time code to your current registered "
-        f"phone number. To change "
-        f"{_contact_target_text(key, payload)}, please enter that code in the secure "
-        "verification form. Say \"cancel\" if you don't want to go ahead."
-    )
-    return _contact_otp_pending(category, service, payload, question,
+    return _contact_otp_pending(category, service, payload, _contact_verify_say(key, payload, lead),
                                 "OTP_RESENT" if lead else "OTP_SENT")
 
 
 async def _handle_contact_otp_reply(
-    customer_identity, jwt: str | None, pending: dict, message: str, submitted: dict | None
+    customer_identity, jwt: str | None, pending: dict, message: str, submitted: dict | None,
+    declined: bool = False,
 ) -> _TurnOutcome:
     """Pending email/mobile change: the code comes ONLY from the structured form
     payload (`otp`), never from chat text; nothing here is logged or sent to an LLM."""
@@ -1318,16 +919,17 @@ async def _handle_contact_otp_reply(
     stored = dict(pending.get("payload") or {})
     otp = _clean_secret((submitted if isinstance(submitted, dict) else {}).get("otp"))
 
-    if not otp and _classify_confirmation_reply(message) == "negative":
+    if not otp and declined:
+        what, must = _contact_change(key, stored)
         return _TurnOutcome(
-            "BANKING_SERVICE", _CONFIRMATION_DECLINE_MESSAGES[key], category, service, None,
+            "BANKING_SERVICE", _say("declined", must, what=f"changing {what}"), category, service, None,
             result_payload={"executed": False, "cancelled": True},
         )
     if not otp:
         return _contact_otp_pending(
             category, service, stored,
-            f"To change {_contact_target_text(key, stored)}, please enter the one-time code "
-            "in the secure verification form (not in the chat). Say \"cancel\" to stop.",
+            _contact_verify_say(key, stored, "the code hasn't been entered yet; it goes in the app's "
+                                             "secure form, never in the chat"),
             "CREDENTIALS_MISSING",
         )
     phone = _contact_otp_phone(customer_identity, key, stored)
@@ -1336,15 +938,15 @@ async def _handle_contact_otp_reply(
     except AdapterValidationError as exc:
         if exc.reason == "OTP_INCORRECT":
             remaining = exc.attempts_remaining
-            left = f" You have {remaining} attempt{'s' if remaining != 1 else ''} left." if remaining is not None else ""
+            left = f"; attempts left: {remaining}" if remaining is not None else ""
             return _contact_otp_pending(
                 category, service, stored,
-                f"That code isn't correct.{left} Please re-enter the code we sent.",
+                _contact_verify_say(key, stored, f"the code entered was not correct{left}; re-enter the same code"),
                 "OTP_INCORRECT", remaining,
             )
         if exc.reason == "OTP_EXPIRED":
             return await _send_contact_otp(customer_identity, category, service, stored,
-                                           lead="That code has expired, so I've sent you a new one.")
+                                           lead="the earlier code expired, so a new one was sent")
         return _service_unavailable(category, service, None)
     except AdapterUnavailableError:
         return _service_unavailable(category, service, None)
@@ -1355,235 +957,161 @@ async def _handle_contact_otp_reply(
             {**stored, "verificationToken": verification_token},
         )
     except AdapterAuthError:
-        return _TurnOutcome("AUTH_REQUIRED", "Please log in to continue with this request.",
-                            category, service, None)
+        return _login_needed(category, service, None)
     except AdapterRejectedError as exc:
+        what, must = _contact_change(key, stored)
         return _TurnOutcome(
             "BANKING_SERVICE",
-            f"The bank couldn't change {_contact_target_text(key, stored)}: {exc.bank_message} "
-            "Nothing has been changed.",
+            _say("refused_by_bank", must, request=f"change {what}", bank_message=exc.bank_message),
             category, service, None,
             result_payload={"executed": False, "bankMessage": exc.bank_message},
         )
     except AdapterUnavailableError:
+        what, must = _contact_change(key, stored)
         return _TurnOutcome(
             "SERVICE_UNAVAILABLE",
-            f"I couldn't change {_contact_target_text(key, stored)} right now — nothing has "
-            "been changed. Please try again shortly, or change it in the app.",
+            _say("unavailable", must, request=f"change {what}", also_possible="change it in the app"),
             category, service, None,
         )
-    done = (
-        f"Done — your email address is now {stored.get('newEmail')}."
-        if key == _EMAIL_KEY else
-        f"Done — your mobile number is now {stored.get('newPhone')}. For your security you've "
-        "been signed out — please log in again."
-    )
+    what, must = _contact_change(key, stored)
     return _TurnOutcome(
-        "BANKING_SERVICE", done, category, service, None,
+        "BANKING_SERVICE",
+        _say("done", must, what=f"{what} was changed",
+             signed_out="yes, for security; they need to log in again" if key == _MOBILE_KEY else None),
+        category, service, None,
         result_payload={"executed": True, **{k: v for k, v in stored.items() if k in ("newEmail", "newPhone")}},
         routing={"category": category, "service": service, "subservice": None, "action": "redirect"},
     )
 
 
-# T-55: deterministic completion of a still-pending T-49 payload-completeness guard,
-# without re-deriving category/service/payload from scratch via classify(). Live-tested
-# (llama3.1:8b) that asking the LLM to resolve a bare-amount reply like "2000 taka" to a
-# clarification it JUST asked is 0/3 reliable for this structural pattern -- unlike a
-# genuine ask_clarification() (real ambiguity), the T-49 guard fires when category/service
-# are already known for certain and only a payload field is missing, so that certainty
-# should never be thrown away and re-guessed from raw text. Only "amount" has an actual
-# extractor right now; any other missing field name simply has no entry below, so
-# _try_deterministic_payload_completion falls through to classify() unchanged for it --
-# this is intentionally generic (keyed off the missing field's name) so a future
-# required-payload service can plug in its own extractor here without new branching in
-# _chat_stream.
-# A number, optionally followed by a Bangladeshi/English unit word: "50k", "1.5 lakh",
-# "2 lacs", "3 crore", "2 koti", "5 hajar", "75,000", "10,00,000" (lakh grouping).
-_AMOUNT_RE = re.compile(
-    r"(\d+(?:,\d{2,3})*(?:\.\d+)?)\s*"
-    r"(k|thousand|hajar|hazar|lakhs?|lacs?|lakh|lac|crores?|cr|koti|হাজার|লাখ|লক্ষ|কোটি)?(?!\w)",
-    re.IGNORECASE,
-)
-_AMOUNT_UNITS = {
-    "k": 1_000, "thousand": 1_000, "hajar": 1_000, "hazar": 1_000,
-    "lakh": 100_000, "lakhs": 100_000, "lac": 100_000, "lacs": 100_000,
-    "crore": 10_000_000, "crores": 10_000_000, "cr": 10_000_000, "koti": 10_000_000,
-    "হাজার": 1_000, "লাখ": 100_000, "লক্ষ": 100_000, "কোটি": 10_000_000,
-}
+_WRITTEN_NUMBER_RE = re.compile(r"\d+(?:,\d{2,3})*(?:\.\d+)?")
 
 
-def _amounts_in_text(text: str) -> list[float | int]:
-    """Every amount written in `text`, with unit words applied (taka). Digit runs of
-    8+ (account/phone numbers) are not amounts. Never raises."""
-    found: list[float | int] = []
-    for number, unit in _AMOUNT_RE.findall(text or ""):
-        digits = number.replace(",", "")
-        if len(digits.split(".")[0]) >= 8 and not unit:
+def _amount_supported(amount, text: str) -> bool:
+    """The model's amount is a number the customer wrote times a power of ten
+    ("1.5 lakh" -> 150000, "50k" -> 50000, "75,000" -> 75000). Generic arithmetic,
+    no unit-word list in code (T-77): the prompts (AMOUNT_GUIDANCE) teach the model the unit words. Catches an invented or mis-scaled amount, NOT a dropped
+    unit ("50k" -> 50 passes: 10^0 is a legitimate "50 taka"); the amount is always
+    echoed back in the confirmation, so the customer sees it before anything proceeds."""
+    try:
+        value = float(amount)
+    except (TypeError, ValueError):
+        return False
+    if value <= 0:
+        return False
+    for written in _WRITTEN_NUMBER_RE.findall(text or ""):
+        base = float(written.replace(",", ""))
+        if base <= 0:
             continue
-        try:
-            value = float(digits) * _AMOUNT_UNITS.get(unit.lower(), 1)
-        except ValueError:
-            continue
-        found.append(int(value) if value.is_integer() else value)
-    return found
+        ratio = value / base
+        if any(abs(ratio - 10 ** k) < 1e-6 * 10 ** k for k in range(0, 9)):
+            return True
+    return False
 
 
-def _extract_single_amount(message: str) -> float | int | None:
-    """Deterministic amount for a bare-amount reply ("2000", "5,000 tk", "1 lakh",
-    "50k"). Only when exactly one amount is written -- several make it ambiguous,
-    so callers fall back to classify(). Never raises."""
-    amounts = _amounts_in_text(message)
-    return amounts[0] if len(amounts) == 1 else None
-
-
-def _align_amount_with_text(result, message: str):
-    """The model sometimes drops the unit ("50k" -> 50, "1 lakh" -> 1). When the
-    customer wrote exactly one amount, that written amount wins."""
+def _check_amount(result, message: str):
+    """Drop an amount the customer didn't write (so they're asked), keep the rest."""
     if not (isinstance(result, BankingService) and result.payload and "amount" in result.payload):
         return result
-    written = _extract_single_amount(message)
-    if written is None or written == result.payload.get("amount"):
+    if _amount_supported(result.payload["amount"], message):
         return result
-    return BankingService(result.category, result.service, result.subservice,
-                          {**result.payload, "amount": written})
+    payload = {k: v for k, v in result.payload.items() if k != "amount"}
+    return BankingService(result.category, result.service, result.subservice, payload or None)
 
 
-_DETERMINISTIC_FIELD_EXTRACTORS: dict[str, Callable[[str], object | None]] = {
-    "amount": _extract_single_amount,
-}
+def _wallet_ids() -> list[str]:
+    """Wallet providers as the live taxonomy lists them (transfer/wallet_transfer)."""
+    return _subservice_ids("transfer", "wallet_transfer")
 
 
-def _try_deterministic_payload_completion(
-    recent_turns: list[ChatTurn], message: str
-) -> BankingService | None:
-    """If the last turn was T-49's deterministic payload-completeness guard -- a
-    CLARIFICATION_REQUIRED with a known, non-null category/service/missingFields, as
-    opposed to a genuinely ambiguous Clarification (which always stores
-    category=None/service=None) -- attempts to resolve the still-missing payload
-    field(s) directly from `message`, without calling classify() at all.
-
-    Returns a BankingService (payload merged with whatever could be deterministically
-    resolved, possibly still incomplete) to be handled exactly like a fresh classify()
-    BankingService result -- the existing _missing_payload_fields guard downstream will
-    ask for whatever, if anything, is still missing. Returns None (meaning: fall through
-    to the normal classify() path unchanged) whenever nothing could be resolved -- e.g.
-    the last turn isn't this specific kind of pending clarification, or `message` doesn't
-    unambiguously supply any of the missing fields (a genuine subject change, an
-    unrelated full-sentence reply, or an ambiguous message with 0 or 2+ numbers) -- never
-    forces a guess.
-    """
-    if not recent_turns:
-        return None
-    last_classification = recent_turns[-1].classification or {}
-    if last_classification.get("type") != "CLARIFICATION_REQUIRED":
-        return None
-
-    category = last_classification.get("category")
-    service = last_classification.get("service")
-    missing_fields = last_classification.get("missingFields")
-    if not category or not service or not missing_fields:
-        return None
-
-    payload = dict(last_classification.get("payload") or {})
-    resolved_any = False
-    for field in missing_fields:
-        extractor = _DETERMINISTIC_FIELD_EXTRACTORS.get(field)
-        if extractor is None:
-            continue
-        value = extractor(message)
-        if value is not None:
-            payload[field] = value
-            resolved_any = True
-
-    if not resolved_any:
-        return None
-
-    return BankingService(
-        category=category,
-        service=service,
-        subservice=last_classification.get("subservice"),
-        payload=payload,
-    )
+def _transfer_type_options() -> str:
+    """Valid transfer-type ids with the taxonomy's own names, for the model."""
+    names = []
+    for kind in fee_transaction_types():
+        name = (_subservice_name("transfer", "bank_transfer", kind)
+                or _subservice_name("transfer", "wallet_transfer", kind) or kind.replace("_", " "))
+        names.append(f"{kind} = {name}")
+    return "; ".join(names)
 
 
 async def _llm_fill_pending_fields(recent_turns: list[ChatTurn], message: str) -> BankingService | None:
-    """Slot filling for a pending missing-field question of a KNOWN service. Re-
-    classifying a one-word reply from scratch was unreliable (live: "bkash" after "what
-    kind of transfer is the fee for?" became gifts_received; "1000" a KB answer). Here
-    the model only fills the fields we asked for. Values are checked (a transfer type
-    must be a real id, amounts come from _amounts_in_text). Nothing filled -> None, so
-    a genuine change of topic still goes to classify()."""
+    """Slot filling (T-76/T-77). When we just asked for missing details of a KNOWN
+    service -- or the customer follows up on a request we just answered ("and for
+    nagad?", "2 lakh") -- the model fills only that service's fields instead of
+    re-classifying a one-word reply from scratch (live: "bkash" after a fee question
+    became gifts_received). Values are checked: a transfer type must be a live id, a
+    wallet must be one the customer named, an amount must be a number they wrote times
+    a power of ten. Nothing filled -> None, so a change of topic goes to classify()."""
     if not recent_turns:
         return None
     last = recent_turns[-1].classification or {}
-    if not last.get("category") or not last.get("service"):
+    key = (last.get("category"), last.get("service"))
+    if not all(key):
         return None
-    if last.get("type") == "BANKING_SERVICE" and (last["category"], last["service"]) == ("fees", "fee_quote"):
-        # An ANSWERED fee quote: a short follow-up may change its type or amount
-        # ("rocket", "and for nagad?", "2 lakh") -- same slot filling, over both fields.
-        last = {**last, "missingFields": ["transactionType", "amount"],
-                "payload": last.get("request") or {},
-                "question": "Which transfer type and amount should the fee be for? (follow-up to the last fee quote)"}
+    if last.get("type") == "BANKING_SERVICE":
+        required = _REQUIRED_PAYLOAD_FIELDS.get(key)
+        if not required or key in _NO_FOLLOW_UP_KEYS:
+            return None
+        last = {**last, "missingFields": list(required), "payload": last.get("request") or {},
+                "question": f"(follow-up to their last request: {_service_name(*key)})"}
     elif last.get("type") != "CLARIFICATION_REQUIRED":
         return None
-    missing = [f for f in (last.get("missingFields") or []) if f != "amount"]
-    payload = dict(last.get("payload") or {})
+    fields = list(last.get("missingFields") or [])
+    if not fields:
+        return None
+    valid_types = fee_transaction_types() if "transactionType" in fields else []
+    lines = []
+    for field in fields:
+        line = f'- "{field}": {_CLARIFICATION_FIELD_DESCRIPTIONS.get(field, field)}'
+        if field == "transactionType" and valid_types:
+            line += f" — use one of these ids: {_transfer_type_options()}"
+        if field == "amount":
+            line += f" — {AMOUNT_GUIDANCE}"
+        lines.append(line)
+    prompt = (
+        f"A bank chat assistant asked the customer: \"{last.get('question')}\"\n"
+        "It needs these details:\n" + "\n".join(lines) + "\n\n"
+        f"The customer replied: \"{_LONG_DIGITS_RE.sub(_mask_digit_run, message)}\"\n\n"
+        "Fill ONLY the details the reply actually gives; leave out anything it doesn't. "
+        "If the reply is about something else entirely, return {}. "
+        "Respond only with a JSON object of the filled details."
+    )
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.post(
+                f"{settings.OLLAMA_BASE_URL}/api/generate",
+                json={
+                    "model": settings.OLLAMA_MODEL, "prompt": prompt, "stream": False,
+                    "format": "json", "think": settings.OLLAMA_THINK,
+                    "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0},
+                },
+            )
+            resp.raise_for_status()
+            extracted = json.loads(resp.json().get("response") or "{}")
+    except Exception:
+        extracted = {}
     filled: dict = {}
-    if "amount" in (last.get("missingFields") or []):
-        amount = _extract_single_amount(message)
-        if amount is not None:
-            filled["amount"] = amount
-    if missing:
-        valid_types = fee_transaction_types() if "transactionType" in missing else []
-        lines = []
-        for field in missing:
-            line = f'- "{field}": {_CLARIFICATION_FIELD_DESCRIPTIONS.get(field, field)}'
-            if field == "transactionType" and valid_types:
-                line += (
-                    f" — one of: {', '.join(valid_types)}. own_account = between the customer's "
-                    "OWN accounts; city_account = SOMEONE ELSE's Polygon Bank account; other_bank "
-                    "= an account at any other bank (BRAC, DBBL, City Bank, any bank name), NPSB, "
-                    "BEFTN or RTGS; wallets by their provider name"
-                )
-            lines.append(line)
-        prompt = (
-            f"A bank chat assistant asked the customer: \"{last.get('question')}\"\n"
-            "It needs these details:\n" + "\n".join(lines) + "\n\n"
-            f"The customer replied (English, Bangla or Banglish): \"{_LONG_DIGITS_RE.sub(_mask_digit_run, message)}\"\n\n"
-            "Fill ONLY the details the reply actually gives; leave out anything it doesn't. "
-            "If the reply is about something else entirely, return {}. "
-            "Respond only with a JSON object of the filled details."
-        )
-        try:
-            async with httpx.AsyncClient(timeout=20.0) as client:
-                resp = await client.post(
-                    f"{settings.OLLAMA_BASE_URL}/api/generate",
-                    json={
-                        "model": settings.OLLAMA_MODEL, "prompt": prompt, "stream": False,
-                        "format": "json", "think": settings.OLLAMA_THINK,
-                        "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0},
-                    },
-                )
-                resp.raise_for_status()
-                extracted = json.loads(resp.json().get("response") or "{}")
-        except Exception:
-            extracted = {}
-        if isinstance(extracted, dict):
-            for field in missing:
-                value = extracted.get(field)
-                if value in (None, "", [], {}):
+    if isinstance(extracted, dict):
+        wallets = _wallet_ids()
+        for field in fields:
+            value = extracted.get(field)
+            if value in (None, "", [], {}):
+                continue
+            if field == "amount" and not _amount_supported(value, message):
+                continue
+            if field == "transactionType":
+                value = re.sub(r"[\s-]+", "_", str(value).strip().lower())
+                if value not in valid_types:
                     continue
-                if field == "transactionType":
-                    value = re.sub(r"[\s-]+", "_", str(value).strip().lower())
-                    if value not in valid_types:
-                        continue
-                    # a wallet must be named by the customer, never assumed
-                    if value in _WALLET_PROVIDERS and value not in message.lower():
-                        continue
-                filled[field] = value
+                # a wallet must be one the customer actually named (grounding)
+                if value in wallets and not _grounded(
+                        _subservice_name("transfer", "wallet_transfer", value) or value, message):
+                    continue
+            filled[field] = value
     if not filled:
         return None
-    return BankingService(last["category"], last["service"], last.get("subservice"), {**payload, **filled})
+    payload = dict(last.get("payload") or {})
+    return BankingService(key[0], key[1], last.get("subservice"), {**payload, **filled})
 
 
 def _candidate_number(candidate: dict) -> str:
@@ -1653,11 +1181,11 @@ async def _prefill_from_bank(customer_identity, jwt, category, service, subservi
         rows = data.get("accounts") if isinstance(data, dict) else None
         return [a for a in rows or [] if isinstance(a, dict) and not _is_card_row(a)]
 
-    def pick(kind: str, question: str, candidates: list[dict]) -> "_TurnOutcome":
+    def pick(kind: str, say: tuple, candidates: list[dict]) -> "_TurnOutcome":
         return _TurnOutcome(
-            kind, question, category, service, subservice,
+            kind, say, category, service, subservice,
             result_payload={"transactions" if kind.startswith("TRANSACTION") else "accounts": candidates},
-            stored={"question": question, "candidates": candidates, "payload": _strip_secrets(payload)},
+            stored={"question": "", "candidates": candidates, "payload": _strip_secrets(payload)},
         )
 
     try:
@@ -1666,13 +1194,14 @@ async def _prefill_from_bank(customer_identity, jwt, category, service, subservi
             if len(mine) < 2:
                 return payload, _TurnOutcome(
                     "BANKING_SERVICE",
-                    "You have only one account with us, so there's no other account of yours to "
-                    "move money to. Would you like to send it to someone else instead?",
+                    _say("not_done", what="moving money between their own accounts",
+                         why="they have only one account with the bank",
+                         other_option="sending it to someone else (another account or a mobile wallet)"),
                     category, service, subservice, result_payload={"executed": False},
                 )
             return payload, pick("ACCOUNT_SELECTION_REQUIRED",
-                                 "Which of your accounts should receive the money? "
-                                 + ", ".join(_describe_selection_account(a) for a in mine) + ".", mine)
+                                 _say("choose", question_about="which of their accounts should receive the money",
+                                      options=[_describe_selection_account(a) for a in mine]), mine)
 
         if key == _DISPUTE_KEY and not payload.get("accountNumber"):
             mine = await accounts()
@@ -1680,7 +1209,8 @@ async def _prefill_from_bank(customer_identity, jwt, category, service, subservi
                 payload["accountNumber"] = mine[0].get("accountNumber")
             elif len(mine) > 1:
                 return payload, pick("ACCOUNT_SELECTION_REQUIRED",
-                                     _account_selection_reply(mine), mine)
+                                     _say("choose", question_about="which account the problem transaction was on",
+                                          options=[_describe_selection_account(a) for a in mine]), mine)
 
         if key == _DISPUTE_KEY and payload.get("accountNumber") and not payload.get("transactionReferenceNo"):
             result = await fulfill_banking_service(
@@ -1697,23 +1227,21 @@ async def _prefill_from_bank(customer_identity, jwt, category, service, subservi
                 else:
                     return payload, pick(
                         "TRANSACTION_SELECTION_REQUIRED",
-                        "Which transaction is this about? " + "; ".join(
-                            f"{i}. {_describe_selection_account(c)}" for i, c in enumerate(choices, 1)) + ".",
-                        choices[:_MAX_TRANSACTION_CHOICES],
+                        _say("choose", question_about="which recent transaction the problem is about",
+                             options=[_describe_selection_account(c) for c in choices]),
+                        choices,
                     )
     except AdapterAuthError:
-        return payload, _TurnOutcome("AUTH_REQUIRED", "Please log in to continue with this request.",
-                                     category, service, subservice)
+        return payload, _login_needed(category, service, subservice)
     except AdapterUnavailableError:
         return payload, None  # can't look it up right now: fall back to asking
     return payload, None
 
 
-def _normalize_fee_type(result):
-    """fees/fee_quote: transactionType must be one of the bank's live transfer ids
-    (routing.fee_transaction_types). Live, the model sent "bkash transfer" and
-    "NPSB", both 404s. Map to the id it names; otherwise drop it so the customer is
-    asked which transfer type they mean."""
+def _normalize_fee_type(result, message: str = ""):
+    """fees/fee_quote: transactionType must be EXACTLY one of the bank's live transfer
+    ids (the model is given them); anything else is dropped so the customer is asked
+    (T-77: no substring/keyword mapping). A wallet must be one the customer named."""
     if not (isinstance(result, BankingService) and (result.category, result.service) == ("fees", "fee_quote")):
         return result
     payload = dict(result.payload or {})
@@ -1723,10 +1251,12 @@ def _normalize_fee_type(result):
     valid = fee_transaction_types()
     if not valid:  # taxonomy not loaded: nothing to check against
         return result
-    text = re.sub(r"[\s-]+", "_", str(raw).strip().lower())
-    named = [v for v in valid if v == text or re.search(rf"(^|_){re.escape(v)}(_|$)", text)]
-    if len(named) == 1:
-        payload["transactionType"] = named[0]
+    value = re.sub(r"[\s-]+", "_", str(raw).strip().lower())
+    named = value in valid and not (
+        value in _wallet_ids() and message
+        and not _grounded(_subservice_name("transfer", "wallet_transfer", value) or value, message))
+    if named:
+        payload["transactionType"] = value
     else:
         payload.pop("transactionType")
     return BankingService(result.category, result.service, result.subservice, payload or None)
@@ -1814,18 +1344,17 @@ async def _ground_freeze_request(result, message: str, recent_turns: list[ChatTu
         # own words say what happened -- "my card isn't working" went here live.
         if reason or block_request:
             return result
-        return Clarification(question=await _phrase(
-            "Reporting a card lost or stolen is only for a card that is lost, stolen or "
-            "misused. What's happening with your card, and what would you like me to help with?",
-            message,
-        ))
+        return Clarification(question=await compose("clarify", {
+            "what is unclear": "what is happening with their card",
+            "note": "reporting a card is only for a card that is lost, stolen or misused",
+            "can help with": ["a lost or stolen card", "freezing a card", "card details and requests"],
+        }, message=message))
     if not reason and not block_request:
-        question = await _phrase(
-            "Freezing a card is only for a lost, stolen or misused card. What's happening "
-            "with your card, and what would you like me to help with?",
-            message,
-        )
-        return Clarification(question=question)
+        return Clarification(question=await compose("clarify", {
+            "what is unclear": "what is happening with their card",
+            "note": "freezing is for a lost, stolen or misused card",
+            "can help with": ["a lost or stolen card", "freezing a card", "card details and requests"],
+        }, message=message))
     payload = dict(result.payload or {})
     payload.pop("reason", None)
     if reason:
@@ -1960,43 +1489,6 @@ def _result_event(
     )
 
 
-def _account_card_summary(cards: object) -> str:
-    """Build a ", linked to N ... card(s)" style fragment for an account's cards.
-
-    Returns "" if there are no (countable) cards. Skips non-dict entries and
-    cards missing a usable cardType. Skips cards whose status is present and
-    clearly not ACTIVE; a missing status is treated as active/countable.
-    """
-    if not isinstance(cards, list):
-        return ""
-    counts: dict[str, int] = {}
-    for card in cards:
-        try:
-            if not isinstance(card, dict):
-                continue
-            status = card.get("status")
-            if status is not None and str(status).strip().upper() != "ACTIVE":
-                continue
-            card_type = card.get("cardType")
-            if not card_type:
-                continue
-            type_name = str(card_type).strip().lower()
-            if not type_name:
-                continue
-            counts[type_name] = counts.get(type_name, 0) + 1
-        except Exception:
-            continue
-    total = sum(counts.values())
-    if total == 0:
-        return ""
-    if len(counts) == 1:
-        ((only_type, count),) = counts.items()
-        noun = "card" if count == 1 else "cards"
-        return f"linked to {count} {only_type} {noun}"
-    breakdown = ", ".join(f"{count} {type_name}" for type_name, count in counts.items())
-    return f"linked to {total} cards ({breakdown})"
-
-
 def _mask_number(value: object, keep: int = 4) -> str | None:
     s = str(value) if value is not None else ""
     if len(s) <= keep:
@@ -2110,29 +1602,20 @@ def _redact_for_prompt(data: dict, service: str | None = None) -> dict:
         return data
 
 
-_NUMBER_RE = re.compile(r"\d[\d,]*(?:\.\d+)?")
-
-
-def _unsupported_numbers(reply: str, source: str) -> list[str]:
-    """Numbers (3+ digits) in a model-written reply that don't appear in the data it
-    was given -- a wrong balance must never reach a customer."""
-    haystack = source.replace(",", "")
-    return [
-        n for n in _NUMBER_RE.findall(reply)
-        if len(re.sub(r"\D", "", n)) >= 3 and n.replace(",", "") not in haystack
-    ]
-
-
 def _compact_for_prompt(node):
     """Fewer prompt tokens, same facts: drop link fields (icon URLs) the reply never
     uses. On the M40 every ~250 prompt tokens cost ~1 s. Nulls stay ("not set" is an
-    answer), and so do empty lists ("none")."""
+    answer), and so do empty lists ("none"). Every list of records also gets its total."""
     if isinstance(node, dict):
-        return {
-            key: _compact_for_prompt(value)
-            for key, value in node.items()
-            if not (isinstance(value, str) and value.startswith(("http://", "https://")))
-        }
+        out = {}
+        for key, value in node.items():
+            if isinstance(value, str) and value.startswith(("http://", "https://")):
+                continue
+            out[key] = _compact_for_prompt(value)
+            if isinstance(value, list) and value and all(isinstance(item, dict) for item in value):
+                # A count the model can state, so it never has to count nested rows itself.
+                out[f"{key} (total)"] = len(value)
+        return out
     if isinstance(node, list):
         return [_compact_for_prompt(item) for item in node]
     return node
@@ -2213,8 +1696,8 @@ def _accounts_for_prompt(data: dict) -> dict:
     return {**data, "data": view}
 
 
-def _reply_prompt(message: str, service: str, subservice: str | None, data: dict) -> tuple[str, str, dict]:
-    """(prompt, data_json, redacted) for the data-answering reply -- shared by the
+def _reply_prompt(message: str, service: str, subservice: str | None, data: dict) -> tuple[list[dict], str, dict]:
+    """(chat messages, data_json, redacted) for the data-answering reply -- shared by the
     streamed and non-streamed paths so both send the model the identical prompt."""
     if (subservice or service) == "accounts":
         data = _accounts_for_prompt(data)
@@ -2224,28 +1707,10 @@ def _reply_prompt(message: str, service: str, subservice: str | None, data: dict
     redacted = _redact_for_prompt(data, subservice or service)
     data_json = json.dumps(_compact_for_prompt(redacted), default=str, ensure_ascii=False,
                            separators=(",", ":"))
-    prompt = (
-        "You are Polygon Bank's chat assistant. The customer said:\n"
-        f"\"{message}\"\n\n"
-        "Here is the real data already fetched to answer them (JSON):\n"
-        f"{data_json}\n\n"
-        "Write a short, natural, accurate reply in English that directly answers what they "
-        "asked, using ONLY this data. Copy every number exactly as it appears in the data — "
-        "never change, round, add or invent a digit. Money is already in Bangladeshi taka "
-        "(Tk); write it as given, never with $, Rs or any other currency, and never "
-        "recalculate it. If a list is empty, say plainly there are none — never describe a "
-        "record, request or status that isn't in the data. A null value means not set or "
-        "not available. Ignore technical fields (status, pagination, ids, icons, "
-        "timestamps' time-of-day) unless the customer asked about them. If the data doesn't "
-        "cover something they asked (e.g. a date range), say what you DO have instead. Never "
-        "state a full account or card number; use only masked forms present in the data. "
-        "You can only SHOW this information: you cannot change, update, submit or cancel "
-        "anything. If the customer asked to change something, never say it was done — say "
-        "it can't be done in this chat and they can do it in the app, then share what the "
-        "data shows if useful. Give no advice, contacts or steps that aren't in the data. "
-        "1-3 sentences, plain prose, no markdown."
-    )
-    return prompt, data_json, redacted
+    messages = build_messages(
+        "answer", {"what you know about their account": _compact_for_prompt(redacted)},
+        message, None, {})
+    return messages, data_json, redacted
 
 
 async def _synthesize_reply(message: str, service: str, subservice: str | None, data: dict) -> str:
@@ -2253,27 +1718,14 @@ async def _synthesize_reply(message: str, service: str, subservice: str | None, 
     fetched data only. Every 3+-digit number in the reply must exist in that data;
     a reply that fails the check is regenerated once at temperature 0, and only if
     that also fails (or Ollama is down) does the deterministic summary stand in."""
-    prompt, data_json, redacted = _reply_prompt(message, service, subservice, data)
+    messages, data_json, redacted = _reply_prompt(message, service, subservice, data)
     for temperature in (0.2, 0.0):
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.post(
-                    f"{settings.OLLAMA_BASE_URL}/api/generate",
-                    json={
-                        "model": settings.OLLAMA_MODEL,
-                        "prompt": prompt,
-                        "stream": False,
-                        "think": settings.OLLAMA_THINK,
-                        "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": temperature},
-                    },
-                )
-                resp.raise_for_status()
-                text = (resp.json().get("response") or "").strip()
-        except Exception:
+        text = await generate_chat(messages, temperature)
+        if text is None:
             break
-        if text and "$" not in text and not _unsupported_numbers(text, data_json):
+        if text and check_reply(text, data_json, {}) is None:
             return text
-    return _subservice_reply(service, subservice, redacted)
+    return _data_fallback(redacted)
 
 
 # End of a sentence: . ! ? or a newline, followed by whitespace ("90,000.00." mid-number never matches).
@@ -2288,19 +1740,19 @@ async def _stream_reply(message: str, service: str, subservice: str | None, data
     was sent, the non-streamed path (retry + deterministic fallback) answers instead;
     if it goes wrong mid-way, generation stops and the deterministic facts finish
     the reply -- no unverified number is ever sent."""
-    prompt, data_json, redacted = _reply_prompt(message, service, subservice, data)
+    messages, data_json, redacted = _reply_prompt(message, service, subservice, data)
     full, sent = "", 0
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             async with client.stream(
                 "POST",
-                f"{settings.OLLAMA_BASE_URL}/api/generate",
+                f"{settings.OLLAMA_BASE_URL}/api/chat",
                 json={
                     "model": settings.OLLAMA_MODEL,
-                    "prompt": prompt,
+                    "messages": messages,
                     "stream": True,
                     "think": settings.OLLAMA_THINK,
-                    "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0.2},
+                    "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0.2, "num_predict": 400},
                 },
             ) as resp:
                 resp.raise_for_status()
@@ -2308,12 +1760,12 @@ async def _stream_reply(message: str, service: str, subservice: str | None, data
                     if not line:
                         continue
                     chunk = json.loads(line)
-                    full += chunk.get("response") or ""
+                    full += (chunk.get("message") or {}).get("content") or ""
                     done = bool(chunk.get("done"))
                     ends = [m.end() for m in _SENTENCE_END_RE.finditer(full)]
                     cut = len(full) if done else (ends[-1] if ends else 0)
                     safe = full[:cut]
-                    if "$" in safe or _unsupported_numbers(safe, data_json):
+                    if any(sym in safe for sym in _FOREIGN_CURRENCY) or unsupported_numbers(safe, data_json):
                         raise ValueError("unsupported number in streamed reply")
                     piece = safe[sent:]
                     if sent == 0:
@@ -2328,130 +1780,10 @@ async def _stream_reply(message: str, service: str, subservice: str | None, data
             yield await _synthesize_reply(message, service, subservice, data)
         else:
             gap = "" if full[:sent].endswith((" ", "\n")) else " "
-            yield gap + _subservice_reply(service, subservice, redacted)
+            yield gap + _data_fallback(redacted)
         return
     if sent == 0:
         yield await _synthesize_reply(message, service, subservice, data)
-
-
-def _subservice_reply(service: str, subservice: str | None, data: dict) -> str:
-    key = subservice or service
-    fallback = f"Sure — here's information about {service.replace('_', ' ')}."
-
-    if not isinstance(data, dict):
-        return fallback
-
-    if key == "balance":
-        return f"Your available balance is {data.get('balance')}."
-
-    if key == "accounts":
-        try:
-            inner = data.get("data")
-            accounts = inner.get("accounts") if isinstance(inner, dict) else None
-            if not isinstance(accounts, list):
-                return fallback
-            if not accounts:
-                return "You don't have any accounts on record."
-            descriptions = []
-            for a in accounts:
-                if not isinstance(a, dict):
-                    continue
-                account_type = str(a.get("accountType") or "account").replace("_", " ").title()
-                account_number = a.get("accountNumber")
-                extras = []
-                if account_number:
-                    extras.append(f"ending {str(account_number)[-4:]}")
-                card_summary = _account_card_summary(a.get("cards"))
-                if card_summary:
-                    extras.append(card_summary)
-                if extras:
-                    descriptions.append(f"{account_type} ({', '.join(extras)})")
-                else:
-                    descriptions.append(account_type)
-            if not descriptions:
-                return "You don't have any accounts on record."
-            plural = "account" if len(descriptions) == 1 else "accounts"
-            return f"You have {len(descriptions)} {plural}: {', '.join(descriptions)}."
-        except Exception:
-            return fallback
-
-    if key == "device_history":
-        try:
-            devices = data.get("devices")
-            if not isinstance(devices, list):
-                return fallback
-            if not devices:
-                return "You don't have any devices on record."
-            names = [d.get("deviceName") for d in devices if isinstance(d, dict) and d.get("deviceName")]
-            if not names:
-                return fallback
-            plural = "device" if len(names) == 1 else "devices"
-            return f"You have {len(names)} {plural} linked: {', '.join(str(n) for n in names)}."
-        except Exception:
-            return fallback
-
-    if key == "transaction_history":
-        try:
-            transactions = data.get("transactions")
-            if not isinstance(transactions, list):
-                return fallback
-            if not transactions:
-                return "You don't have any recent transactions."
-            pagination = data.get("pagination") if isinstance(data.get("pagination"), dict) else {}
-            total_count = pagination.get("totalCount")
-            shown = len(transactions)
-            if isinstance(total_count, int) and total_count > shown:
-                summary = f"Here are your {shown} most recent transactions (out of {total_count} total)."
-            else:
-                plural = "transaction" if shown == 1 else "transactions"
-                summary = f"Here are your {shown} most recent {plural}."
-            latest = transactions[0]
-            if isinstance(latest, dict):
-                amount = latest.get("amount")
-                description = latest.get("description")
-                txn_type = str(latest.get("type") or "").upper()
-                verb = {"DEBIT": "debit", "CREDIT": "credit"}.get(txn_type)
-                if amount is not None and description and verb:
-                    summary += f" Your most recent was a {amount} {description} {verb}."
-            return summary
-        except Exception:
-            return fallback
-
-    if key == "login_history":
-        try:
-            logins = None
-            for candidate_key in ("records", "loginHistory", "logins", "history"):
-                candidate = data.get(candidate_key)
-                if isinstance(candidate, list):
-                    logins = candidate
-                    break
-            if logins is None and isinstance(data.get("data"), list):
-                logins = data.get("data")
-            if logins is None:
-                return fallback
-            if not logins:
-                return "There's no login history on record for this device."
-            pagination = data.get("pagination") if isinstance(data.get("pagination"), dict) else {}
-            total_count = pagination.get("totalCount")
-            shown = len(logins)
-            if isinstance(total_count, int) and total_count > shown:
-                summary = f"Here are your {shown} most recent logins (out of {total_count} total)."
-            else:
-                plural = "login" if shown == 1 else "logins"
-                summary = f"Here are your {shown} most recent {plural}."
-            latest = logins[0]
-            if isinstance(latest, dict):
-                status = latest.get("status")
-                ip_address = latest.get("ipAddress")
-                if status and ip_address:
-                    summary += f" The most recent was {str(status).lower()} from {ip_address}."
-                elif status:
-                    summary += f" The most recent was {str(status).lower()}."
-            return summary
-        except Exception:
-            return fallback
-
-    return fallback
 
 
 def _enrich_payload(service: str, subservice: str | None, data: dict) -> dict:
@@ -2500,44 +1832,17 @@ def _enrich_payload(service: str, subservice: str | None, data: dict) -> dict:
     return data
 
 
-def _transfer_summary_reply(service: str, subservice: str | None, payload: dict) -> str:
-    """Deterministic (never LLM-synthesized -- see T-56 module notes in _chat_stream)
-    confirmation summary for a complete transfer/bank_transfer or transfer/wallet_transfer
-    payload. There is no real adapter for either service -- ADR-0008's GET-only policy
-    means a transfer is never executed from here -- so this template, built only from
-    already-known payload fields, is the entire reply; it must never claim the transfer
-    is done."""
-    amount_formatted = _format_bdt(payload.get("amount")) or str(payload.get("amount"))
-    if service == "wallet_transfer":
-        provider_name = _wallet_provider_display_name(subservice)
-        wallet_number = payload.get("walletNumber")
-        destination = f"to your {provider_name} number {wallet_number}"
-    else:
-        transfer_name = _bank_transfer_display_name(subservice)
-        account_number = payload.get("accountNumber")
-        destination = f"to account {account_number} via {transfer_name}"
-    return (
-        f"Here's your transfer summary: {amount_formatted} {destination}. I can't complete "
-        "this for you here — please confirm and finish it in the app."
-    )
-
-
-def _dispute_summary_reply(payload: dict) -> str:
-    """Deterministic (never LLM-synthesized -- same reasoning as _transfer_summary_reply)
-    confirmation summary for a complete service_requests/raise_dispute payload. There is no
-    real submission here -- this flow never calls POST service-request/v1/disputes -- so this
-    template, built only from already-known payload fields, is the entire reply; it must
-    never claim the dispute has been filed."""
-    transaction_ref = payload.get("transactionSummary") or payload.get("transactionReferenceNo")
-    account_number = payload.get("accountNumber")
-    remarks = payload.get("remarks")
-    # The customer's own account: last 4 only, like every other reply.
-    account_ref = f"ending {str(account_number)[-4:]}" if account_number else "on file"
-    return (
-        f"Here's your dispute summary: transaction {transaction_ref} on account "
-        f"{account_ref}, reason: {remarks}. I can't submit this for you here — please "
-        "confirm and complete it in the app."
-    )
+def _data_fallback(data) -> str:
+    """Degraded mode (the model's replies kept failing the number check): the data's
+    top-level facts as plain 'label: value' lines -- no prose, no template."""
+    flat = {}
+    if isinstance(data, dict):
+        for key, value in data.items():
+            if isinstance(value, list):
+                flat[key] = f"{len(value)} item(s)"
+            elif not isinstance(value, dict):
+                flat[key] = value
+    return facts_listing(flat)
 
 
 def _describe_selection_account(a: dict) -> str:
@@ -2567,12 +1872,6 @@ def _describe_selection_account(a: dict) -> str:
     chart_of_account_name = a.get("chartOfAccountName") or "Account"
     identifier = str(a.get("identifier") or "")
     return f"{chart_of_account_name} ending {identifier[-6:]}"
-
-
-def _account_selection_reply(accounts: list[dict]) -> str:
-    options = ", ".join(_describe_selection_account(a) for a in accounts)
-    noun = "cards" if accounts and all("cardNumber" in a for a in accounts) else "accounts"
-    return f"You have multiple {noun} — which one did you mean? {options}."
 
 
 def _match_beneficiaries(name_query: str, beneficiaries: list[dict]) -> list[dict]:
@@ -2630,32 +1929,100 @@ def _resolve_beneficiary_destination(beneficiary: dict) -> dict | None:
     return None
 
 
-def _beneficiary_display_name(beneficiary: dict) -> str:
-    return beneficiary.get("nickname") or beneficiary.get("accountHolderName") or "that beneficiary"
+def _subservice_name(category: str | None, service: str | None, subservice: str | None) -> str | None:
+    """A sub-service's own name from the live taxonomy (e.g. "Other Bank Transfer")."""
+    for cat in get_taxonomy().get("categories", []):
+        if cat.get("id") != category:
+            continue
+        for svc in cat.get("services", []):
+            if svc.get("id") == service:
+                for sub in svc.get("subServices") or []:
+                    if sub.get("id") == subservice:
+                        return sub.get("name")
+    return None
 
 
-def _beneficiary_match_reply(beneficiary: dict, destination: dict | None) -> str:
-    name = _beneficiary_display_name(beneficiary)
-    if destination is None:
-        return f"Found {name}, but I can't route this transfer type automatically — please open it manually."
-    action = destination["action"]
-    if action == "own_bank_transfer":
-        return f"Sending to {name} via your Polygon Bank account — redirecting you now."
-    if action == "other_bank_transfer":
-        return f"Sending to {name} via their other bank account — redirecting you now."
-    if action == "wallet_transfer":
-        provider = destination.get("provider") or "wallet"
-        return f"Sending to {name} via {provider.title()} — redirecting you now."
-    return f"Found {name} — redirecting you now."
+def _tail(value) -> str | None:
+    digits = re.sub(r"\D", "", str(value or ""))
+    return digits[-4:] if len(digits) >= 4 else None
 
 
-def _beneficiary_selection_reply(beneficiaries: list[dict]) -> str:
-    names = ", ".join(_beneficiary_display_name(b) for b in beneficiaries)
-    return f"I found {len(beneficiaries)} beneficiaries matching that name — which one did you mean? {names}."
+def _confirm_say(key: tuple, payload: dict | None) -> tuple:
+    """Facts for the yes/no before a change (T-77: no template)."""
+    payload = payload or {}
+    common = {"to_confirm": "say yes", "to_cancel": "say no"}
+    if key == ("beneficiary_management", "beneficiary_add"):
+        must = {"nickname": payload.get("nickname"), "account ending": _tail(payload.get("accountNumber"))}
+        return _say("confirm", must, change="save a new beneficiary for future transfers",
+                    account_holder=payload.get("accountHolderName"),
+                    bank=payload.get("bankName") or ("Polygon Bank" if payload.get("serviceType") == "OWN_BANK" else None),
+                    branch=payload.get("branchName"), what_it_means="nothing is sent now; it is only saved", **common)
+    if key == ("support", "submit_complaint"):
+        text = str(payload.get("description") or "")
+        must = {"complaint": text} if len(text) <= 120 else {}
+        return _say("confirm", must, change="submit a complaint to the bank",
+                    complaint_type=str(payload.get("category") or "OTHER").replace("_", " ").lower(),
+                    complaint_text=text if len(text) > 120 else None,
+                    what_happens_next="it appears under My Tickets", **common)
+    if key == ("profile_update", "update_nickname"):
+        return _say("confirm", {"nickname": payload.get("nickName")}, change="change their nickname",
+                    what_it_means="only the name shown in the app changes", **common)
+    if key == _ADDRESS_KEY:
+        must = {_ADDRESS_LABELS[f]: payload[f] for f in _ADDRESS_LABELS if payload.get(f)}
+        return _say("confirm", must, change="update the address on their profile", **common)
+    if key == _FREEZE_KEY:
+        return _say("confirm", _card_must(payload), change="temporarily freeze this card so it can't be used for payments",
+                    their_reason=payload.get("reason"),
+                    what_happens_next="a verification code is sent to their phone, then they enter it with their PIN or "
+                                      "password in the app's secure form", **common)
+    return _say("confirm", change=_service_name(*key), **common)
 
 
-def _beneficiary_not_found_reply(name_query: str) -> str:
-    return f"I couldn't find a beneficiary named {name_query}."
+def _done_say(key: tuple, payload: dict | None) -> tuple:
+    payload = payload or {}
+    if key == ("beneficiary_management", "beneficiary_add"):
+        return _say("done", {"nickname": payload.get("nickname")}, what="the beneficiary was saved",
+                    next_option="they can now send money to them")
+    if key == ("support", "submit_complaint"):
+        return _say("done", what="the complaint was submitted", where_to_follow_it="My Tickets in the app")
+    if key == ("profile_update", "update_nickname"):
+        return _say("done", {"nickname": payload.get("nickName")}, what="the nickname was changed")
+    if key == _ADDRESS_KEY:
+        return _say("done", {_ADDRESS_LABELS[f]: payload[f] for f in _ADDRESS_LABELS if payload.get(f)},
+                    what="the address was updated")
+    return _say("done", what=f"{_service_name(*key)} completed")
+
+
+def _transfer_summary_say(service: str, subservice: str | None, payload: dict) -> tuple:
+    """No transfer is executed in chat (ADR-0008): the customer finishes it in the app."""
+    amount = payload.get("amount")
+    must = {"amount": f"Tk {amount}"} if amount is not None else {}
+    if service == "wallet_transfer":
+        must["wallet number"] = payload.get("walletNumber")
+    else:
+        must["account ending"] = _tail(payload.get("accountNumber"))
+    return _say("summary", must, transfer_type=_subservice_name("transfer", service, subservice) or subservice,
+                where_to_finish="the transfer screen in the app, which opens next",
+                done_in_chat="no; they confirm and send it in the app")
+
+
+def _dispute_summary_say(payload: dict) -> tuple:
+    """The dispute is never submitted in chat: the customer finishes it in the app."""
+    return _say("summary", {"account ending": _tail(payload.get("accountNumber"))},
+                request="raise a dispute about a transaction",
+                transaction=payload.get("transactionSummary") or payload.get("transactionReferenceNo"),
+                their_reason=payload.get("remarks"),
+                where_to_finish="the dispute screen in the app, which opens next",
+                done_in_chat="no; they submit it in the app")
+
+
+def _choose_say(question_about: str, items: list[dict]) -> tuple:
+    return _say("choose", question_about=question_about,
+                options=[_describe_selection_account(i) for i in items])
+
+
+def _beneficiary_name(beneficiary: dict) -> str | None:
+    return beneficiary.get("nickname") or beneficiary.get("accountHolderName")
 
 
 def _trim_beneficiary(beneficiary: dict) -> dict:
@@ -2728,11 +2095,43 @@ async def _kb_stream(req: ChatRequest, request_id: str):
     yield _sse("done", {})
 
 
-def _emit_outcome(
-    outcome: _TurnOutcome, request_id: str, customer_identity, turn_started_at: float
-) -> list[str]:
-    """SSE chunks (token + result) for a decided _TurnOutcome, plus its per-turn log
-    line and audit line. Logged payload is always secret-redacted."""
+_REDACTED_SUBMISSION = "[redacted: verification submission]"
+
+
+def _history(turns: list[ChatTurn] | None) -> list[tuple[str, str]]:
+    """Recent conversation for the composer: what the customer said and what the
+    assistant asked/said, oldest first. Verification submissions are never included."""
+    out: list[tuple[str, str]] = []
+    for turn in (turns or [])[-3:]:
+        if turn.message and not turn.message.startswith("[redacted"):
+            out.append(("Customer", turn.message))
+        said = (turn.classification or {}).get("question")
+        if said:
+            out.append(("Assistant", said))
+    return out
+
+
+def _safe_for_model(message: str, payload: dict | None) -> str:
+    """The customer's text as the composer may see it: never a typed code/password."""
+    if _has_secret_fields(payload) or _looks_like_typed_secret(message):
+        return "(the customer submitted the secure verification form)"
+    return message
+
+
+async def _emit_outcome(
+    outcome: _TurnOutcome, request_id: str, customer_identity, turn_started_at: float,
+    *, message: str = "", history: list[tuple[str, str]] | None = None,
+):
+    """Composes the outcome's message (streamed), then the result event, plus its
+    per-turn log line and audit line. Logged payload is always secret-redacted."""
+    kind, facts, must = outcome.say
+    text = ""
+    async for piece in compose_stream(kind, facts, message=message, history=history, must_include=must):
+        text += piece
+        yield _sse("token", {"token": piece})
+    outcome.token = text
+    if "question" in outcome.stored:
+        outcome.stored["question"] = text
     logger.info(json.dumps({
         "request_id": request_id,
         "type": outcome.result_type,
@@ -2745,13 +2144,10 @@ def _emit_outcome(
         latency_ms=(time.monotonic() - turn_started_at) * 1000,
         request_id=request_id,
     )
-    return [
-        _sse("token", {"token": outcome.token}),
-        _result_event(
-            outcome.result_type, outcome.category, outcome.service, outcome.subservice,
-            payload=outcome.result_payload, routing=outcome.routing,
-        ),
-    ]
+    yield _result_event(
+        outcome.result_type, outcome.category, outcome.service, outcome.subservice,
+        payload=outcome.result_payload, routing=outcome.routing,
+    )
 
 
 def _session_safe_classification(classification: dict | None) -> dict | None:
@@ -2770,6 +2166,18 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
     customer_identity = await verify_jwt(token) if token else None
 
     session_turns: list[ChatTurn] = get_session(customer_identity.customer_id) if customer_identity else []
+    # T-77: every message is composed with the conversation so far, from text that
+    # can never contain a typed code/password.
+    history = _history(session_turns)
+    composer_message = _safe_for_model(req.message, req.payload)
+    # What is written to the session and the log: a typed code/password is never kept,
+    # at any step (a code typed into a yes/no step is as sensitive as one at an OTP step).
+    stored_message = (_REDACTED_SUBMISSION if _has_secret_fields(req.payload) or _looks_like_typed_secret(req.message)
+                      else req.message)
+
+    async def say_text(say: tuple) -> str:
+        kind, facts, must = say
+        return await compose(kind, facts, message=composer_message, history=history, must_include=must)
     last_session_classification = (session_turns[-1].classification or {}) if session_turns else {}
 
     # T-57: a pending freeze OTP step. Applies to a plain follow-up, or to an explicit
@@ -2777,6 +2185,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
     # may echo the routing fields back) -- any other explicit category+service is a
     # fresh request, same rule as the yes/no confirmation gate below.
     pending_otp: dict | None = None
+    pending_reading = "unsure"
     if last_session_classification.get("type") == _OTP_PENDING_TYPE:
         explicit_pair = (req.category, req.service) if (req.category and req.service) else None
         pending_pair = (last_session_classification.get("category"), last_session_classification.get("service"))
@@ -2786,20 +2195,17 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
         # step when it's a cancel or looks like a code/password typed into the chat
         # box (never logged or sent to an LLM). Anything else means the customer has
         # moved on: the freeze is dropped and the message is handled normally.
-        if (
-            pending_otp is not None
-            and explicit_pair is None
-            and not _has_secret_fields(req.payload)
-            and _classify_confirmation_reply(req.message) != "negative"
-            and not _looks_like_typed_secret(req.message)
-        ):
-            pending_otp = None
+        if pending_otp is not None and explicit_pair is None:
+            pending_reading = await _read_pending_reply(
+                pending_otp.get("question"), req.message, req.payload)
+            if pending_reading == "other":
+                pending_otp = None
 
     logger.info(json.dumps({
         "request_id": request_id,
         # While an OTP step is pending, the free-text message is never logged: a
         # customer may type their code/PIN into the chat box instead of the form.
-        "message": "[redacted: pending verification]" if pending_otp is not None else req.message,
+        "message": "[redacted: pending verification]" if pending_otp is not None else stored_message,
         "session_id": req.session_id,
         "top_k": req.top_k,
         "category": req.category,
@@ -2815,17 +2221,18 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
             if (pending_otp.get("category"), pending_otp.get("service")) in _CONTACT_KEYS
             else _handle_freeze_otp_reply
         )
-        outcome = await otp_handler(customer_identity, token, pending_otp, req.message, req.payload)
-        # Security step: sent exactly as decided, never reworded. Live, the rewording
-        # put the card ending onto the phone number and invented a way to cancel.
-        for chunk in _emit_outcome(outcome, request_id, customer_identity, turn_started_at):
+        outcome = await otp_handler(customer_identity, token, pending_otp, req.message, req.payload,
+                                    declined=(pending_reading == "decline"))
+        # Composed from facts like every message; exact values (card ending, new
+        # email/number) are validated attached to their labels.
+        async for chunk in _emit_outcome(outcome, request_id, customer_identity, turn_started_at, message=composer_message, history=history):
             yield chunk
         yield _sse("done", {})
         record_turn(
             customer_identity.customer_id,
             ChatTurn(
                 timestamp=datetime.now(timezone.utc),
-                message="[redacted: verification submission]",
+                message=_REDACTED_SUBMISSION,
                 classification=_session_safe_classification(outcome.classification()),
             ),
         )
@@ -2849,18 +2256,18 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
         and not (req.category and req.service)
         and last_session_classification.get("type") == "CONFIRMATION_REQUIRED"
         and (last_session_classification.get("category"), last_session_classification.get("service"))
-        in _CONFIRMATION_QUESTION_BUILDERS
+        in (_CONFIRM_CHANGE_KEYS | {_FREEZE_KEY})
     ):
         pending_confirmation = last_session_classification
-        # An unclear reply longer than a word or two ("actually make it Rafiul",
-        # "what's my balance") means the customer moved on: the pending change is
+        confirmation_reading = await _read_pending_reply(
+            pending_confirmation.get("question"), req.message, req.payload)
+        # A different request means the customer moved on: the pending change is
         # dropped -- never executed -- and the message is handled as a new request.
-        if (_classify_confirmation_reply(req.message) == "unclear"
-                and len(req.message.split()) > 2):
+        if confirmation_reading == "other":
             pending_confirmation = None
 
     if pending_confirmation is not None:
-        outcome = _classify_confirmation_reply(req.message)
+        outcome = {"confirm": "affirmative", "decline": "negative"}.get(confirmation_reading, "unclear")
         conf_category = pending_confirmation.get("category")
         conf_service = pending_confirmation.get("service")
         conf_subservice = pending_confirmation.get("subservice")
@@ -2869,10 +2276,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
         confirmation_turn_classification: dict
 
         if outcome == "negative":
-            decline_token = _CONFIRMATION_DECLINE_MESSAGES.get(
-                (conf_category, conf_service), "Okay, I won't go ahead with that."
-            )
-            decline_token = await _phrase(decline_token, req.message)
+            decline_token = await say_text(_say("declined", what=_service_name(conf_category, conf_service)))
             yield _sse("token", {"token": decline_token})
             yield _result_event(
                 "BANKING_SERVICE", conf_category, conf_service, conf_subservice,
@@ -2892,7 +2296,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                 request_id=request_id,
             )
         elif outcome == "unclear":
-            reask_token = f"Sorry, I didn't quite catch that — {conf_question}"
+            reask_token = await say_text(_confirm_say((conf_category, conf_service), conf_payload))
             yield _sse("token", {"token": reask_token})
             yield _result_event("CONFIRMATION_REQUIRED", conf_category, conf_service, conf_subservice, payload=conf_payload)
             confirmation_turn_classification = {
@@ -2910,14 +2314,22 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                 latency_ms=(time.monotonic() - turn_started_at) * 1000,
                 request_id=request_id,
             )
+        elif (conf_category, conf_service) == _FREEZE_KEY:
+            # An explicit yes: only now is the verification code sent. The freeze itself
+            # still only runs from the OTP_REQUIRED gate at the top of this function.
+            freeze_outcome = await _send_freeze_otp(
+                customer_identity, conf_category, conf_service, conf_subservice, conf_payload)
+            async for chunk in _emit_outcome(freeze_outcome, request_id, customer_identity, turn_started_at,
+                                             message=composer_message, history=history):
+                yield chunk
+            confirmation_turn_classification = freeze_outcome.classification()
         else:
             try:
                 adapter_result = await fulfill_banking_service(
                     customer_identity, token, conf_category, conf_service, conf_subservice, conf_payload
                 )
             except AdapterAuthError:
-                confirm_auth_token = "Please log in to continue with this request."
-                confirm_auth_token = await _phrase(confirm_auth_token, req.message)
+                confirm_auth_token = await say_text(_say("login_needed", request=_service_name(conf_category, conf_service)))
                 yield _sse("token", {"token": confirm_auth_token})
                 yield _result_event("AUTH_REQUIRED", conf_category, conf_service, conf_subservice)
                 confirmation_turn_classification = {
@@ -2939,13 +2351,11 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                 if isinstance(exc, AdapterRejectedError):
                     # Not "nothing changed": live, the address PATCH saved and still answered
                     # 409 "A record with the given value already exists".
-                    confirm_unavailable_token = (
-                        f"The bank reported a problem: {exc.bank_message} Please check in the app "
-                        "whether the change was saved."
-                    )
+                    confirm_unavailable_token = await say_text(_say(
+                        "refused_by_bank", request=_service_name(conf_category, conf_service),
+                        bank_message=exc.bank_message, was_it_saved="unknown; check in the app"))
                 else:
-                    confirm_unavailable_token = "That service isn't available right now. Please try again shortly."
-                    confirm_unavailable_token = await _phrase(confirm_unavailable_token, req.message)
+                    confirm_unavailable_token = await say_text(_say("unavailable", service=_service_name(conf_category, conf_service)))
                 yield _sse("token", {"token": confirm_unavailable_token})
                 yield _result_event("SERVICE_UNAVAILABLE", conf_category, conf_service, conf_subservice)
                 confirmation_turn_classification = {
@@ -2968,9 +2378,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                     dict(adapter_result.data) if isinstance(adapter_result.data, dict) else {"result": adapter_result.data}
                 )
                 executed_data["executed"] = True
-                success_builder = _CONFIRMATION_SUCCESS_MESSAGES.get((conf_category, conf_service))
-                success_token = success_builder(conf_payload) if success_builder else "Done."
-                success_token = await _phrase(success_token, req.message)
+                success_token = await say_text(_done_say((conf_category, conf_service), conf_payload))
                 yield _sse("token", {"token": success_token})
                 yield _result_event(
                     "BANKING_SERVICE", conf_category, conf_service, conf_subservice,
@@ -3002,7 +2410,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
             customer_identity.customer_id,
             ChatTurn(
                 timestamp=datetime.now(timezone.utc),
-                message=req.message,
+                message=stored_message,
                 classification=_session_safe_classification(confirmation_turn_classification),
             ),
         )
@@ -3021,18 +2429,18 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                 category=req.category, service=req.service, subservice=req.subservice
             )
     else:
+        fill_context = recent_turns
         result = await _try_account_selection_completion(recent_turns, req.message, req.payload)
         if result is None:
-            fill_context = recent_turns
-            if not recent_turns and session_turns and (
-                    last_session_classification.get("type"), last_session_classification.get("category"),
-                    last_session_classification.get("service")) == ("BANKING_SERVICE", "fees", "fee_quote"):
-                fill_context = session_turns[-1:]
+            if (not recent_turns and session_turns
+                    and last_session_classification.get("type") == "BANKING_SERVICE"
+                    and last_session_classification.get("request") is not None):
+                fill_context = session_turns[-1:]  # a follow-up to the answered request
             result = await _llm_fill_pending_fields(fill_context, req.message)
         if result is not None:
             # A bare follow-up ("500", "the savings one") answered our question; the reply
             # must still answer what the customer originally asked.
-            reply_context = f"{recent_turns[-1].message} (follow-up answer: {req.message})"
+            reply_context = f"{fill_context[-1].message} (follow-up answer: {req.message})"
         if result is None:
             # Nothing pending, but the last turn was ANSWERED: hand it over as context so
             # a follow-up that only changes a detail ("and for nagad?") stays on it.
@@ -3053,11 +2461,10 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                     subservice=result.subservice,
                     payload=req.payload,
                 )
-            result = _align_amount_with_text(result, req.message)
-            result = _fee_answer_not_transfer(result, recent_turns, req.message)
+            result = _check_amount(result, req.message)
             result = _carry_forward_gathered(result, classify_context)
             result = await _ground_freeze_request(result, req.message, recent_turns)
-            result = _normalize_fee_type(result)
+            result = _normalize_fee_type(result, req.message)
 
     result = _clean_extracted_fields(result)
     result = _normalize_change_request(result)
@@ -3069,13 +2476,20 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
         if customer_identity is not None:
             record_turn(
                 customer_identity.customer_id,
-                ChatTurn(timestamp=datetime.now(timezone.utc), message=req.message, classification=None),
+                ChatTurn(timestamp=datetime.now(timezone.utc), message=stored_message, classification=None),
             )
         return
 
     if isinstance(result, Clarification) and _foreign_script(result.question, req.message):
         # Live: Banglish typed in Latin letters came back as garbled Bengali script.
         result = Clarification(question=_CLARIFICATION_FALLBACK)
+    if isinstance(result, Clarification) and result.question == _CLARIFICATION_FALLBACK:
+        # The classifier couldn't word a question (or its wording was rejected):
+        # compose one for this message instead of a fixed sentence.
+        result = Clarification(question=await say_text(_say(
+            "clarify", what_is_unclear="what the customer would like to do",
+            can_help_with=["balance and transactions", "transfers and fees", "cards",
+                           "disputes and complaints", "profile details"])))
     if isinstance(result, Clarification):
         yield _sse("token", {"token": result.question})
         yield _result_event("CLARIFICATION_REQUIRED", None, None, None)
@@ -3095,8 +2509,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
         )
 
     elif isinstance(result, UnknownService):
-        unknown_service_token = "I'm not able to help with that specific request right now."
-        unknown_service_token = await _phrase(unknown_service_token, req.message)
+        unknown_service_token = await say_text(_say("not_in_chat", request=_service_name(result.category, result.service)))
         yield _sse("token", {"token": unknown_service_token})
         yield _result_event("UNKNOWN_SERVICE", result.category, result.service, result.subservice)
         turn_classification = {
@@ -3122,8 +2535,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
         )
 
         if customer_identity is None:
-            auth_required_token = "Please log in to continue with this request."
-            auth_required_token = await _phrase(auth_required_token, req.message)
+            auth_required_token = await say_text(_say("login_needed", request=_service_name(category, service)))
             yield _sse("token", {"token": auth_required_token})
             yield _result_event("AUTH_REQUIRED", category, service, subservice)
             turn_classification = {
@@ -3153,8 +2565,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                         customer_identity, token, "account_info", "cards", None, None
                     )
                 except AdapterAuthError:
-                    freeze_cards_auth_token = "Please log in to continue with this request."
-                    freeze_cards_auth_token = await _phrase(freeze_cards_auth_token, req.message)
+                    freeze_cards_auth_token = await say_text(_say("login_needed", request=_service_name(category, service)))
                     yield _sse("token", {"token": freeze_cards_auth_token})
                     yield _result_event("AUTH_REQUIRED", category, service, subservice)
                     turn_classification = {
@@ -3173,8 +2584,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                         request_id=request_id,
                     )
                 except AdapterUnavailableError:
-                    freeze_cards_unavailable_token = "That service isn't available right now. Please try again shortly."
-                    freeze_cards_unavailable_token = await _phrase(freeze_cards_unavailable_token, req.message)
+                    freeze_cards_unavailable_token = await say_text(_say("unavailable", service="their card list"))
                     yield _sse("token", {"token": freeze_cards_unavailable_token})
                     yield _result_event("SERVICE_UNAVAILABLE", category, service, subservice)
                     turn_classification = {
@@ -3196,8 +2606,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                     cards = cards_result.data.get("cards") if isinstance(cards_result.data, dict) else None
                     cards = cards if isinstance(cards, list) else []
                     if len(cards) == 0:
-                        no_cards_token = "You don't have any cards on file."
-                        no_cards_token = await _phrase(no_cards_token, req.message)
+                        no_cards_token = await say_text(_say("answer", cards_on_file="none"))
                         yield _sse("token", {"token": no_cards_token})
                         yield _result_event("BANKING_SERVICE", category, service, subservice, payload={"cards": []})
                         turn_classification = {
@@ -3222,8 +2631,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                         if len(card_number) >= 4:
                             payload["cardLast4"] = card_number[-4:]
                     else:
-                        card_selection_token = _account_selection_reply(cards)
-                        card_selection_token = await _phrase(card_selection_token, req.message)
+                        card_selection_token = await say_text(_choose_say("which of their cards they mean", cards))
                         yield _sse("token", {"token": card_selection_token})
                         yield _result_event(
                             "ACCOUNT_SELECTION_REQUIRED", category, service, subservice, payload={"accounts": cards}
@@ -3272,7 +2680,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                     else:
                         payload["serviceType"] = "OTHER_BANK"
                 if recipient_outcome is not None:
-                    for chunk in _emit_outcome(recipient_outcome, request_id, customer_identity, turn_started_at):
+                    async for chunk in _emit_outcome(recipient_outcome, request_id, customer_identity, turn_started_at, message=composer_message, history=history):
                         yield chunk
                     turn_classification = recipient_outcome.classification()
 
@@ -3281,16 +2689,15 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                     customer_identity, token, category, service, subservice, payload, reply_context
                 )
                 if prefill_outcome is not None:
-                    for chunk in _emit_outcome(prefill_outcome, request_id, customer_identity, turn_started_at):
+                    async for chunk in _emit_outcome(prefill_outcome, request_id, customer_identity, turn_started_at, message=composer_message, history=history):
                         yield chunk
                     turn_classification = prefill_outcome.classification()
 
             if turn_classification is None:
                 missing_fields = _missing_payload_fields(category, service, payload)
                 if missing_fields:
-                    clarification_question = await _clarification_question_for(
-                        req.message, category, service, subservice, payload, missing_fields
-                    )
+                    clarification_question = await say_text(
+                        _ask_say(category, service, subservice, payload, missing_fields))
                     yield _sse("token", {"token": clarification_question})
                     yield _result_event("CLARIFICATION_REQUIRED", None, None, None)
                     turn_classification = {
@@ -3322,8 +2729,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                     collected_payload = dict(payload or {})
                     collected_payload["formattedAmount"] = _format_bdt(collected_payload.get("amount"))
                     collected_payload["executed"] = False
-                    transfer_summary_token = _transfer_summary_reply(service, subservice, payload or {})
-                    transfer_summary_token = await _phrase(transfer_summary_token, req.message)
+                    transfer_summary_token = await say_text(_transfer_summary_say(service, subservice, payload or {}))
                     yield _sse("token", {"token": transfer_summary_token})
                     routing_action = f"{subservice}_transfer"
                     yield _result_event(
@@ -3365,8 +2771,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                     # FAILED_TRANSFER 8.2 -- identical contract, one implementation.
                     collected_payload = dict(payload or {})
                     collected_payload["executed"] = False
-                    dispute_summary_token = _dispute_summary_reply(payload or {})
-                    dispute_summary_token = await _phrase(dispute_summary_token, req.message)
+                    dispute_summary_token = await say_text(_dispute_summary_say(payload or {}))
                     yield _sse("token", {"token": dispute_summary_token})
                     yield _result_event(
                         "BANKING_SERVICE",
@@ -3408,30 +2813,17 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                         change_outcome = _profile_photo_outcome(category, service, subservice)
                     else:
                         change_outcome = await _send_contact_otp(customer_identity, category, service, payload)
-                    for chunk in _emit_outcome(change_outcome, request_id, customer_identity, turn_started_at):
+                    async for chunk in _emit_outcome(change_outcome, request_id, customer_identity, turn_started_at, message=composer_message, history=history):
                         yield chunk
                     turn_classification = change_outcome.classification()
-                elif (category, service) == _FREEZE_KEY:
-                    # T-57: card + reason known -> send the OTP to the customer's own
-                    # phone and ask for OTP + PIN/password (replaces the old yes/no).
-                    # The freeze itself only ever runs from the pending OTP_REQUIRED
-                    # branch at the top of this function.
-                    freeze_outcome = await _send_freeze_otp(
-                        customer_identity, category, service, subservice, payload
-                    )
-                    # Security step: exact wording, never reworded (see the OTP branch above).
-                    for chunk in _emit_outcome(freeze_outcome, request_id, customer_identity, turn_started_at):
-                        yield chunk
-                    turn_classification = freeze_outcome.classification()
-                elif (category, service) in _CONFIRMATION_QUESTION_BUILDERS:
+                elif (category, service) in _CONFIRM_CHANGE_KEYS or (category, service) == _FREEZE_KEY:
                     # T-57/T-60: this chatbot's first-ever mutating platform calls --
                     # never executed here. Only an explicit, deterministic "yes" on the
                     # customer's NEXT turn (see the pending_confirmation branch near the
                     # top of this function) triggers the actual fulfill_banking_service
                     # call; nothing below this point calls the real adapter.
-                    # Sent verbatim: a yes/no must show exactly the value that will be
-                    # saved (nickname, address, complaint text), never a rewording.
-                    confirmation_question = _CONFIRMATION_QUESTION_BUILDERS[(category, service)](payload)
+                    # Composed; the exact values that will be saved are validated in it.
+                    confirmation_question = await say_text(_confirm_say((category, service), payload))
                     yield _sse("token", {"token": confirmation_question})
                     yield _result_event(
                         "CONFIRMATION_REQUIRED", category, service, subservice, payload=_strip_secrets(payload)
@@ -3461,8 +2853,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                             customer_identity, token, category, service, subservice, payload
                         )
                     except AdapterAuthError:
-                        adapter_auth_error_token = "Please log in to continue with this request."
-                        adapter_auth_error_token = await _phrase(adapter_auth_error_token, req.message)
+                        adapter_auth_error_token = await say_text(_say("login_needed", request=_service_name(category, service)))
                         yield _sse("token", {"token": adapter_auth_error_token})
                         yield _result_event("AUTH_REQUIRED", category, service, subservice)
                         turn_classification = {
@@ -3479,8 +2870,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                             request_id=request_id,
                         )
                     except AdapterAccountSelectionRequiredError as exc:
-                        account_selection_token = _account_selection_reply(exc.accounts)
-                        account_selection_token = await _phrase(account_selection_token, req.message)
+                        account_selection_token = await say_text(_choose_say("which of their accounts they mean", exc.accounts))
                         yield _sse("token", {"token": account_selection_token})
                         yield _result_event(
                             "ACCOUNT_SELECTION_REQUIRED", category, service, subservice, payload={"accounts": exc.accounts}
@@ -3506,8 +2896,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                             request_id=request_id,
                         )
                     except AdapterUnavailableError:
-                        service_unavailable_token = "That service isn't available right now. Please try again shortly."
-                        service_unavailable_token = await _phrase(service_unavailable_token, req.message)
+                        service_unavailable_token = await say_text(_say("unavailable", service=_service_name(category, service)))
                         yield _sse("token", {"token": service_unavailable_token})
                         yield _result_event("SERVICE_UNAVAILABLE", category, service, subservice)
                         turn_classification = {
@@ -3547,10 +2936,10 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                                 matches = _match_beneficiaries(payload.get("nameQuery", ""), beneficiaries)
 
                             if len(matches) == 0:
-                                beneficiary_reply_token = _beneficiary_not_found_reply(
-                                    payload.get("nameQuery") or "that beneficiary"
-                                )
-                                beneficiary_reply_token = await _phrase(beneficiary_reply_token, req.message)
+                                beneficiary_reply_token = await say_text(_say(
+                                    "ask", {"name searched": payload.get("nameQuery")},
+                                    problem="no saved beneficiary has that name",
+                                    options=["check the name", "send to a new account or wallet instead"]))
                                 yield _sse("token", {"token": beneficiary_reply_token})
                                 yield _result_event("CLARIFICATION_REQUIRED", None, None, None)
                                 turn_classification = {
@@ -3563,8 +2952,11 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                             elif len(matches) == 1:
                                 matched = matches[0]
                                 destination = _resolve_beneficiary_destination(matched)
-                                beneficiary_reply_token = _beneficiary_match_reply(matched, destination)
-                                beneficiary_reply_token = await _phrase(beneficiary_reply_token, req.message)
+                                beneficiary_reply_token = await say_text(_say(
+                                    "redirect", {"beneficiary": _beneficiary_name(matched)},
+                                    screen=("the matching transfer screen in the app, pre-filled" if destination
+                                            else "the beneficiary list in the app (this type can't be opened automatically)"),
+                                    done_in_chat="no; they confirm the amount and send it in the app"))
                                 yield _sse("token", {"token": beneficiary_reply_token})
                                 routing_action = destination["action"] if destination else "manual"
                                 yield _result_event(
@@ -3587,8 +2979,9 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                                     "subservice": subservice,
                                 }
                             else:
-                                beneficiary_reply_token = _beneficiary_selection_reply(matches)
-                                beneficiary_reply_token = await _phrase(beneficiary_reply_token, req.message)
+                                beneficiary_reply_token = await say_text(_say(
+                                    "choose", question_about="which saved beneficiary they mean",
+                                    options=[_beneficiary_name(b) for b in matches]))
                                 yield _sse("token", {"token": beneficiary_reply_token})
                                 yield _result_event(
                                     "BENEFICIARY_SELECTION_REQUIRED",
@@ -3617,7 +3010,9 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                             )
                         else:
                             if data.get("mock") is True:
-                                banking_service_token = await _phrase(f"This is placeholder information about {service.replace('_', ' ')}; the real service isn't connected to chat yet.", req.message)
+                                banking_service_token = await say_text(_say(
+                                    "unavailable", service=_service_name(category, service),
+                                    status="not connected to the chat yet"))
                             else:
                                 data = _enrich_payload(service, subservice, data)
                                 banking_service_token = ""
@@ -3666,7 +3061,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
             customer_identity.customer_id,
             ChatTurn(
                 timestamp=datetime.now(timezone.utc),
-                message=req.message,
+                message=stored_message,
                 classification=_session_safe_classification(turn_classification),
             ),
         )

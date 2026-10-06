@@ -120,8 +120,18 @@ def _post(client, message, payload=None, **extra):
     return _parse_sse(resp.text)
 
 
-def _start(client, bank):
+def _ask_freeze(client, bank):
+    """The freeze request: ends in a yes/no, and NO verification code is sent yet."""
     events = _post(client, "please freeze my card")
+    assert _result(events)["type"] == "CONFIRMATION_REQUIRED"
+    assert bank.sends == []
+    return events
+
+
+def _start(client, bank):
+    """Request -> yes/no -> (the customer taps Confirm) -> code sent, OTP step pending."""
+    _ask_freeze(client, bank)
+    events = _post(client, "Confirm", {"confirm": True})
     assert _result(events)["type"] == "OTP_REQUIRED"
     assert bank.sends == [CUSTOMER_PHONE]
     return events
@@ -142,7 +152,10 @@ def test_otp_and_pin_freezes_card(client, bank):
     assert "password" not in sent
     assert sent["cardId"] == "41"
 
-    assert _token(events) == "Done — your card ending 0251 has been frozen."
+    token = _token(events)
+    assert token.startswith("done:")
+    assert "what: the card was frozen" in token
+    assert "card ending: 0251" in token
     result = _result(events)
     assert result["type"] == "BANKING_SERVICE"
     # Only the outcome reaches the frontend -- never the bank's raw card record.
@@ -180,7 +193,8 @@ def test_both_pin_and_password_reasks(client, bank):
     result = _result(events)
     assert result["type"] == "OTP_REQUIRED"
     assert result["payload"]["verificationStatus"] == "CREDENTIALS_INVALID_COMBINATION"
-    assert "just one" in _token(events)
+    assert _token(events).startswith("verify:")
+    assert "only one of them is needed" in _token(events)
     assert bank.verifies == [] and bank.freezes == []
 
 
@@ -202,10 +216,142 @@ def test_otp_typed_in_message_text_is_never_parsed(client, bank):
     assert bank.classify_calls == ["please freeze my card"]
 
 
+# --- the yes/no BEFORE any code is sent (live QA: "Withdraw cash" was routed to a
+# --- freeze and an SMS went out the customer never asked for) ---------------------
+
+
+def test_freeze_request_asks_yes_no_and_sends_no_code(client, bank):
+    events = _ask_freeze(client, bank)
+    result = _result(events)
+    assert result["category"] == "card_services" and result["service"] == "frezz_unfrezz"
+    # the exact card and the reason travel with it; secrets never do
+    assert result["payload"] == CARD_PAYLOAD
+    token = _token(events)
+    assert token.startswith("confirm:")
+    assert "card ending: 0251" in token
+    assert "their reason: lost" in token
+    assert "to confirm: say yes" in token and "to cancel: say no" in token
+    assert "verification code is sent to their phone" in token
+    assert bank.sends == [] and bank.verifies == [] and bank.freezes == []
+    pending = session_module.get_session(CUSTOMER_PHONE)[-1].classification
+    assert pending["type"] == "CONFIRMATION_REQUIRED"
+    assert (pending["category"], pending["service"]) == ("card_services", "frezz_unfrezz")
+    assert pending["payload"] == CARD_PAYLOAD
+    assert pending["question"] == token
+
+
+def test_confirm_button_sends_the_code_once_to_the_jwt_customers_phone(client, bank):
+    _ask_freeze(client, bank)
+    events = _post(client, "Confirm", {"confirm": True})
+    result = _result(events)
+    assert result["type"] == "OTP_REQUIRED"
+    assert result["payload"]["verificationStatus"] == "OTP_SENT"
+    assert result["payload"]["cardLast4"] == "0251"
+    assert _token(events).startswith("verify:")
+    assert bank.sends == [CUSTOMER_PHONE]
+    assert bank.verifies == [] and bank.freezes == []
+    assert bank.classify_calls == ["please freeze my card"]
+
+
+def test_typed_yes_sends_the_code_but_never_freezes(client, bank):
+    _ask_freeze(client, bank)
+    events = _post(client, "yes")
+    assert _result(events)["type"] == "OTP_REQUIRED"
+    assert bank.sends == [CUSTOMER_PHONE]
+    assert bank.freezes == []
+    assert bank.classify_calls == ["please freeze my card"]
+
+
+@pytest.mark.parametrize("reply,payload", [("no", None), ("Cancel", {"confirm": False})])
+def test_declining_the_yes_no_sends_nothing_and_calls_no_bank(client, bank, reply, payload):
+    _ask_freeze(client, bank)
+    events = _post(client, reply, payload)
+    result = _result(events)
+    assert result["type"] == "BANKING_SERVICE"
+    assert result["payload"] == {"executed": False, "cancelled": True}
+    assert _token(events).startswith("declined:")
+    assert bank.sends == [] and bank.verifies == [] and bank.freezes == []
+    # Flow is over: a later "yes" revives nothing.
+    _post(client, "yes")
+    assert bank.sends == [] and bank.freezes == []
+
+
+def test_unclear_reply_reasks_the_yes_no_and_sends_nothing(client, bank):
+    first = _ask_freeze(client, bank)
+    events = _post(client, "hmm")
+    assert _result(events)["type"] == "CONFIRMATION_REQUIRED"
+    assert _token(events) == _token(first)
+    assert bank.sends == [] and bank.freezes == []
+    assert bank.classify_calls == ["please freeze my card"]
+    # still pending: a yes now sends the code
+    assert _result(_post(client, "yes"))["type"] == "OTP_REQUIRED"
+    assert bank.sends == [CUSTOMER_PHONE]
+
+
+def test_a_different_request_drops_the_freeze_and_sends_no_code(client, bank):
+    _ask_freeze(client, bank)
+    events = _post(client, "what is my account balance please")
+    assert bank.classify_calls == ["please freeze my card", "what is my account balance please"]
+    assert _result(events)["type"] == "CLARIFICATION_REQUIRED"  # the classifier's answer
+    assert bank.sends == [] and bank.freezes == []
+    _post(client, "yes")
+    assert bank.sends == []
+
+
+def test_code_typed_at_the_freeze_yes_no_never_executes_or_classifies(client, bank, monkeypatch):
+    import httpx
+
+    async def never(self, *a, **k):
+        raise AssertionError("a typed secret must never reach a model")
+
+    _ask_freeze(client, bank)
+    monkeypatch.setattr(httpx.AsyncClient, "post", never)
+    events = _post(client, "my code is 482916")
+    assert _result(events)["type"] == "CONFIRMATION_REQUIRED"  # asked again, nothing runs
+    assert bank.sends == [] and bank.verifies == [] and bank.freezes == []
+    assert bank.classify_calls == ["please freeze my card"]
+
+
+def test_explicit_freeze_request_with_a_reason_still_gets_a_yes_no_never_an_otp(client, bank, monkeypatch):
+    # The app resubmits category+service+payload directly (no classifier involved).
+    monkeypatch.setattr(chat_module, "is_valid_path", lambda c, s, sub=None: True)
+    events = _post(client, "freeze it", dict(CARD_PAYLOAD), category="card_services", service="frezz_unfrezz")
+    assert _result(events)["type"] == "CONFIRMATION_REQUIRED"
+    assert bank.sends == []
+
+
+def test_a_classifier_invented_block_request_still_ends_in_a_yes_no(client, bank, monkeypatch):
+    """Live: the model copied one quote ("Withdraw cash") into both `reason` and
+    `block_request`, so the grounding check passed. Whatever the classifier and the
+    grounding say, a freeze only ever reaches a yes/no -- never a code."""
+
+
+    async def grounded_by_copy(result, message, recent_turns):
+        # the 8B's behaviour: same quote for reason and block_request -> freeze kept
+        payload = dict(result.payload or {})
+        payload["reason"] = message
+        return BankingService(result.category, result.service, result.subservice, payload)
+
+    async def fake_classify(message, recent_turns=None):
+        bank.classify_calls.append(message)
+        return BankingService("card_services", "frezz_unfrezz", None, {"cardId": "41", "cardLast4": "0251"})
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "_ground_freeze_request", grounded_by_copy)
+    events = _post(client, "Withdraw cash")
+    assert _result(events)["type"] == "CONFIRMATION_REQUIRED"
+    assert "their reason: Withdraw cash" in _token(events)  # the customer can see it and say no
+    assert bank.sends == [] and bank.freezes == []
+    declined = _post(client, "no")
+    assert _result(declined)["payload"] == {"executed": False, "cancelled": True}
+    assert bank.sends == []
+
+
 def test_cancel_while_pending_stops_without_freezing(client, bank):
     _start(client, bank)
     events = _post(client, "cancel")
-    assert _token(events) == "Okay, I won't freeze your card."
+    assert _token(events).startswith("declined:")
+    assert "card ending: 0251" in _token(events)
     assert _result(events)["payload"] == {"executed": False, "cancelled": True}
     assert bank.freezes == []
 
@@ -223,8 +369,8 @@ def test_wrong_otp_reports_attempts_and_does_not_resend(client, bank):
     assert result["type"] == "OTP_REQUIRED"
     assert result["payload"]["verificationStatus"] == "OTP_INCORRECT"
     assert result["payload"]["attemptsRemaining"] == 2
-    assert "2 attempts left" in _token(events)
-    assert "no new code" in _token(events)
+    assert "attempts left: 2" in _token(events)
+    assert "no new code is needed" in _token(events)
     assert len(bank.sends) == 1
     assert bank.freezes == []
 
@@ -240,7 +386,8 @@ def test_expired_otp_auto_resends(client, bank):
     result = _result(events)
     assert result["type"] == "OTP_REQUIRED"
     assert result["payload"]["verificationStatus"] == "OTP_RESENT"
-    assert _token(events).startswith("That code has expired, so I've sent you a new one.")
+    assert _token(events).startswith("verify:")
+    assert "the earlier code expired, so a new one was sent" in _token(events)
     assert bank.sends == [CUSTOMER_PHONE, CUSTOMER_PHONE]
     assert bank.freezes == []
 
@@ -253,13 +400,15 @@ def test_blocked_otp_tells_customer_to_wait_and_ends_flow(client, bank):
     assert result["type"] == "BANKING_SERVICE"
     assert result["payload"] == {"executed": False, "verificationStatus": "OTP_BLOCKED"}
     assert "wait about 5 minutes" in _token(events)
-    assert "has not been frozen" in _token(events)
+    assert _token(events).startswith("not_done:")
+    assert "card status: not frozen" in _token(events)
     assert bank.freezes == []
 
 
 def test_send_throttled_at_start_tells_customer_to_wait(client, bank):
     bank.send_errors.append(AdapterValidationError("SEND_THROTTLED", "slow down"))
-    events = _post(client, "please freeze my card")
+    _ask_freeze(client, bank)
+    events = _post(client, "Confirm", {"confirm": True})
     result = _result(events)
     assert result["type"] == "BANKING_SERVICE"
     assert result["payload"] == {"executed": False, "verificationStatus": "SEND_THROTTLED"}
@@ -268,7 +417,8 @@ def test_send_throttled_at_start_tells_customer_to_wait(client, bank):
 
 def test_send_unavailable_is_service_unavailable(client, bank):
     bank.send_errors.append(AdapterUnavailableError("down"))
-    events = _post(client, "please freeze my card")
+    _ask_freeze(client, bank)
+    events = _post(client, "Confirm", {"confirm": True})
     assert _result(events)["type"] == "SERVICE_UNAVAILABLE"
 
 
@@ -284,7 +434,7 @@ def test_wrong_pin_keeps_token_and_retries_without_resend_or_reverify(client, ba
     assert result["payload"]["verificationStatus"] == "INVALID_CREDENTIALS"
     assert result["payload"]["otpRequired"] is False
     assert "verificationToken" not in result["payload"]
-    assert "no new code" in _token(events)
+    assert "the code is still valid, so only the PIN or password needs re-entering" in _token(events)
 
     # Retry with only the PIN: no new OTP send, no new verify, same token reused.
     events = _post(client, "submit", {"pin": "123456"})
@@ -302,7 +452,8 @@ def test_invalid_verification_token_auto_resends(client, bank):
     assert result["type"] == "OTP_REQUIRED"
     assert result["payload"]["verificationStatus"] == "OTP_RESENT"
     assert result["payload"]["otpRequired"] is True
-    assert _token(events).startswith("Your verification has expired, so I've sent you a new code.")
+    assert _token(events).startswith("verify:")
+    assert "the verification expired, so a new code was sent" in _token(events)
     assert len(bank.sends) == 2
 
 
@@ -334,7 +485,10 @@ def test_otp_pin_password_never_appear_in_logs_or_session_state(client, bank, ca
 
     # Initial request already (wrongly) carries secrets -- they must not be stored.
     first = _post(client, "please freeze my card", {**CARD_PAYLOAD, "pin": secret_pin, "otp": secret_otp})
-    assert _result(first)["type"] == "OTP_REQUIRED"
+    assert _result(first)["type"] == "CONFIRMATION_REQUIRED"
+    assert "pin" not in _result(first)["payload"] and "otp" not in _result(first)["payload"]
+    confirm_events = _post(client, "Confirm", {"confirm": True})
+    assert _result(confirm_events)["type"] == "OTP_REQUIRED"
     # Customer types a code into the chat box instead of the form.
     _post(client, f"the code is {typed_otp}")
     bank.freeze_errors.append(AdapterValidationError("INVALID_CREDENTIALS", "bad pin"))
@@ -353,9 +507,9 @@ def test_otp_pin_password_never_appear_in_logs_or_session_state(client, bank, ca
     )
     assert "chat.requests" in log_text and "banking.audit" in log_text
     stored_turns = session_module.get_session(CUSTOMER_PHONE)
-    assert len(stored_turns) == 4
+    assert len(stored_turns) == 5
     session_text = repr(stored_turns)
-    sse_text = json.dumps(first) + json.dumps(wrong_events) + json.dumps(ok_events)
+    sse_text = json.dumps(first) + json.dumps(confirm_events) + json.dumps(wrong_events) + json.dumps(ok_events)
 
     for secret in secrets:
         assert secret not in log_text, f"secret leaked into logs: {secret}"

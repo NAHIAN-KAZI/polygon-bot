@@ -187,57 +187,20 @@ def test_resolve_destination_unknown_service_type_returns_none():
     assert chat_module._resolve_beneficiary_destination({}) is None
 
 
-# --- _beneficiary_display_name / reply builders / _trim_beneficiary ---------
+# --- _beneficiary_name / _trim_beneficiary ----------------------------------
 
 
 def test_display_name_prefers_nickname():
-    assert chat_module._beneficiary_display_name(ASHAN) == "Ashan"
+    assert chat_module._beneficiary_name(ASHAN) == "Ashan"
 
 
 def test_display_name_falls_back_to_account_holder_name():
-    assert chat_module._beneficiary_display_name(ASHANUR) == "Ashanur Rahman"
+    assert chat_module._beneficiary_name(ASHANUR) == "Ashanur Rahman"
 
 
-def test_display_name_falls_back_to_generic_when_both_missing():
-    assert chat_module._beneficiary_display_name({}) == "that beneficiary"
-
-
-def test_match_reply_no_destination():
-    reply = chat_module._beneficiary_match_reply(ASHAN, None)
-    assert reply == "Found Ashan, but I can't route this transfer type automatically — please open it manually."
-
-
-def test_match_reply_own_bank_transfer():
-    destination = {"action": "own_bank_transfer"}
-    reply = chat_module._beneficiary_match_reply(ASHAN, destination)
-    assert reply == "Sending to Ashan via your Polygon Bank account — redirecting you now."
-
-
-def test_match_reply_other_bank_transfer():
-    destination = {"action": "other_bank_transfer"}
-    reply = chat_module._beneficiary_match_reply(ASHANUR, destination)
-    assert reply == "Sending to Ashanur Rahman via their other bank account — redirecting you now."
-
-
-def test_match_reply_wallet_transfer_titles_provider():
-    destination = {"action": "wallet_transfer", "provider": "bkash"}
-    reply = chat_module._beneficiary_match_reply(BIKASH_MOM, destination)
-    assert reply == "Sending to Mom via Bkash — redirecting you now."
-
-
-def test_match_reply_wallet_transfer_without_provider_falls_back():
-    destination = {"action": "wallet_transfer"}
-    reply = chat_module._beneficiary_match_reply(BIKASH_MOM, destination)
-    assert reply == "Sending to Mom via Wallet — redirecting you now."
-
-
-def test_selection_reply_lists_all_names():
-    reply = chat_module._beneficiary_selection_reply([ASHAN, ASHANUR])
-    assert reply == "I found 2 beneficiaries matching that name — which one did you mean? Ashan, Ashanur Rahman."
-
-
-def test_not_found_reply_includes_query():
-    assert chat_module._beneficiary_not_found_reply("Ashan") == "I couldn't find a beneficiary named Ashan."
+def test_display_name_none_when_both_missing():
+    # No invented generic name: the composer simply gets no name fact.
+    assert chat_module._beneficiary_name({}) is None
 
 
 def test_trim_beneficiary_keeps_only_expected_keys():
@@ -299,7 +262,9 @@ def test_e2e_name_query_single_match_returns_beneficiary_match(client, monkeypat
     assert [name for name, _ in events] == ["token", "result", "done"]
 
     token_event = next(data for name, data in events if name == "token")
-    assert token_event["token"] == "Sending to Ashan via your Polygon Bank account — redirecting you now."
+    assert token_event["token"].startswith("redirect:")
+    assert "beneficiary: Ashan" in token_event["token"]
+    assert "pre-filled" in token_event["token"]  # a routable destination opens the transfer screen
 
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "BENEFICIARY_MATCH"
@@ -332,7 +297,9 @@ def test_e2e_name_query_zero_matches_returns_clarification_required(client, monk
     events = _parse_sse(resp.text)
 
     token_event = next(data for name, data in events if name == "token")
-    assert token_event["token"] == "I couldn't find a beneficiary named Zubair."
+    assert token_event["token"].startswith("ask:")
+    assert "name searched: Zubair" in token_event["token"]
+    assert "no saved beneficiary has that name" in token_event["token"]
 
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "CLARIFICATION_REQUIRED"
@@ -355,7 +322,8 @@ def test_e2e_name_query_zero_matches_audit_includes_question(client, monkeypatch
     args, kwargs = audit_spy[0]
     _, turn_classification = args
     assert turn_classification["type"] == "CLARIFICATION_REQUIRED"
-    assert turn_classification["question"] == "I couldn't find a beneficiary named Zubair."
+    assert turn_classification["question"].startswith("ask:")
+    assert "name searched: Zubair" in turn_classification["question"]
 
 
 def test_e2e_name_query_multiple_matches_returns_beneficiary_selection_required(client, monkeypatch):
@@ -376,6 +344,11 @@ def test_e2e_name_query_multiple_matches_returns_beneficiary_selection_required(
     assert trimmed_ids == {"ben-1", "ben-2"}
     for trimmed in result_event["payload"]["beneficiaries"]:
         assert set(trimmed.keys()) == {"id", "nickname", "accountHolderName", "serviceType", "mfsProvider"}
+
+    # the question names every matching beneficiary
+    token = next(data for name, data in events if name == "token")["token"]
+    assert token.startswith("choose:")
+    assert "Ashan" in token and "Ashanur Rahman" in token
 
 
 def test_e2e_beneficiary_id_resubmit_resolves_directly_skipping_name_matching(client, monkeypatch):
@@ -398,6 +371,8 @@ def test_e2e_beneficiary_id_resubmit_resolves_directly_skipping_name_matching(cl
     assert result_event["payload"]["beneficiary"] == BIKASH_MOM
     assert result_event["payload"]["destination"] == {"action": "wallet_transfer", "provider": "bkash"}
     assert result_event["routing"]["action"] == "wallet_transfer"
+    token = next(data for name, data in events if name == "token")["token"]
+    assert "beneficiary: Mom" in token
 
 
 def test_e2e_non_beneficiary_banking_service_flow_unaffected(client, monkeypatch):

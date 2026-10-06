@@ -5,6 +5,7 @@ import json
 
 import pytest
 
+import app.banking.routing as routing_module
 import app.routes.chat as chat
 from app.banking.adapters import real
 from app.banking.routing import BankingService
@@ -24,6 +25,27 @@ def test_ordinary_messages_do_not_look_like_secrets(message):
 
 
 _REAL_GROUND = chat._ground_freeze_request  # conftest patches it per test
+_REAL_FILL = chat._llm_fill_pending_fields  # conftest patches it per test
+
+# The live transfer menu (taxonomy key "subServices"): every transfer/fee id is read
+# from here, never from a hardcoded list.
+TRANSFER_TAXONOMY = {"categories": [{"id": "transfer", "services": [
+    {"id": "bank_transfer", "name": "Bank Transfer", "subServices": [
+        {"id": "own_account", "name": "Own Account Transfer"},
+        {"id": "city_account", "name": "Polygon Bank Account Transfer"},
+        {"id": "other_bank", "name": "Other Bank Transfer"}]},
+    {"id": "wallet_transfer", "name": "Wallet Transfer", "subServices": [
+        {"id": "bkash", "name": "bKash"}, {"id": "nagad", "name": "Nagad"}]},
+    {"id": "cash_by_code", "name": "Cash by Code"},
+]}]}
+
+
+@pytest.fixture
+def transfer_menu(monkeypatch):
+    monkeypatch.setattr(routing_module, "get_taxonomy", lambda: TRANSFER_TAXONOMY)
+    monkeypatch.setattr(chat, "get_taxonomy", lambda: TRANSFER_TAXONOMY)
+    monkeypatch.setattr(chat, "fee_transaction_types", lambda: routing_module.fee_transaction_types(TRANSFER_TAXONOMY))
+    return TRANSFER_TAXONOMY
 
 
 def _freeze(payload):
@@ -90,7 +112,7 @@ def test_no_credit_card_is_an_answer_not_an_outage(monkeypatch, adapter):
 
     monkeypatch.setattr(real, "_call", fake_call)
     result = asyncio.run(adapter.fulfill(None, "jwt", "x", None))
-    assert result.data == {"creditCard": None, "answer": "You don't have a credit card with Polygon Bank."}
+    assert result.data == {"creditCard": None, "hasCreditCard": False}
 
 
 def test_coerce_payload_drops_empty_values_the_model_fills_in():
@@ -205,15 +227,26 @@ def test_running_balance_is_labelled_for_the_reply():
     assert redacted["transactions"][0]["balanceAfterThisTransaction"] == "Tk 95,000.00"
 
 
-def test_fee_type_is_mapped_to_a_live_id_or_dropped(monkeypatch):
-    monkeypatch.setattr(chat, "fee_transaction_types", lambda: ["bkash", "nagad", "other_bank"])
+def test_fee_type_is_mapped_to_a_live_id_or_dropped(transfer_menu):
+    def fee(t, message=""):
+        return chat._normalize_fee_type(
+            BankingService("fees", "fee_quote", None, {"transactionType": t, "amount": 500}), message)
 
-    def fee(t):
-        return chat._normalize_fee_type(BankingService("fees", "fee_quote", None, {"transactionType": t, "amount": 500}))
-
-    assert fee("bkash transfer").payload == {"transactionType": "bkash", "amount": 500}
+    # Exactly a live id (case / spaces / hyphens normalised) -- no substring mapping.
+    assert fee("bkash").payload == {"transactionType": "bkash", "amount": 500}
     assert fee("Other Bank").payload == {"transactionType": "other_bank", "amount": 500}
+    assert fee("other-bank").payload == {"transactionType": "other_bank", "amount": 500}
+    assert fee("bkash transfer").payload == {"amount": 500}
     assert fee("NPSB").payload == {"amount": 500}
+    # A wallet must be one the customer actually named.
+    assert fee("nagad", "fee for 500 to a mobile wallet").payload == {"amount": 500}
+    assert fee("nagad", "nagad e 500 pathale fee koto").payload == {"transactionType": "nagad", "amount": 500}
+
+
+def test_fee_type_is_kept_when_no_taxonomy_is_loaded(monkeypatch):
+    monkeypatch.setattr(chat, "fee_transaction_types", lambda: [])
+    out = chat._normalize_fee_type(BankingService("fees", "fee_quote", None, {"transactionType": "bkash"}))
+    assert out.payload == {"transactionType": "bkash"}
 
 
 def test_foreign_script_and_repeated_quote_guards():
@@ -224,18 +257,31 @@ def test_foreign_script_and_repeated_quote_guards():
 
 
 def test_dispute_summary_shows_only_the_account_ending():
-    text = chat._dispute_summary_reply(
+    kind, facts, must = chat._dispute_summary_say(
         {"accountNumber": "100126000056", "transactionReferenceNo": "TXN1", "remarks": "not received"})
-    assert "100126000056" not in text
-    assert "ending 0056" in text and "TXN1" in text
+    assert kind == "summary"
+    assert must == {"account ending": "0056"}
+    assert "100126000056" not in repr((facts, must))
+    assert facts["transaction"] == "TXN1"
+    assert facts["their reason"] == "not received"
+    assert facts["done in chat"].startswith("no")
 
 
 def test_compact_for_prompt_drops_links_keeps_nulls_and_empty_lists():
     data = {"transactions": [{"amount": "Tk 5.00", "icon": "https://x/y.png", "note": None, "tags": []}],
             "pagination": {"hasNext": False}, "items": []}
     assert chat._compact_for_prompt(data) == {
-        "transactions": [{"amount": "Tk 5.00", "note": None, "tags": []}],
+        "transactions": [{"amount": "Tk 5.00", "note": None, "tags": []}], "transactions (total)": 1,
         "pagination": {"hasNext": False}, "items": []}
+
+
+def test_compact_for_prompt_states_the_total_of_nested_record_lists():
+    """The model never counts rows itself: a customer with one account holding one card
+    was told "two" and "three accounts" before every list carried its total."""
+    data = {"accounts": [{"name": "a", "cards": [{"id": 1}, {"id": 2}]}]}
+    out = chat._compact_for_prompt(data)
+    assert out["accounts (total)"] == 1
+    assert out["accounts"][0]["cards (total)"] == 2
 
 
 _REAL_STREAM = chat._stream_reply  # conftest swaps it for the non-streamed path
@@ -243,8 +289,8 @@ _REAL_STREAM = chat._stream_reply  # conftest swaps it for the non-streamed path
 
 class _FakeStream:
     def __init__(self, pieces):
-        self._lines = [json.dumps({"response": p, "done": False}) for p in pieces]
-        self._lines.append(json.dumps({"response": "", "done": True}))
+        self._lines = [json.dumps({"message": {"content": p}, "done": False}) for p in pieces]
+        self._lines.append(json.dumps({"message": {"content": ""}, "done": True}))
 
     async def __aenter__(self):
         return self
@@ -280,7 +326,8 @@ def test_stream_stops_before_an_unsupported_number_and_finishes_with_facts(monke
     _stream_with(monkeypatch, ["Here is your balance. ", "It is Tk 31,000.00", " today."])
     out = "".join(_collect(_REAL_STREAM("balance?", "balance", None, {"balance": 9000000})))
     assert "31,000" not in out
-    assert out == "Here is your balance. Your available balance is Tk 90,000.00."
+    # the verified sentence, then the data itself as plain facts (no prose template)
+    assert out == "Here is your balance. balance: Tk 90,000.00"
 
 
 def test_stream_with_bad_first_number_uses_the_non_streamed_path(monkeypatch):
@@ -293,13 +340,17 @@ def test_stream_with_bad_first_number_uses_the_non_streamed_path(monkeypatch):
     assert _collect(_REAL_STREAM("balance?", "balance", None, {"balance": 9000000})) == ["checked reply"]
 
 
-def test_fee_quote_routing_offers_the_matching_transfer():
+def test_fee_quote_routing_offers_the_matching_transfer(transfer_menu):
     routing = chat._service_routing("fees", "fee_quote", None, {"transactionType": "nagad", "amount": 500})
     assert routing["action"] == "start_transfer"
     assert routing["transfer"] == {"category": "transfer", "service": "wallet_transfer",
                                    "subservice": "nagad", "prefill": {"amount": 500}}
     assert chat._service_routing("fees", "fee_quote", None, {"transactionType": "cash_by_code"})["action"] == "redirect"
     assert chat._service_routing("account_info", "balance", None, None)["action"] == "redirect"
+    bank = chat._service_routing("fees", "fee_quote", None, {"transactionType": "other_bank", "amount": 900})
+    assert bank["transfer"]["service"] == "bank_transfer" and bank["transfer"]["subservice"] == "other_bank"
+    # an id the live menu doesn't list never starts a transfer
+    assert chat._service_routing("fees", "fee_quote", None, {"transactionType": "upay"})["action"] == "redirect"
 
 
 def _fee_pending(payload=None):
@@ -308,15 +359,123 @@ def _fee_pending(payload=None):
         "payload": payload or {}, "missingFields": ["transactionType", "amount"]})]
 
 
-def test_transfer_shaped_answer_to_a_fee_question_is_the_fee():
-    transfer = BankingService("transfer", "wallet_transfer", "bkash", {"amount": 500})
-    out = chat._fee_answer_not_transfer(transfer, _fee_pending(), "mobile wallet 500 taka")
+def _model_fills(monkeypatch, obj):
+    class _Resp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"response": json.dumps(obj)}
+
+    async def fake_post(self, url, *args, **kwargs):
+        return _Resp()
+
+    monkeypatch.setattr(real.httpx.AsyncClient, "post", fake_post)
+
+
+def test_transfer_shaped_answer_to_a_fee_question_is_the_fee(monkeypatch, transfer_menu):
+    # Pending fee question: the reply fills the fee's own fields (slot filling), it
+    # never becomes a transfer.
+    _model_fills(monkeypatch, {"transactionType": "bkash", "amount": 500})
+    out = asyncio.run(_REAL_FILL(_fee_pending(), "mobile wallet 500 taka"))
     # "bkash" was never said -> not assumed; the type is asked for next.
     assert (out.category, out.service, out.payload) == ("fees", "fee_quote", {"amount": 500})
-    named = chat._fee_answer_not_transfer(transfer, _fee_pending(), "bkash e 500")
+    named = asyncio.run(_REAL_FILL(_fee_pending(), "bkash e 500"))
+    assert (named.category, named.service) == ("fees", "fee_quote")
     assert named.payload == {"transactionType": "bkash", "amount": 500}
 
 
-def test_transfer_wording_without_a_pending_fee_question_stays_a_transfer():
-    transfer = BankingService("transfer", "wallet_transfer", "bkash", None)
-    assert chat._fee_answer_not_transfer(transfer, [], "i want to transfer money to bkash") is transfer
+def test_transfer_wording_without_a_pending_fee_question_stays_a_transfer(monkeypatch, transfer_menu):
+    calls = []
+
+    async def fake_post(self, url, *args, **kwargs):
+        calls.append(url)
+        raise AssertionError("no slot filling without a pending question")
+
+    monkeypatch.setattr(real.httpx.AsyncClient, "post", fake_post)
+    assert asyncio.run(_REAL_FILL([], "i want to transfer money to bkash")) is None
+    assert calls == []
+
+
+def test_send_after_fee_hint_targets_the_quoted_transfer_from_the_taxonomy(transfer_menu):
+    hint = routing_module._send_after_fee_hint(
+        {"category": "fees", "service": "fee_quote", "request": {"transactionType": "nagad", "amount": 500}})
+    assert 'category="transfer", service="wallet_transfer", subservice="nagad"' in hint
+    assert 'payload={"amount": 500}' in hint
+    bank = routing_module._send_after_fee_hint(
+        {"category": "fees", "service": "fee_quote", "request": {"transactionType": "own_account"}})
+    assert 'service="bank_transfer", subservice="own_account"' in bank
+    assert "payload" not in bank
+
+
+@pytest.mark.parametrize("previous", [
+    {"category": "fees", "service": "fee_quote", "request": {"transactionType": "upay", "amount": 5}},
+    {"category": "fees", "service": "fee_quote", "request": {"transactionType": "cash_by_code"}},
+    {"category": "fees", "service": "fee_quote", "request": {}},
+    {"category": "account_info", "service": "balance", "request": {"transactionType": "bkash"}},
+])
+def test_send_after_fee_hint_is_empty_without_a_live_transfer_target(transfer_menu, previous):
+    # "upay" isn't in this taxonomy: no hardcoded wallet list fills the gap.
+    assert routing_module._send_after_fee_hint(previous) == ""
+
+
+def test_subservice_ids_reads_the_live_taxonomy(transfer_menu):
+    assert routing_module._subservice_ids("transfer", "wallet_transfer") == ["bkash", "nagad"]
+    assert routing_module._subservice_ids("transfer", "cash_by_code") == []
+    assert routing_module._subservice_ids("nope", "wallet_transfer") == []
+    assert chat._subservice_ids is routing_module._subservice_ids
+
+
+# --- data answers use /api/chat and the composer's checks (T-77) -------------------
+
+
+def _chat_replies(monkeypatch, *texts):
+    sent = []
+    queue = list(texts)
+
+    class _R:
+        def __init__(self, text):
+            self._text = text
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"message": {"content": self._text}}
+
+    async def fake_post(self, url, *args, **kwargs):
+        sent.append((url, kwargs["json"]))
+        return _R(queue.pop(0))
+
+    monkeypatch.setattr(real.httpx.AsyncClient, "post", fake_post)
+    return sent
+
+
+def test_synthesize_reply_retries_a_markdown_reply_then_sends_the_checked_one(monkeypatch):
+    sent = _chat_replies(monkeypatch, "- Your balance is Tk 90,000.00", "Your balance is Tk 90,000.00.")
+    out = asyncio.run(chat._synthesize_reply("balance?", "balance", None, {"balance": 9000000}))
+    assert out == "Your balance is Tk 90,000.00."
+    assert len(sent) == 2 and all(url.endswith("/api/chat") for url, _ in sent)
+    assert sent[1][1]["options"]["temperature"] == 0.0
+
+
+def test_synthesize_reply_never_sends_a_foreign_currency_or_wrong_number(monkeypatch):
+    _chat_replies(monkeypatch, "Your balance is €900.", "Your balance is Tk 31,000.00.")
+    out = asyncio.run(chat._synthesize_reply("balance?", "balance", None, {"balance": 9000000}))
+    assert "€" not in out and "31,000" not in out
+    assert out == "balance: Tk 90,000.00"  # plain facts, no prose
+
+
+def test_stream_posts_the_persona_as_a_system_message_to_api_chat(monkeypatch):
+    seen = []
+
+    def fake_stream(self, method, url, **kwargs):
+        seen.append((url, kwargs["json"]))
+        return _FakeStream(["Your balance is Tk 90,000.00."])
+
+    monkeypatch.setattr(real.httpx.AsyncClient, "stream", fake_stream)
+    out = _collect(_REAL_STREAM("balance?", "balance", None, {"balance": 9000000}))
+    assert out == ["Your balance is Tk 90,000.00."]
+    url, body = seen[0]
+    assert url.endswith("/api/chat")
+    assert [m["role"] for m in body["messages"]] == ["system", "user"]

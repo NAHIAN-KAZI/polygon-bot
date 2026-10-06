@@ -240,7 +240,9 @@ def test_dispute_transaction_no_clear_match_asks_customer_to_pick(bank):
     stored = outcome.classification()
     assert stored["candidates"] == transactions
     assert stored["payload"]["accountNumber"] == SAVINGS["accountNumber"]
-    assert outcome.token.startswith("Which transaction is this about?")
+    kind, facts, _ = outcome.say
+    assert kind == "choose"
+    assert facts["options"] == [chat_module._describe_selection_account(t) for t in transactions]
 
 
 def test_dispute_without_transactions_falls_back_to_asking(bank):
@@ -280,7 +282,9 @@ def test_own_account_transfer_with_one_account_explains_and_does_not_execute(ban
     _, outcome = _prefill("transfer", "bank_transfer", "own_account", {"amount": 500})
     assert outcome.result_type == "BANKING_SERVICE"
     assert outcome.result_payload == {"executed": False}
-    assert "only one account" in outcome.token
+    kind, facts, _ = outcome.say
+    assert kind == "not_done"
+    assert facts["why"] == "they have only one account with the bank"
 
 
 def test_own_account_transfer_with_two_accounts_asks_which(bank):
@@ -324,7 +328,7 @@ def test_chat_dispute_picks_transaction_and_summarises_with_masked_account(clien
     assert result["payload"]["executed"] is False
     summary = chat_module._describe_selection_account(chat_module._transaction_choice(TXNS[0]))
     assert summary in token
-    assert "ending 2222" in token
+    assert "account ending: 2222" in token
     assert SAVINGS["accountNumber"] not in token
     # Read-only lookups only; never a dispute submission.
     assert [(c, s) for c, s, _ in bank.fulfills] == [
@@ -424,7 +428,13 @@ def test_beneficiary_add_polygon_account_confirms_with_holder_name(client, bank)
     assert result["payload"]["serviceType"] == "OWN_BANK"
     assert result["payload"]["identifierType"] == "ACCOUNT"
     assert result["payload"]["accountHolderName"] == "Rafiul Islam"
-    assert "Rafiul Islam's Polygon Bank account ending 6666" in _token(events)
+    token = _token(events)
+    assert token.startswith("confirm:")
+    assert "account holder: Rafiul Islam" in token
+    assert "bank: Polygon Bank" in token
+    assert "account ending: 6666" in token
+    assert "nickname: Rafi" in token
+    assert "2001000055556666" not in token
     assert bank.fulfills == []
 
     _post(client, "yes")
@@ -478,9 +488,11 @@ def test_confirmation_yes_rejected_by_bank_shows_its_message(client, bank):
     bank.fulfill_errors[("profile_update", "update_nickname")] = AdapterRejectedError(
         "PATCH ... returned 409: Nickname already taken.", "Nickname already taken.")
     events = _post(client, "yes")
-    assert _token(events) == (
-        "The bank reported a problem: Nickname already taken. Please check in the app whether "
-        "the change was saved.")
+    token = _token(events)
+    assert token.startswith("refused_by_bank:")
+    assert "bank message: Nickname already taken." in token
+    # live, a 409 still saved the change: never claim either way
+    assert "was it saved: unknown" in token
     assert _result(events)["type"] == "SERVICE_UNAVAILABLE"
 
 
@@ -493,8 +505,10 @@ def test_email_change_rejected_after_otp_reports_bank_message(client, bank):
     result = _result(events)
     assert result["type"] == "BANKING_SERVICE"
     assert result["payload"] == {"executed": False, "bankMessage": "Email already in use."}
-    assert "Email already in use." in _token(events)
-    assert "Nothing has been changed." in _token(events)
+    token = _token(events)
+    assert token.startswith("refused_by_bank:")
+    assert "bank message: Email already in use." in token
+    assert "new email: a@b.com" in token
 
 
 def test_mobile_change_rejected_after_otp_reports_bank_message(client, bank):

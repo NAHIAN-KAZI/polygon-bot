@@ -92,7 +92,7 @@ def test_pick_domain_returns_none_on_unknown_domain(monkeypatch):
             pass
 
         def json(self):
-            return {"response": json.dumps({"domain": "not-a-domain"})}
+            return {"message": {"content": json.dumps({"domain": "not-a-domain"})}}
 
     async def fake_post(self, *args, **kwargs):
         return FakeResp()

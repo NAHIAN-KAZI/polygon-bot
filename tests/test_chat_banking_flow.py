@@ -33,7 +33,12 @@ from app.banking.adapters.base import (
 from app.banking.identity import CustomerIdentity
 from app.banking.routing import BankingService, Clarification, KbQuestion, UnknownService
 
+from app.conversation.persona import GLOBAL_PERSONA
+
 from tests.conftest import AUTH_HEADERS
+
+# Captured at import, before conftest's autouse fixture swaps in a no-op.
+_real_fill_pending_fields = chat_module._llm_fill_pending_fields
 
 CUSTOMER_ID = "cust-123"
 JWT_HEADERS = {**AUTH_HEADERS, "Authorization": "Bearer sometoken"}
@@ -142,7 +147,7 @@ def test_unknown_service_yields_message_then_result(client, monkeypatch):
     assert [name for name, _ in events] == ["token", "result", "done"]
 
     token_event = next(data for name, data in events if name == "token")
-    assert token_event["token"] == "I'm not able to help with that specific request right now."
+    assert token_event["token"].startswith("not_in_chat:")
 
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "UNKNOWN_SERVICE"
@@ -176,7 +181,7 @@ def test_banking_service_without_identity_requires_auth(client, monkeypatch):
     assert [name for name, _ in events] == ["token", "result", "done"]
 
     token_event = next(data for name, data in events if name == "token")
-    assert token_event["token"] == "Please log in to continue with this request."
+    assert token_event["token"].startswith("login_needed:")
 
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "AUTH_REQUIRED"
@@ -215,7 +220,7 @@ def test_banking_service_adapter_auth_error_requires_auth(client, monkeypatch):
     assert [name for name, _ in events] == ["token", "result", "done"]
 
     token_event = next(data for name, data in events if name == "token")
-    assert token_event["token"] == "Please log in to continue with this request."
+    assert token_event["token"].startswith("login_needed:")
 
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "AUTH_REQUIRED"
@@ -249,7 +254,7 @@ def test_banking_service_adapter_unavailable_error(client, monkeypatch):
     assert [name for name, _ in events] == ["token", "result", "done"]
 
     token_event = next(data for name, data in events if name == "token")
-    assert token_event["token"] == "That service isn't available right now. Please try again shortly."
+    assert token_event["token"].startswith("unavailable:")
 
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "SERVICE_UNAVAILABLE"
@@ -317,7 +322,8 @@ def test_banking_service_mock_adapter_success(client, monkeypatch):
     assert [name for name, _ in events] == ["token", "result", "done"]
 
     token_event = next(data for name, data in events if name == "token")
-    assert token_event["token"] == "This is placeholder information about transfer funds; the real service isn't connected to chat yet."
+    assert token_event["token"].startswith("unavailable:")
+    assert "not connected to the chat yet" in token_event["token"]
 
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "BANKING_SERVICE"
@@ -360,7 +366,7 @@ def test_banking_service_real_adapter_balance_success(client, monkeypatch):
 
 
 class _FakeOllamaResponse:
-    """Minimal httpx.Response stand-in for mocking Ollama's /api/generate,
+    """Minimal httpx.Response stand-in for mocking Ollama's /api/chat,
     matching tests/test_routing.py's FakeResponse pattern."""
 
     def __init__(self, json_data):
@@ -378,7 +384,7 @@ def test_banking_service_real_adapter_success_uses_synthesized_reply(client, mon
     """TASKS.md T-29: the real-adapter (non-mock) BANKING_SERVICE success
     branch now calls _synthesize_reply(...) instead of _subservice_reply(...)
     directly. This drives the full /chat SSE flow end-to-end with a mocked
-    Ollama /api/generate call and confirms the LLM-synthesized text -- not
+    Ollama /api/chat call and confirms the LLM-synthesized text -- not
     the deterministic template -- is what actually reaches the token event."""
 
     async def fake_classify(message, recent_turns=None):
@@ -391,7 +397,7 @@ def test_banking_service_real_adapter_success_uses_synthesized_reply(client, mon
         return AdapterResult(data={"balance": "500.00"})
 
     async def fake_post(self, url, *args, **kwargs):
-        return _FakeOllamaResponse({"response": "This is your distinctive synthesized reply 42."})
+        return _FakeOllamaResponse({"message": {"content": "This is your distinctive synthesized reply 42."}})
 
     monkeypatch.setattr(chat_module, "classify", fake_classify)
     monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
@@ -448,7 +454,8 @@ def test_banking_service_mock_adapter_never_calls_synthesize_reply(client, monke
     assert [name for name, _ in events] == ["token", "result", "done"]
 
     token_event = next(data for name, data in events if name == "token")
-    assert token_event["token"] == "This is placeholder information about transfer funds; the real service isn't connected to chat yet."
+    assert token_event["token"].startswith("unavailable:")
+    assert "not connected to the chat yet" in token_event["token"]
 
     assert synth_calls == []
 
@@ -608,14 +615,16 @@ def test_record_turn_called_for_account_selection_required_with_identity(client,
         "category": "account_info",
         "service": "balance",
         "subservice": None,
-        "question": (
-            "You have multiple accounts — which one did you mean? "
-            "Savings account ending 111, Current account ending 222."
-        ),
+        # The composed question (rendered by the conftest fake): names each option.
+        "question": turn.classification["question"],
         # T-67: kept so the customer's next message can resume the original service.
         "candidates": _ACCOUNT_SELECTION_ACCOUNTS,
         "payload": {},
     }
+    question = turn.classification["question"]
+    assert question.startswith("choose:")
+    assert "Savings account ending 111" in question
+    assert "Current account ending 222" in question
 
 
 def test_record_turn_not_called_without_identity(client, monkeypatch):
@@ -1472,8 +1481,12 @@ def test_banking_service_real_adapter_success_prompt_redacted_payload_unchanged(
     captured_prompts = []
 
     async def fake_post(self, url, *args, **kwargs):
-        captured_prompts.append(kwargs["json"]["prompt"])
-        return _FakeOllamaResponse({"response": "You spent Tk 1.51 on a transfer recently."})
+        body = kwargs["json"]
+        assert url.endswith("/api/chat")
+        # the persona is the system message; the data and question are the user message
+        assert body["messages"][0]["content"] == GLOBAL_PERSONA
+        captured_prompts.append(json.dumps(body["messages"], ensure_ascii=False))
+        return _FakeOllamaResponse({"message": {"content": "You spent Tk 1.51 on a transfer recently."}})
 
     monkeypatch.setattr(chat_module, "classify", fake_classify)
     monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
@@ -1542,13 +1555,13 @@ def test_synthesize_reply_fallback_on_exception_redacts_description(monkeypatch)
 
     assert "100126000015" not in reply
     assert "4600000" not in reply
-    assert "••••••••0015" in reply
-    assert "•••0000" in reply
+    # Degraded mode is a plain facts listing (T-77) -- never the raw numbers.
+    assert "transactions: 1 item(s)" in reply
 
 
 def test_synthesize_reply_fallback_on_empty_response_redacts_description(monkeypatch):
     async def fake_post(self, url, *args, **kwargs):
-        return _FakeOllamaResponse({"response": ""})
+        return _FakeOllamaResponse({"message": {"content": ""}})
 
     monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
 
@@ -1560,8 +1573,8 @@ def test_synthesize_reply_fallback_on_empty_response_redacts_description(monkeyp
 
     assert "100126000015" not in reply
     assert "4600000" not in reply
-    assert "••••••••0015" in reply
-    assert "•••0000" in reply
+    # Degraded mode is a plain facts listing (T-77) -- never the raw numbers.
+    assert "transactions: 1 item(s)" in reply
 
 
 def test_chat_stream_fallback_redacts_token_but_not_payload(client, monkeypatch):
@@ -1598,7 +1611,7 @@ def test_chat_stream_fallback_redacts_token_but_not_payload(client, monkeypatch)
     token_event = next(data for name, data in events if name == "token")
     assert "100126000015" not in token_event["token"]
     assert "4600000" not in token_event["token"]
-    assert "••••••••0015" in token_event["token"]
+    assert "transactions: 1 item(s)" in token_event["token"]
 
     result_event = next(data for name, data in events if name == "result")
     txn = result_event["payload"]["transactions"][0]
@@ -1950,7 +1963,8 @@ def test_auth_required_logs_type_and_token(client, monkeypatch):
     assert resp.status_code == 200
     branch_log = next(json.loads(msg) for _lvl, msg in log_calls if '"type"' in msg)
     assert branch_log["type"] == "AUTH_REQUIRED"
-    assert branch_log["token"] == "Please log in to continue with this request."
+    # the logged token is the composed message that was sent
+    assert branch_log["token"] == "login_needed: request: balance"
 
 
 def test_banking_service_success_logs_type_token_and_unredacted_payload(client, monkeypatch):
@@ -2074,60 +2088,37 @@ def test_missing_payload_fields_fees_fee_quote_complete_payload_returns_empty():
     assert chat_module._missing_payload_fields("fees", "fee_quote", payload) == []
 
 
+def _ask(category, service, subservice, payload):
+    """(kind, facts, must) of the missing-details question for this request (T-77:
+    facts for the composer, not a fixed sentence)."""
+    missing = chat_module._missing_payload_fields(category, service, payload)
+    return chat_module._ask_say(category, service, subservice, payload, missing)
+
+
+FIELD = chat_module._CLARIFICATION_FIELD_DESCRIPTIONS
+
+
 def test_fee_quote_clarification_question_both_missing():
-    question = chat_module._fee_quote_clarification_question(None)
-    assert question == (
-        "Sure — which transaction type would you like a fee quote for, and for what "
-        "amount? For example, a bank transfer, bKash, or another wallet?"
-    )
+    kind, facts, must = _ask("fees", "fee_quote", None, None)
+    assert kind == "ask"
+    assert facts["missing"] == [FIELD["transactionType"], FIELD["amount"]]
+    assert "already known" not in facts
+    # transfer-type options come from the live taxonomy, never a hardcoded list
+    assert "options" in facts
 
 
 def test_fee_quote_clarification_question_amount_missing_names_transaction_type():
-    question = chat_module._fee_quote_clarification_question({"transactionType": "other_bank"})
-    assert question == (
-        "Sure — how much would you like to send via other bank? I can give you "
-        "the exact fee once I know the amount."
-    )
+    kind, facts, _ = _ask("fees", "fee_quote", None, {"transactionType": "other_bank"})
+    assert kind == "ask"
+    assert facts["missing"] == [FIELD["amount"]]
+    assert "transfer type: other bank" in facts["already known"]
 
 
 def test_fee_quote_clarification_question_transaction_type_missing_mentions_formatted_amount():
-    question = chat_module._fee_quote_clarification_question({"amount": 5000})
-    assert question == (
-        "Sure — you'd like a fee quote for ৳5,000. Which transaction type "
-        "would you like that for? For example, a bank transfer, bKash, or another wallet?"
-    )
-
-
-def test_payload_clarification_question_unmapped_pair_uses_generic_fallback():
-    question = chat_module._payload_clarification_question("account_info", "balance", None)
-    assert question == "Could you share a few more details so I can help with that?"
-
-
-def test_payload_clarification_question_fees_fee_quote_dispatch_byte_identical_with_and_without_subservice():
-    """T-56 extended _payload_clarification_question's and
-    _PAYLOAD_CLARIFICATION_BUILDERS' signatures to also pass a `subservice`
-    argument through to every builder (needed by the new transfer builders).
-    Confirms this signature change left fees/fee_quote's dispatch and output
-    completely byte-identical to _fee_quote_clarification_question's own
-    direct output -- both when subservice is omitted (its default, matching
-    every pre-T-56 call site) and when some subservice value is explicitly
-    passed through (fee_quote itself has no subservice in the real taxonomy,
-    so the builder must simply ignore it rather than erroring or changing
-    its wording)."""
-    payload = {"transactionType": "other_bank"}
-    expected = chat_module._fee_quote_clarification_question(payload)
-
-    assert chat_module._payload_clarification_question("fees", "fee_quote", payload) == expected
-    assert (
-        chat_module._payload_clarification_question("fees", "fee_quote", payload, subservice=None)
-        == expected
-    )
-    assert (
-        chat_module._payload_clarification_question(
-            "fees", "fee_quote", payload, subservice="some_subservice"
-        )
-        == expected
-    )
+    kind, facts, _ = _ask("fees", "fee_quote", None, {"amount": 5000})
+    assert kind == "ask"
+    assert facts["missing"] == [FIELD["transactionType"]]
+    assert "amount: Tk 5000" in facts["already known"]
 
 
 def test_fees_fee_quote_payload_none_yields_clarification_without_calling_adapter(client, monkeypatch):
@@ -2149,10 +2140,9 @@ def test_fees_fee_quote_payload_none_yields_clarification_without_calling_adapte
     assert [name for name, _ in events] == ["token", "result", "done"]
 
     token_event = next(data for name, data in events if name == "token")
-    assert token_event["token"] == (
-        "Sure — which transaction type would you like a fee quote for, and for what "
-        "amount? For example, a bank transfer, bKash, or another wallet?"
-    )
+    assert token_event["token"].startswith("ask:")
+    assert FIELD["transactionType"] in token_event["token"]
+    assert FIELD["amount"] in token_event["token"]
 
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "CLARIFICATION_REQUIRED"
@@ -2186,10 +2176,9 @@ def test_fees_fee_quote_payload_missing_amount_asks_for_amount_naming_transactio
     assert [name for name, _ in events] == ["token", "result", "done"]
 
     token_event = next(data for name, data in events if name == "token")
-    assert token_event["token"] == (
-        "Sure — how much would you like to send via other bank? I can give you "
-        "the exact fee once I know the amount."
-    )
+    assert token_event["token"].startswith("ask:")
+    assert FIELD["amount"] in token_event["token"]
+    assert "transfer type: other bank" in token_event["token"]
 
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "CLARIFICATION_REQUIRED"
@@ -2216,10 +2205,9 @@ def test_fees_fee_quote_payload_missing_transaction_type_asks_which_type_mention
     assert [name for name, _ in events] == ["token", "result", "done"]
 
     token_event = next(data for name, data in events if name == "token")
-    assert token_event["token"] == (
-        "Sure — you'd like a fee quote for ৳5,000. Which transaction type "
-        "would you like that for? For example, a bank transfer, bKash, or another wallet?"
-    )
+    assert token_event["token"].startswith("ask:")
+    assert FIELD["transactionType"] in token_event["token"]
+    assert "amount: Tk 5000" in token_event["token"]
 
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "CLARIFICATION_REQUIRED"
@@ -2250,7 +2238,7 @@ def test_fees_fee_quote_complete_payload_calls_adapter_normally(client, monkeypa
     _install_session_fakes(monkeypatch)
 
     resp = client.post(
-        "/chat", json={"message": "how much does it cost to send money via bKash"}, headers=JWT_HEADERS
+        "/chat", json={"message": "how much does it cost to send 1000 via bKash"}, headers=JWT_HEADERS
     )
 
     assert resp.status_code == 200
@@ -2334,42 +2322,43 @@ def test_missing_payload_fields_transfer_wallet_transfer_complete_payload_return
 
 
 def test_bank_transfer_clarification_question_both_missing_names_subservice():
-    question = chat_module._bank_transfer_clarification_question(None, "other_bank")
-    assert question == (
-        "Sure — which account number would you like to send money to via Other Bank "
-        "Transfer, and how much?"
-    )
+    kind, facts, _ = _ask("transfer", "bank_transfer", "other_bank", None)
+    assert kind == "ask"
+    assert facts["missing"] == [FIELD["accountNumber"], FIELD["amount"]]
 
 
 def test_bank_transfer_clarification_question_amount_missing_names_account():
-    question = chat_module._bank_transfer_clarification_question(
-        {"accountNumber": "1234567890"}, "other_bank"
-    )
-    assert question == "Sure — how much would you like to send to account 1234567890?"
+    kind, facts, _ = _ask("transfer", "bank_transfer", "other_bank", {"accountNumber": "1234567890"})
+    assert kind == "ask"
+    assert facts["missing"] == [FIELD["amount"]]
+    # the known account is passed masked to its last 4 -- never the full number
+    assert facts["already known"] == ["account number ending 7890"]
+    assert "1234567890" not in repr(facts)
 
 
 def test_bank_transfer_clarification_question_account_missing_mentions_formatted_amount():
-    question = chat_module._bank_transfer_clarification_question({"amount": 5000}, "other_bank")
-    assert question == "Sure — which account number would you like to send ৳5,000 to?"
+    kind, facts, _ = _ask("transfer", "bank_transfer", "other_bank", {"amount": 5000})
+    assert facts["missing"] == [FIELD["accountNumber"]]
+    assert facts["already known"] == ["amount: Tk 5000"]
 
 
 def test_wallet_transfer_clarification_question_both_missing_names_provider():
-    question = chat_module._wallet_transfer_clarification_question(None, "bkash")
-    assert question == "Sure — to which bKash number would you like to send money, and how much?"
+    kind, facts, _ = _ask("transfer", "wallet_transfer", "bkash", None)
+    assert kind == "ask"
+    assert facts["missing"] == [FIELD["walletNumber"], FIELD["amount"]]
 
 
 def test_wallet_transfer_clarification_question_amount_missing_names_wallet_number():
-    question = chat_module._wallet_transfer_clarification_question(
-        {"walletNumber": "01812345678"}, "bkash"
-    )
-    assert question == (
-        "Sure — how much would you like to send to your bKash number 01812345678?"
-    )
+    kind, facts, _ = _ask("transfer", "wallet_transfer", "bkash", {"walletNumber": "01812345678"})
+    assert facts["missing"] == [FIELD["amount"]]
+    assert facts["already known"] == ["wallet number ending 5678"]
+    assert "01812345678" not in repr(facts)
 
 
 def test_wallet_transfer_clarification_question_wallet_number_missing_mentions_formatted_amount():
-    question = chat_module._wallet_transfer_clarification_question({"amount": 5000}, "bkash")
-    assert question == "Sure — which bKash number would you like to send ৳5,000 to?"
+    kind, facts, _ = _ask("transfer", "wallet_transfer", "bkash", {"amount": 5000})
+    assert facts["missing"] == [FIELD["walletNumber"]]
+    assert facts["already known"] == ["amount: Tk 5000"]
 
 
 # --- full _chat_stream wiring: incomplete payload -> CLARIFICATION_REQUIRED, --------
@@ -2402,7 +2391,10 @@ def test_transfer_bank_transfer_missing_amount_asks_for_amount_naming_account(cl
     assert [name for name, _ in events] == ["token", "result", "done"]
 
     token_event = next(data for name, data in events if name == "token")
-    assert token_event["token"] == "Sure — how much would you like to send to account 1234567890?"
+    assert token_event["token"].startswith("ask:")
+    assert FIELD["amount"] in token_event["token"]
+    assert "account number ending 7890" in token_event["token"]
+    assert "1234567890" not in token_event["token"]
 
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "CLARIFICATION_REQUIRED"
@@ -2432,7 +2424,9 @@ def test_transfer_bank_transfer_missing_account_number_asks_for_account(client, 
     assert resp.status_code == 200
     events = _parse_sse(resp.text)
     token_event = next(data for name, data in events if name == "token")
-    assert token_event["token"] == "Sure — which account number would you like to send ৳5,000 to?"
+    assert token_event["token"].startswith("ask:")
+    assert FIELD["accountNumber"] in token_event["token"]
+    assert "amount: Tk 5000" in token_event["token"]
 
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "CLARIFICATION_REQUIRED"
@@ -2457,10 +2451,9 @@ def test_transfer_bank_transfer_missing_both_asks_for_both_naming_subservice(cli
     assert resp.status_code == 200
     events = _parse_sse(resp.text)
     token_event = next(data for name, data in events if name == "token")
-    assert token_event["token"] == (
-        "Sure — which account number would you like to send money to via Other Bank "
-        "Transfer, and how much?"
-    )
+    assert token_event["token"].startswith("ask:")
+    assert FIELD["accountNumber"] in token_event["token"]
+    assert FIELD["amount"] in token_event["token"]
 
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "CLARIFICATION_REQUIRED"
@@ -2490,9 +2483,9 @@ def test_transfer_wallet_transfer_missing_amount_asks_for_amount(client, monkeyp
     assert resp.status_code == 200
     events = _parse_sse(resp.text)
     token_event = next(data for name, data in events if name == "token")
-    assert token_event["token"] == (
-        "Sure — how much would you like to send to your bKash number 01812345678?"
-    )
+    assert token_event["token"].startswith("ask:")
+    assert FIELD["amount"] in token_event["token"]
+    assert "wallet number ending 5678" in token_event["token"]
 
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "CLARIFICATION_REQUIRED"
@@ -2517,9 +2510,9 @@ def test_transfer_wallet_transfer_missing_both_asks_for_both_naming_provider(cli
     assert resp.status_code == 200
     events = _parse_sse(resp.text)
     token_event = next(data for name, data in events if name == "token")
-    assert token_event["token"] == (
-        "Sure — to which bKash number would you like to send money, and how much?"
-    )
+    assert token_event["token"].startswith("ask:")
+    assert FIELD["walletNumber"] in token_event["token"]
+    assert FIELD["amount"] in token_event["token"]
 
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "CLARIFICATION_REQUIRED"
@@ -2559,11 +2552,12 @@ def test_transfer_bank_transfer_complete_payload_builds_summary_without_calling_
     assert [name for name, _ in events] == ["token", "result", "done"]
 
     token_event = next(data for name, data in events if name == "token")
-    assert token_event["token"] == (
-        "Here's your transfer summary: ৳5,000 to account 1234567890 via Other Bank "
-        "Transfer. I can't complete this for you here — please confirm and finish it "
-        "in the app."
-    )
+    # Summary only: exact amount and masked account ending, finished in the app.
+    assert token_event["token"].startswith("summary:")
+    assert "amount: Tk 5000" in token_event["token"]
+    assert "account ending: 7890" in token_event["token"]
+    assert "1234567890" not in token_event["token"]
+    assert "done in chat: no" in token_event["token"]
 
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "BANKING_SERVICE"
@@ -2622,10 +2616,10 @@ def test_transfer_wallet_transfer_complete_payload_builds_summary_without_callin
     assert [name for name, _ in events] == ["token", "result", "done"]
 
     token_event = next(data for name, data in events if name == "token")
-    assert token_event["token"] == (
-        "Here's your transfer summary: ৳2,000 to your bKash number 01812345678. I "
-        "can't complete this for you here — please confirm and finish it in the app."
-    )
+    assert token_event["token"].startswith("summary:")
+    assert "amount: Tk 2000" in token_event["token"]
+    assert "wallet number: 01812345678" in token_event["token"]
+    assert "done in chat: no" in token_event["token"]
 
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "BANKING_SERVICE"
@@ -2738,12 +2732,8 @@ def test_transfer_summary_turn_recorded_as_banking_service_not_clarification_req
     recorded_turn = record_turn_spy.calls[0][0][1]
     assert recorded_turn.classification["type"] == "BANKING_SERVICE"
 
-    # The recorded turn must never be treated as a pending T-49 guard by a
-    # later message -- confirms _try_deterministic_payload_completion falls
-    # through (returns None) for it, exactly like any other non-clarification
-    # recorded turn.
-    assert chat_module._try_deterministic_payload_completion([recorded_turn], "2000") is None
-    assert chat_module._try_deterministic_payload_completion([recorded_turn], "ok thanks") is None
+    # Not a pending question: nothing is recorded as still missing.
+    assert "missingFields" not in recorded_turn.classification
 
 
 def test_transfer_summary_followed_by_unrelated_message_classifies_fresh_and_still_records(
@@ -2870,30 +2860,32 @@ def test_fees_fee_quote_still_calls_real_adapter_unaffected_by_transfer_branch(c
 # --- _extract_single_amount ---------------------------------------------------
 
 
-def test_extract_single_amount_plain_number():
-    assert chat_module._extract_single_amount("2000") == 2000
+def test_amount_supported_plain_number():
+    assert chat_module._amount_supported(2000, "2000") is True
 
 
-def test_extract_single_amount_ignores_trailing_unit_word():
-    assert chat_module._extract_single_amount("2000 taka") == 2000
-    assert chat_module._extract_single_amount("5000 tk") == 5000
+def test_amount_supported_ignores_trailing_unit_word():
+    assert chat_module._amount_supported(2000, "2000 taka") is True
+    assert chat_module._amount_supported(5000, "5000 tk") is True
 
 
-def test_extract_single_amount_comma_separated_thousands():
-    assert chat_module._extract_single_amount("5,000") == 5000
-    assert chat_module._extract_single_amount("5,000 tk") == 5000
+def test_amount_supported_comma_separated_thousands():
+    assert chat_module._amount_supported(5000, "5,000") is True
+    assert chat_module._amount_supported(75000, "75,000 tk") is True
 
 
-def test_extract_single_amount_decimal():
-    assert chat_module._extract_single_amount("2000.50") == 2000.5
+def test_amount_supported_decimal():
+    assert chat_module._amount_supported(2000.5, "2000.50") is True
 
 
-def test_extract_single_amount_zero_numeric_substrings_returns_none():
-    assert chat_module._extract_single_amount("hello") is None
+def test_amount_supported_rejects_message_without_numbers():
+    assert chat_module._amount_supported(2000, "hello") is False
 
 
-def test_extract_single_amount_multiple_numeric_substrings_returns_none():
-    assert chat_module._extract_single_amount("2000 or 3000") is None
+def test_amount_supported_rejects_a_number_the_customer_never_wrote():
+    assert chat_module._amount_supported(2500, "2000 or 3000") is False
+    assert chat_module._amount_supported(0, "0") is False
+    assert chat_module._amount_supported("abc", "abc") is False
 
 
 # --- _try_deterministic_payload_completion ------------------------------------
@@ -2921,8 +2913,21 @@ def _deterministic_guard_turn(**classification_overrides):
     )
 
 
-def test_try_deterministic_payload_completion_resolves_amount_from_bare_reply():
-    result = chat_module._try_deterministic_payload_completion([_deterministic_guard_turn()], "2000")
+def _fake_ollama_json(monkeypatch, response_obj):
+    """Patch httpx so the slot filler's model call returns `response_obj`."""
+    calls = []
+
+    async def fake_post(self, url, *args, **kwargs):
+        calls.append(kwargs.get("json", {}).get("prompt", ""))
+        return _FakeOllamaResponse({"response": json.dumps(response_obj)})
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+    return calls
+
+
+def test_fill_pending_fields_resolves_amount_from_bare_reply(monkeypatch):
+    _fake_ollama_json(monkeypatch, {"amount": 2000})
+    result = asyncio.run(_real_fill_pending_fields([_deterministic_guard_turn()], "2000"))
     assert result == BankingService(
         category="fees",
         service="fee_quote",
@@ -2931,7 +2936,8 @@ def test_try_deterministic_payload_completion_resolves_amount_from_bare_reply():
     )
 
 
-def test_try_deterministic_payload_completion_none_for_genuine_ambiguous_clarification():
+def test_fill_pending_fields_none_for_genuine_ambiguous_clarification(monkeypatch):
+    calls = _fake_ollama_json(monkeypatch, {"amount": 2000})
     ambiguous_turn = chat_module.ChatTurn(
         timestamp=datetime.now(timezone.utc),
         message="check my thing",
@@ -2943,32 +2949,46 @@ def test_try_deterministic_payload_completion_none_for_genuine_ambiguous_clarifi
             "question": "Which account would you like to check?",
         },
     )
-    assert chat_module._try_deterministic_payload_completion([ambiguous_turn], "2000") is None
-    assert chat_module._try_deterministic_payload_completion([ambiguous_turn], "anything at all") is None
+    assert asyncio.run(_real_fill_pending_fields([ambiguous_turn], "2000")) is None
+    assert calls == []  # no known service: never a slot-filling call
 
 
-def test_try_deterministic_payload_completion_none_when_missing_field_has_no_extractor():
+def test_fill_pending_fields_drops_a_transfer_type_that_is_not_a_live_id(monkeypatch):
+    _fake_ollama_json(monkeypatch, {"transactionType": "teleport"})
     turn = _deterministic_guard_turn(missingFields=["transactionType"], payload={"amount": 5000})
-    assert chat_module._try_deterministic_payload_completion([turn], "bkash") is None
+    assert asyncio.run(_real_fill_pending_fields([turn], "teleport")) is None
 
 
-def test_try_deterministic_payload_completion_none_when_message_has_no_extractable_number():
+def test_fill_pending_fields_drops_an_amount_the_customer_never_wrote(monkeypatch):
+    _fake_ollama_json(monkeypatch, {"amount": 2000})
     turn = _deterministic_guard_turn()
-    assert chat_module._try_deterministic_payload_completion([turn], "not sure") is None
-    assert chat_module._try_deterministic_payload_completion([turn], "2000 or 3000") is None
+    assert asyncio.run(_real_fill_pending_fields([turn], "not sure")) is None
+    assert asyncio.run(_real_fill_pending_fields([turn], "2500 or 3000")) is None
 
 
-def test_try_deterministic_payload_completion_none_when_last_turn_not_clarification_required():
+def test_fill_pending_fields_none_when_last_turn_has_nothing_to_fill(monkeypatch):
+    calls = _fake_ollama_json(monkeypatch, {"amount": 2000})
     turn = chat_module.ChatTurn(
         timestamp=datetime.now(timezone.utc),
         message="what's my balance",
         classification={"type": "BANKING_SERVICE", "category": "account_info", "service": "balance"},
     )
-    assert chat_module._try_deterministic_payload_completion([turn], "2000") is None
+    assert asyncio.run(_real_fill_pending_fields([turn], "2000")) is None
+    assert calls == []
 
 
-def test_try_deterministic_payload_completion_none_for_empty_recent_turns():
-    assert chat_module._try_deterministic_payload_completion([], "2000") is None
+def test_fill_pending_fields_none_for_empty_recent_turns(monkeypatch):
+    calls = _fake_ollama_json(monkeypatch, {"amount": 2000})
+    assert asyncio.run(_real_fill_pending_fields([], "2000")) is None
+    assert calls == []
+
+
+def test_fill_pending_fields_model_failure_returns_none(monkeypatch):
+    async def boom(self, url, *args, **kwargs):
+        raise httpx.ConnectError("down")
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", boom)
+    assert asyncio.run(_real_fill_pending_fields([_deterministic_guard_turn()], "2000")) is None
 
 
 # --- full /chat SSE flow: deterministic completion wired into _chat_stream ---
@@ -2979,7 +2999,7 @@ def test_chat_stream_bare_amount_reply_bypasses_classify_and_completes_payload(c
     would return) trips the T-49 guard and asks for the amount; its
     turn_classification (with missingFields) is what record_turn stores.
     Second call: a bare-amount reply, with that stored turn now returned by
-    get_classification_context, must resolve deterministically -- classify()
+    get_classification_context, is filled by slot filling -- classify()
     must not be called again -- and the merged, now-complete payload must
     reach fulfill_banking_service directly."""
 
@@ -3019,7 +3039,10 @@ def test_chat_stream_bare_amount_reply_bypasses_classify_and_completes_payload(c
     assert first_turn.classification["service"] == "fee_quote"
 
     # Second call: bare-amount reply, session now returns the stored guard turn.
+    # Slot filling (a model call, faked here) fills only the pending field.
     monkeypatch.setattr(chat_module, "get_classification_context", lambda customer_id: [first_turn])
+    monkeypatch.setattr(chat_module, "_llm_fill_pending_fields", _real_fill_pending_fields)
+    _fake_ollama_json(monkeypatch, {"amount": 2000})
 
     fulfill_calls = []
     mock_data = {"mock": True, "note": "synthetic fee quote"}
@@ -3118,3 +3141,42 @@ def test_chat_stream_genuine_ambiguous_clarification_never_uses_deterministic_pa
 
     assert resp.status_code == 200
     assert classify_calls == ["2000"]
+
+
+def test_chat_follow_up_to_an_answered_request_does_not_crash(client, monkeypatch):
+    """Regression: nothing is pending, but the customer's last request was ANSWERED and
+    they follow up with just the detail that changes ("and for nagad?"). Slot filling
+    fills it from the session's last turn; building the reply context used to index the
+    (empty) pending-turn list and fail with IndexError mid-stream."""
+    from app.banking.session import ChatTurn
+
+    answered = ChatTurn(
+        timestamp=datetime.now(timezone.utc), message="bkash fee for 500",
+        classification={"type": "BANKING_SERVICE", "category": "fees", "service": "fee_quote",
+                        "subservice": None, "request": {"transactionType": "bkash", "amount": 500}})
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    async def fake_fill(recent_turns, message):
+        assert recent_turns == [answered]   # the answered turn, via the session
+        return BankingService("fees", "fee_quote", None, {"transactionType": "nagad", "amount": 500})
+
+    fulfill_calls = []
+
+    async def fake_fulfill(customer_identity, jwt, category, service, subservice, payload):
+        fulfill_calls.append((category, service, payload))
+        return AdapterResult(data={"charge": 0})
+
+    _install_session_fakes(monkeypatch)
+    monkeypatch.setattr(chat_module, "get_session", lambda customer_id: [answered])
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "_llm_fill_pending_fields", fake_fill)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", fake_fulfill)
+
+    resp = client.post("/chat", json={"message": "and for nagad?"}, headers=JWT_HEADERS)
+
+    assert resp.status_code == 200
+    result = next(data for name, data in _parse_sse(resp.text) if name == "result")
+    assert result["type"] == "BANKING_SERVICE" and result["service"] == "fee_quote"
+    assert fulfill_calls == [("fees", "fee_quote", {"transactionType": "nagad", "amount": 500})]

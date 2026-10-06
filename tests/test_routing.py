@@ -1099,9 +1099,11 @@ def test_classify_account_selection_required_context_rules_out_transfer_reinterp
         "sending money anywhere" in text
         for text in system_texts
     )
+    # The worked example is now a rule without quoted sample messages (T-77): a
+    # message about their accounts in general is classified on its own.
     assert any(
-        'how many accounts do i have?" -> does not name any of the specific listed accounts'
-        in text
+        "A message about the customer's accounts in general (how many, which ones) "
+        "names none of the listed accounts: classify it on its own." in text
         for text in system_texts
     )
 

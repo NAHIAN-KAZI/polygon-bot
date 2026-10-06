@@ -23,27 +23,49 @@ def client():
 
 @pytest.fixture(autouse=True)
 def _no_generated_clarifications(monkeypatch):
-    """Missing-field clarifying questions are LLM-worded in production
-    (app.routes.chat._generate_clarification_question), falling back to the
-    deterministic templates on any failure. Tests default to that fallback so they
-    stay deterministic and never call a live Ollama; tests of the generator itself
-    capture the real function at import time and/or re-patch it explicitly."""
+    """Every customer-facing message is LLM-composed in production (T-77,
+    app.conversation.composer). Tests swap in a deterministic rendering of the
+    composer's inputs -- "<kind>: label: value ..." -- so they assert on what the
+    message must convey (kind, facts, exact values), never on model wording, and
+    never call a live Ollama. Tests of the composer itself import it directly."""
     import app.routes.chat as chat_module
+    from app.conversation.composer import facts_listing
 
-    async def _disabled(*args, **kwargs):
-        return None
+    def _render(kind, facts, must_include):
+        listing = facts_listing({**facts, **(must_include or {})})
+        return f"{kind}: " + listing.replace("\n", "; ")
 
-    monkeypatch.setattr(chat_module, "_generate_clarification_question", _disabled)
+    async def _fake_compose(kind, facts, *, message="", history=None, must_include=None):
+        return _render(kind, facts, must_include)
 
-    # Same for the LLM rewording of fact-based replies and the LLM account pick:
-    # tests see the code-decided facts verbatim and never call a live Ollama.
-    async def _identity(facts, customer_message):
-        return facts
+    async def _fake_compose_stream(kind, facts, *, message="", history=None, must_include=None):
+        yield _render(kind, facts, must_include)
+
+    monkeypatch.setattr(chat_module, "compose", _fake_compose)
+    monkeypatch.setattr(chat_module, "compose_stream", _fake_compose_stream)
+
+    # Reading a reply to a pending yes/no or verification step is a model call in
+    # production. Tests use the structured paths for real (payload.confirm, secret
+    # shapes) and a small stand-in for typed text; tests of the reader patch httpx.
+    real_reader = chat_module._read_pending_reply
+
+    async def _fake_reader(question, message, payload):
+        if (isinstance(payload, dict) and isinstance(payload.get("confirm"), bool)) \
+                or chat_module._has_secret_fields(payload) \
+                or chat_module._looks_like_typed_secret(message):
+            return await real_reader(question, message, payload)
+        text = (message or "").strip().lower().rstrip(".!")
+        if text in {"yes", "y", "ok", "okay", "sure", "confirm", "go ahead", "yes please"}:
+            return "confirm"
+        if text in {"no", "n", "cancel", "stop", "no thanks", "don't", "nope"}:
+            return "decline"
+        return "other" if len(text.split()) > 3 else "unsure"
+
+    monkeypatch.setattr(chat_module, "_read_pending_reply", _fake_reader)
 
     async def _no_pick(message, candidates):
         return None
 
-    monkeypatch.setattr(chat_module, "_phrase", _identity)
     monkeypatch.setattr(chat_module, "_llm_pick_candidate", _no_pick)
 
     # Freeze grounding check (an extra LLM call): pass the classification through
@@ -53,12 +75,12 @@ def _no_generated_clarifications(monkeypatch):
 
     monkeypatch.setattr(chat_module, "_ground_freeze_request", _as_classified)
 
-    # Slot filling for a pending question (an LLM call): tests use the deterministic
-    # amount-only completion it builds on.
-    async def _deterministic_fill(recent_turns, message):
-        return chat_module._try_deterministic_payload_completion(recent_turns, message)
+    # Slot filling for a pending question is a model call: off by default in tests
+    # (the turn is classified as usual); slot-filling tests patch it explicitly.
+    async def _no_fill(recent_turns, message):
+        return None
 
-    monkeypatch.setattr(chat_module, "_llm_fill_pending_fields", _deterministic_fill)
+    monkeypatch.setattr(chat_module, "_llm_fill_pending_fields", _no_fill)
 
     # Streamed reply: tests use the non-streamed path (same prompt and checks),
     # which they already fake via httpx.AsyncClient.post.

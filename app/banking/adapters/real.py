@@ -1090,9 +1090,9 @@ class NoCreditCardError(AdapterUnavailableError):
     """The customer simply has no credit card -- a real answer, not an outage."""
 
 
-# What the credit-card adapters return instead of failing, so the reply can say
-# "you don't have a credit card" rather than "service unavailable".
-_NO_CREDIT_CARD = {"creditCard": None, "answer": "You don't have a credit card with Polygon Bank."}
+# What the credit-card adapters return instead of failing: a fact (no credit card),
+# not an outage. The composer words it (T-77) -- no sentence lives in the data.
+_NO_CREDIT_CARD = {"creditCard": None, "hasCreditCard": False}
 
 
 class CreditCardSummaryAdapter:

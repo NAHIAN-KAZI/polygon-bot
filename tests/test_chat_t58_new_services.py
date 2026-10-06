@@ -207,10 +207,9 @@ def test_fd_profit_history_two_matches_yields_account_selection_required(client,
     assert result_event["payload"] == {"accounts": _LEDGER_ACCOUNT_SELECTION_CANDIDATES}
 
     token_event = next(data for name, data in events if name == "token")
-    assert token_event["token"] == (
-        "You have multiple accounts — which one did you mean? "
-        "Fixed Deposit ending FD-1, Fixed Deposit ending FD-2."
-    )
+    assert token_event["token"].startswith("choose:")
+    assert "Fixed Deposit ending FD-1" in token_event["token"]
+    assert "Fixed Deposit ending FD-2" in token_event["token"]
 
 
 # --- 3. Zero-match FD/DPS -> clean SERVICE_UNAVAILABLE ----------------------
@@ -255,7 +254,7 @@ def test_profit_history_zero_matches_yields_service_unavailable(
     assert [name for name, _ in events] == ["token", "result", "done"]
 
     token_event = next(data for name, data in events if name == "token")
-    assert token_event["token"] == "That service isn't available right now. Please try again shortly."
+    assert token_event["token"].startswith("unavailable:")
     # the adapter's specific reason must never leak into the customer-facing token
     assert not_found_message not in token_event["token"]
 
@@ -294,7 +293,7 @@ def test_disputes_without_identity_requires_auth(client, monkeypatch):
     assert [name for name, _ in events] == ["token", "result", "done"]
 
     token_event = next(data for name, data in events if name == "token")
-    assert token_event["token"] == "Please log in to continue with this request."
+    assert token_event["token"].startswith("login_needed:")
 
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "AUTH_REQUIRED"

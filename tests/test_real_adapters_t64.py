@@ -321,7 +321,7 @@ def test_credit_card_zero_credit_cards_answers_no_credit_card(monkeypatch, attr)
     calls = _by_path(monkeypatch, {_CARDS_PATH: FakeResponse(json_data=_cards_body(
         _full_card("41", "DEBIT", "4001230000000251")))})
     result = _run(getattr(real, attr))
-    assert result.data == {"creditCard": None, "answer": "You don't have a credit card with Polygon Bank."}
+    assert result.data == {"creditCard": None, "hasCreditCard": False}
     assert [c["path"] for c in calls] == [_CARDS_PATH]
 
 

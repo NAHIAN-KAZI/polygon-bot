@@ -95,7 +95,7 @@ def test_all_new_fields_populated_is_accepted_and_streams(client, monkeypatch):
     assert event_names[-1] == "done"
 
     token_event = next(data for name, data in events if name == "token")
-    assert token_event["token"] == "I'm not able to help with that specific request right now."
+    assert token_event["token"].startswith("not_in_chat:")
 
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "UNKNOWN_SERVICE"
@@ -147,7 +147,7 @@ def test_taxonomy_fields_without_payload_is_accepted(client, monkeypatch):
     assert event_names[-1] == "done"
 
     token_event = next(data for name, data in events if name == "token")
-    assert token_event["token"] == "I'm not able to help with that specific request right now."
+    assert token_event["token"].startswith("not_in_chat:")
 
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "UNKNOWN_SERVICE"

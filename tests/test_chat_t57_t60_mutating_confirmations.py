@@ -10,8 +10,10 @@ session store, or (most importantly for this file) the real banking
 platform -- no test here ever lets a freeze/beneficiary-add call reach a
 real adapter with a verified "yes".
 """
+import asyncio
 import json
 
+import httpx
 import pytest
 
 import app.routes.chat as chat_module
@@ -21,6 +23,9 @@ from app.banking.routing import BankingService
 from app.banking.session import ChatTurn
 
 from tests.conftest import AUTH_HEADERS
+
+# Captured at import, before conftest's autouse fixture swaps in a stand-in.
+_real_read_pending_reply = chat_module._read_pending_reply
 
 CUSTOMER_ID = "cust-123"
 JWT_HEADERS = {**AUTH_HEADERS, "Authorization": "Bearer sometoken"}
@@ -71,29 +76,62 @@ def _fail_classify(monkeypatch):
     monkeypatch.setattr(chat_module, "classify", fake_classify)
 
 
-# --- _classify_confirmation_reply: pure deterministic classifier -----------
+# --- _read_pending_reply: the model reads a typed reply; a confirm counts -----
+# --- only when grounded in the customer's own words (T-77) -------------------
+
+
+class _ModelReply:
+    def __init__(self, obj):
+        self._obj = obj
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return {"response": json.dumps(self._obj)}
+
+
+def _model_says(monkeypatch, obj):
+    async def fake_post(self, url, *args, **kwargs):
+        return _ModelReply(obj)
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+
+
+def _read(message):
+    return asyncio.run(_real_read_pending_reply("Shall I add Rahim?", message, None))
 
 
 @pytest.mark.parametrize(
     "message",
     ["yes", "Yes", "YES!", "confirm", "Confirmed.", "do it", "Do it!", "go ahead", "yes please"],
 )
-def test_classify_confirmation_reply_affirmative(message):
-    assert chat_module._classify_confirmation_reply(message) == "affirmative"
+def test_classify_confirmation_reply_affirmative(monkeypatch, message):
+    _model_says(monkeypatch, {"answer": "confirm", "quote": message})
+    assert _read(message) == "confirm"
 
 
 @pytest.mark.parametrize(
     "message", ["no", "No.", "cancel", "Cancel!", "nevermind", "never mind", "stop", "Stop."]
 )
-def test_classify_confirmation_reply_negative(message):
-    assert chat_module._classify_confirmation_reply(message) == "negative"
+def test_classify_confirmation_reply_negative(monkeypatch, message):
+    _model_says(monkeypatch, {"answer": "decline", "quote": message})
+    assert _read(message) == "decline"
 
 
 @pytest.mark.parametrize(
-    "message", ["maybe", "I'm not sure", "yes but wait", "freeze it", "", "yesss"]
+    "message", ["maybe", "I'm not sure", "yes but wait", "freeze it", "yesss"]
 )
-def test_classify_confirmation_reply_unclear(message):
-    assert chat_module._classify_confirmation_reply(message) == "unclear"
+def test_classify_confirmation_reply_unclear(monkeypatch, message):
+    _model_says(monkeypatch, {"answer": "unsure", "quote": message})
+    assert _read(message) == "unsure"
+
+
+@pytest.mark.parametrize("message", ["maybe", "hmm", "what does that mean"])
+def test_confirm_without_the_customers_own_words_is_unsure(monkeypatch, message):
+    # The model claims a "yes" the customer never wrote: nothing runs on it.
+    _model_says(monkeypatch, {"answer": "confirm", "quote": "yes go ahead"})
+    assert _read(message) == "unsure"
 
 
 # --- T-57: card freeze gather step ------------------------------------------
@@ -119,7 +157,8 @@ def test_freeze_card_zero_cards_is_clean_no_error(client, monkeypatch):
     assert [name for name, _ in events] == ["token", "result", "done"]
 
     token_event = next(data for name, data in events if name == "token")
-    assert token_event["token"] == "You don't have any cards on file."
+    assert token_event["token"].startswith("answer:")
+    assert "cards on file: none" in token_event["token"]
 
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "BANKING_SERVICE"
@@ -178,10 +217,8 @@ def test_freeze_card_two_cards_asks_which_one(client, monkeypatch):
     assert result_event["payload"] == {"accounts": cards}
 
     token_event = next(data for name, data in events if name == "token")
-    assert token_event["token"] == (
-        "You have multiple cards — which one did you mean? "
-        "Debit card ending 0251, Credit card ending 9988."
-    )
+    assert token_event["token"].startswith("choose:")
+    assert "Debit card ending 0251" in token_event["token"] and "Credit card ending 9988" in token_event["token"]
 
 
 def test_freeze_card_id_and_reason_known_sends_otp_and_asks_for_otp_and_pin(client, monkeypatch):
@@ -210,7 +247,19 @@ def test_freeze_card_id_and_reason_known_sends_otp_and_asks_for_otp_and_pin(clie
     _install_identity_fakes(monkeypatch)
     _install_no_pending_session(monkeypatch)
 
+    # Step 1: the request ends in a yes/no; no verification code is sent yet.
     resp = client.post("/chat", json={"message": "freeze my card"}, headers=JWT_HEADERS)
+    asked = _parse_sse(resp.text)
+    assert next(data for name, data in asked if name == "result")["type"] == "CONFIRMATION_REQUIRED"
+    assert next(data for name, data in asked if name == "token")["token"].startswith("confirm:")
+    assert otp_sends == [] and fulfill_calls == []
+
+    # Step 2: the customer confirms (the app's button) -> the code goes to their own phone.
+    pending = {"type": "CONFIRMATION_REQUIRED", "category": "card_services", "service": "frezz_unfrezz",
+               "subservice": None, "payload": {"cardId": "41", "cardLast4": "0251", "reason": "lost"},
+               "question": "confirm: ..."}
+    _install_pending_confirmation_session(monkeypatch, pending)
+    resp = client.post("/chat", json={"message": "Confirm", "payload": {"confirm": True}}, headers=JWT_HEADERS)
 
     events = _parse_sse(resp.text)
     assert [name for name, _ in events] == ["token", "result", "done"]
@@ -218,9 +267,11 @@ def test_freeze_card_id_and_reason_known_sends_otp_and_asks_for_otp_and_pin(clie
     assert otp_sends == [CUSTOMER_ID]
 
     token_event = next(data for name, data in events if name == "token")
+    assert token_event["token"].startswith("verify:")
     assert "one-time code" in token_event["token"]
-    assert "card ending 0251" in token_event["token"]
+    assert "card ending: 0251" in token_event["token"]
     assert "PIN" in token_event["token"] and "password" in token_event["token"]
+    assert "secure form" in token_event["token"]
 
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "OTP_REQUIRED"
@@ -274,6 +325,18 @@ def test_freeze_card_explicit_resubmit_uses_is_valid_path(client, monkeypatch):
     )
     events = _parse_sse(resp.text)
     result_event = next(data for name, data in events if name == "result")
+    # Even a direct resubmit from the app ends in a yes/no first: no code yet.
+    assert result_event["type"] == "CONFIRMATION_REQUIRED"
+    assert result_event["payload"] == {"cardId": "41", "reason": "stolen", "phone": "01700000000"}
+    assert otp_sends == []
+
+    # Confirming sends the code to the JWT customer, never the payload's phone.
+    pending = {"type": "CONFIRMATION_REQUIRED", "category": "card_services", "service": "frezz_unfrezz",
+               "subservice": None, "payload": {"cardId": "41", "reason": "stolen", "phone": "01700000000"},
+               "question": "confirm: ..."}
+    _install_pending_confirmation_session(monkeypatch, pending)
+    resp = client.post("/chat", json={"message": "Confirm", "payload": {"confirm": True}}, headers=JWT_HEADERS)
+    result_event = next(data for name, data in _parse_sse(resp.text) if name == "result")
     assert result_event["type"] == "OTP_REQUIRED"
     assert otp_sends == [CUSTOMER_ID]
 
@@ -326,10 +389,11 @@ def test_beneficiary_add_complete_payload_asks_for_confirmation(client, monkeypa
 
     events = _parse_sse(resp.text)
     token_event = next(data for name, data in events if name == "token")
-    assert token_event["token"] == (
-        "You're about to add Rahim as a beneficiary: Rahim Uddin's Polygon Bank account "
-        "ending 7890. Shall I proceed? (yes/no)"
-    )
+    assert token_event["token"].startswith("confirm:")
+    assert "nickname: Rahim" in token_event["token"]
+    assert "account holder: Rahim Uddin" in token_event["token"]
+    assert "account ending: 7890" in token_event["token"]
+    assert "1234567890" not in token_event["token"]
 
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "CONFIRMATION_REQUIRED"
@@ -349,9 +413,10 @@ def test_beneficiary_add_complete_payload_asks_for_confirmation(client, monkeypa
 # --- pending confirmation: affirmative / negative / unclear -----------------
 
 
-def test_legacy_freeze_yes_no_state_is_not_a_pending_confirmation(client, monkeypatch):
-    """Card freeze no longer has a yes/no step -- a stale CONFIRMATION_REQUIRED
-    freeze turn must never let a bare "yes" call the real freeze adapter."""
+def test_pending_freeze_confirmation_yes_only_sends_the_code_never_freezes(client, monkeypatch):
+    """The freeze yes/no comes BEFORE the verification code: a yes sends the code to
+    the customer's own phone and moves to the OTP step; the real freeze adapter is
+    only ever reached after the OTP step."""
     pending = {
         "type": "CONFIRMATION_REQUIRED",
         "category": "card_services",
@@ -364,23 +429,26 @@ def test_legacy_freeze_yes_no_state_is_not_a_pending_confirmation(client, monkey
     async def fake_fulfill(*a, **k):
         raise AssertionError("a bare yes must never freeze a card")
 
-    classify_calls = []
+    sends = []
+
+    async def fake_send_otp(phone):
+        sends.append(phone)
 
     async def fake_classify(message, recent_turns=None):
-        classify_calls.append(message)
-        return chat_module.Clarification(question="What would you like to do?")
+        raise AssertionError("a reply to the pending yes/no is never re-classified")
 
     monkeypatch.setattr(chat_module, "classify", fake_classify)
     monkeypatch.setattr(chat_module, "fulfill_banking_service", fake_fulfill)
+    monkeypatch.setattr(chat_module, "send_otp", fake_send_otp)
     _install_identity_fakes(monkeypatch)
     _install_pending_confirmation_session(monkeypatch, pending)
 
     resp = client.post("/chat", json={"message": "yes"}, headers=JWT_HEADERS)
 
     events = _parse_sse(resp.text)
-    assert classify_calls == ["yes"]
     result_event = next(data for name, data in events if name == "result")
-    assert result_event["type"] == "CLARIFICATION_REQUIRED"
+    assert result_event["type"] == "OTP_REQUIRED"
+    assert sends == [CUSTOMER_ID]
 
 
 def test_pending_beneficiary_confirmation_affirmative_calls_adapter(client, monkeypatch):
@@ -417,7 +485,8 @@ def test_pending_beneficiary_confirmation_affirmative_calls_adapter(client, monk
     assert payload["serviceType"] == "OTHER_BANK"
 
     token_event = next(data for name, data in events if name == "token")
-    assert token_event["token"] == "Done — Rahim has been added as a beneficiary."
+    assert token_event["token"].startswith("done:")
+    assert "nickname: Rahim" in token_event["token"]
 
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "BANKING_SERVICE"
@@ -450,7 +519,7 @@ def test_pending_confirmation_negative_never_calls_adapter(client, monkeypatch):
     assert fulfill_calls == []
 
     token_event = next(data for name, data in events if name == "token")
-    assert token_event["token"] == "Okay, I won't add that beneficiary."
+    assert token_event["token"].startswith("declined:")
 
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "BANKING_SERVICE"
@@ -483,10 +552,10 @@ def test_pending_confirmation_unclear_reasks_and_never_calls_adapter(client, mon
     assert fulfill_calls == []
 
     token_event = next(data for name, data in events if name == "token")
-    assert token_event["token"] == (
-        "Sorry, I didn't quite catch that — You're about to add Rahim as a beneficiary. "
-        "Shall I proceed? (yes/no)"
-    )
+    # re-asks the same yes/no with the same exact values
+    assert token_event["token"].startswith("confirm:")
+    assert "nickname: Rahim" in token_event["token"]
+    assert "account ending: 7890" in token_event["token"]
 
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "CONFIRMATION_REQUIRED"
@@ -515,7 +584,8 @@ def test_pending_confirmation_affirmative_adapter_unavailable_never_claims_succe
 
     events = _parse_sse(resp.text)
     token_event = next(data for name, data in events if name == "token")
-    assert token_event["token"] == "That service isn't available right now. Please try again shortly."
+    assert token_event["token"].startswith("unavailable:")
+    assert not token_event["token"].startswith("done:")
     assert "added" not in token_event["token"].lower()
 
     result_event = next(data for name, data in events if name == "result")
