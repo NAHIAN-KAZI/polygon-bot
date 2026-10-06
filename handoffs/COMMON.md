@@ -44,7 +44,8 @@ server-side; show a generic "something went wrong, please try again".
 | `CLARIFICATION_REQUIRED` | The bot asked a question | Show the bubble; keep the input open. `payload` is `null` |
 | `ACCOUNT_SELECTION_REQUIRED` | The customer has several accounts/cards and the bot asked which | Show the bubble **and** a picker from `payload.accounts` (§4) |
 | `OTP_REQUIRED` | Card freeze needs verification | Open the secure verification form (§5). Never collect codes in the chat box |
-| `CONFIRMATION_REQUIRED` | A change is ready and needs an explicit yes/no | Show the bubble plus **Yes** / **No** buttons that send `"yes"` / `"no"` |
+| `TRANSACTION_SELECTION_REQUIRED` | A dispute needs to know which recent transaction it's about | Show the bubble **and** a picker from `payload.transactions` (`transactionId`, `txnTime`, `type`, `amount`, `transactionType`); send the pick as `payload: {"transactionId": id}` |
+| `CONFIRMATION_REQUIRED` | A change is ready and needs an explicit yes/no | Show the bubble plus **Yes** / **No** buttons that send `payload: {"confirm": true}` / `{"confirm": false}` (message text can be the button label). Typed replies also work — the bot reads them — but buttons are exact |
 | `SERVICE_UNAVAILABLE` | The bank's service failed or isn't available for this customer | Show the bubble; optionally a retry button that resends the last message |
 | `AUTH_REQUIRED` | JWT missing/expired | Refresh the token (or send the customer to login), then resend |
 | `KB_ANSWER` | General/product answer from the bank's knowledge base, or a polite off-topic decline | Show the bubble. `payload.sources` lists documents used (may be `null`) |
@@ -188,7 +189,11 @@ Future<void> onSend(String message, {Map<String, dynamic>? payload}) async {
     case 'OTP_REQUIRED':
       showVerificationForm(turn.payload!);
     case 'CONFIRMATION_REQUIRED':
-      showYesNo(onYes: () => onSend('yes'), onNo: () => onSend('no'));
+      showYesNo(onYes: () => onSend('Yes', payload: {'confirm': true}),
+                onNo: () => onSend('No', payload: {'confirm': false}));
+    case 'TRANSACTION_SELECTION_REQUIRED':
+      showTransactionPicker((turn.payload!['transactions'] as List).cast<Map<String, dynamic>>(),
+          onPick: (t) => onSend('Selected', payload: {'transactionId': t['transactionId']}));
     case 'AUTH_REQUIRED':
       await refreshLogin();
     case 'BANKING_SERVICE':
@@ -198,3 +203,10 @@ Future<void> onSend(String message, {Map<String, dynamic>? payload}) async {
   }
 }
 ```
+
+## 8. Bot wording (T-77)
+Every bubble is written by the model for this customer and moment, so the same
+step can be worded differently each time. Never match on bubble text; drive the
+UI only from `result.type`, `payload` and `routing`. Only one sentence is fixed:
+when the bot's language model can't be reached it says
+"Sorry, I'm having trouble right now. Please try again in a moment."

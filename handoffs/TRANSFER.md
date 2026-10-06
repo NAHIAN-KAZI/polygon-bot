@@ -120,7 +120,8 @@ void renderTransfer(ChatTurnResult turn) {
       showPicker((p['beneficiaries'] as List).cast<Map<String, dynamic>>(),
           onPick: (b) => onSend('Selected', payload: {'beneficiaryId': b['id']}));
     case 'CONFIRMATION_REQUIRED':
-      showYesNo(onYes: () => onSend('yes'), onNo: () => onSend('no'));
+      showYesNo(onYes: () => onSend('Yes', payload: {'confirm': true}),
+                onNo: () => onSend('No', payload: {'confirm': false}));
     case 'BANKING_SERVICE' when turn.service == 'transfer_limit':
       showLimitBars(p, money: (v) => v == null ? 'Not set' : Money.fromPoisha(v).format());
     case 'BANKING_SERVICE' when turn.service == 'qr_payment_history':
