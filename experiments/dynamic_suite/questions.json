@@ -1,0 +1,1289 @@
+{
+ "1.1": {
+  "intent": "ACCOUNT_INFO",
+  "name": "1.1 Get all accounts",
+  "expected": [
+   "account_info",
+   "accounts"
+  ],
+  "questions": {
+   "one_word": "Accounts",
+   "two_words": "My accounts",
+   "casual": "hey whats my accs like? i think i have some bKash ones somewhere?",
+   "sentence": "Can you please list all of my bank accounts, including the one with 20k BDT that I transferred from Rocket.",
+   "paragraph": "I've been trying to keep track of my finances for the new year and I'm pretty sure I have three different bank accounts with this bank. One has my salary deposited directly into it, another has some savings from a friend's gift last Eid, and then there's the one with 20k BDT that I transferred from Rocket for an unexpected expense last month. Could you please help me find all of these accounts so I can get a clear picture?"
+  }
+ },
+ "1.2": {
+  "intent": "ACCOUNT_INFO",
+  "name": "1.2 Get account detail",
+  "expected": [
+   "account_info",
+   "accounts"
+  ],
+  "questions": {
+   "one_word": "Accounts",
+   "two_words": "Get balance",
+   "casual": "hey i want my acc details pls lol",
+   "sentence": "Can you please give me a list of all my bank accounts and their current balances?",
+   "paragraph": "I'm trying to track my expenses for the last quarter, but I have accounts spread across different banks. Specifically, I'm looking for the current balance of my IFIC Bank account and the remaining amount in my Bkash wallet. Could you please provide me with this information? Thank you!"
+  }
+ },
+ "1.5": {
+  "intent": "ACCOUNT_INFO",
+  "name": "1.5 Star account",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "star",
+   "two_words": "get star",
+   "casual": "im wanna get my star accnt lol i forgot username",
+   "sentence": "Can I please have access to my Star account?",
+   "paragraph": "Hey, I've been trying to use my Star account for a while now but the app keeps saying it's inactive. I'm really confused because I used it last on 2022-02-15 and even made some transactions through Paytm wallet before that. Can you help me sort this out? I'd really appreciate it if I could get back to using my Star account."
+  }
+ },
+ "1.6": {
+  "intent": "ACCOUNT_INFO",
+  "name": "1.6 My loans",
+  "expected": [
+   "loan_services",
+   "my_loans"
+  ],
+  "questions": {
+   "one_word": "loans",
+   "two_words": "my loans",
+   "casual": "can u plz send me my loan info lol thx",
+   "sentence": "I'd like to view an overview of all my current loans, please.",
+   "paragraph": "Hi, I've had a few loans open since last year, including one for Tk. 200,000 from DBBL that's due next month and another smaller one with bKash. Could you please show me their status and any new ones? Thanks."
+  }
+ },
+ "1.7": {
+  "intent": "ACCOUNT_INFO",
+  "name": "1.7 FD profit history",
+  "expected": [
+   "account_info",
+   "fd_profit_history"
+  ],
+  "questions": {
+   "one_word": "profit",
+   "two_words": "fd profit",
+   "casual": "wanna see fd interest calc",
+   "sentence": "Can you please provide me the FD profit history for my account?",
+   "paragraph": "I have been saving money in my Dhaka Bank FD since last year and I'm curious to know how much profit I earned. I deposited Tk 50,000 on January 1st and it's about to mature soon. Could you please help me find out the interest earned so far?"
+  }
+ },
+ "1.8": {
+  "intent": "ACCOUNT_INFO",
+  "name": "1.8 DPS profit history",
+  "expected": [
+   "account_info",
+   "dps_profit_history"
+  ],
+  "questions": {
+   "one_word": "Profit",
+   "two_words": "DPS history",
+   "casual": "can u pls send me dps profit history from january?",
+   "sentence": "I need to know how much profit I earned on my DPS savings scheme.",
+   "paragraph": "I've been using my Bangladeshi bank's mobile app for years, but I'm really interested in knowing the profit history of my DPS savings scheme. It's been a while since I last checked it, and I think I might have missed out on some interest. Can you please help me find this information? I would greatly appreciate it if you could send me the details for the past year."
+  }
+ },
+ "— Cards list": {
+  "intent": "ACCOUNT_INFO",
+  "name": "— Cards list",
+  "expected": [
+   "account_info",
+   "cards"
+  ],
+  "questions": {
+   "one_word": "Cards",
+   "two_words": "Card list",
+   "casual": "hey whats my cardz i think i lost one",
+   "sentence": "Can you please show me a list of all my cards?",
+   "paragraph": "I'm trying to keep track of my cards for the Eid festival, I have a credit card from BRAC Bank and a debit card from bKash, but I'm not sure if there's anything due or expired. Can you help me with that? I had a card expire last year on 15th June, so I'd like to see the list of cards I have now."
+  }
+ },
+ "— Account transactions": {
+  "intent": "ACCOUNT_INFO",
+  "name": "— Account transactions",
+  "expected": [
+   "account_info",
+   "account_transactions"
+  ],
+  "questions": {
+   "one_word": "money",
+   "two_words": "account balance",
+   "casual": "hey i need to check my mony in bkash that was deposited 2days ago pls help!",
+   "sentence": "I need to know how much money is left in my account after the transaction today.",
+   "paragraph": "I'm having trouble checking my transactions for last month. I made a big purchase on 10th February using my Nagad wallet, and I think it's still pending. Can you please help me check if everything has been processed correctly? I'd like to know how much is left in my account after the transaction."
+  }
+ },
+ "2.1": {
+  "intent": "ATM_SUPPORT",
+  "name": "2.1 Cash by code",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "Cash",
+   "two_words": "Withdraw cash",
+   "casual": "can i withdraw 500 taka using rocket via code",
+   "sentence": "I need to withdraw some money from my Rocket account today, can you help me with a cash by code service?",
+   "paragraph": "Hi, I'm trying to withdraw money for my sister's birthday tomorrow. She's coming over from abroad and I want to surprise her with some local cash. Can you please assist me with the cash by code feature so I can get the money delivered to our home? It would be a huge help!"
+  }
+ },
+ "2.2": {
+  "intent": "ATM_SUPPORT",
+  "name": "2.2 Raise dispute",
+  "expected": [
+   "service_requests",
+   "raise_dispute"
+  ],
+  "questions": {
+   "one_word": "Problem",
+   "two_words": "Transaction failed",
+   "casual": "hey whats gng on my paypal money was taken out yday but i didnt recieve it plz chk",
+   "sentence": "I have a dispute with a transaction that happened yesterday from my Bkash account.",
+   "paragraph": "I've been using my City Bank credit card for years without any issues, but last night I tried to pay someone through Rocket. The money was deducted from my account, but the other person is saying they didn't receive it. Can you help me raise a dispute about this transaction? The details are: account number 1234567890, transaction reference no. XYZ123, and the amount was Tk. 500. I'd really appreciate your assistance in getting to the bottom of this."
+  }
+ },
+ "2.3": {
+  "intent": "ATM_SUPPORT",
+  "name": "2.3 List disputes",
+  "expected": [
+   "service_requests",
+   "disputes"
+  ],
+  "questions": {
+   "one_word": "Disputes",
+   "two_words": "See disputes",
+   "casual": "omg i got scammed last wk thru paypall wallet my card no is ************ and amount was tkrs 12k pls help me to list all disputes",
+   "sentence": "Can you please show me the list of transactions I have disputed?",
+   "paragraph": "I made a payment through bkash on jan 10th but the receiver didn't receive it, i've already contacted them. now the money is stuck in my account and i don't know what to do. can u pls help me by listing all transaction disputes with their status?"
+  }
+ },
+ "3.1": {
+  "intent": "CARD_ISSUE",
+  "name": "3.1 Reset card PIN",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "Reset",
+   "two_words": "Change PIN",
+   "casual": "can u pls reset my card pin?",
+   "sentence": "I forgot my card's PIN, can you please help me reset it.",
+   "paragraph": "I've been trying to remember my card's PIN for hours, but I just can't. It's really frustrating because I need to pay some bills online and my wallet is running low - I had 5,000 taka in my Bkash account on the 15th of this month. Can you please reset my card PIN so I can transfer money from my bank account?"
+  }
+ },
+ "3.2": {
+  "intent": "CARD_ISSUE",
+  "name": "3.2 Unfreeze card",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "Unfreeze",
+   "two_words": "Card Unfrozen",
+   "casual": "hey unfreeze my card pls i tried 2 days ago still not working btw",
+   "sentence": "I would like to request that you unfreeze my debit card as it has been frozen for a week.",
+   "paragraph": "Hi, I'm reaching out because my card got frozen last week due to some suspicious activity. I know I made a purchase of Tk 500 from my Bkash wallet on the 10th and then another one of Tk 800 from the same wallet two days later - it was all legitimate transactions, but for some reason, the bank flagged it as unusual. Anyway, could you please unfreeze my card so I can use it again? It would be a huge relief!"
+  }
+ },
+ "3.3": {
+  "intent": "CARD_ISSUE",
+  "name": "3.3 Raise dispute",
+  "expected": [
+   "service_requests",
+   "raise_dispute"
+  ],
+  "questions": {
+   "one_word": "Problem",
+   "two_words": "Dispute raised",
+   "casual": "hey my money didnt come out of my bKash account on 10th feb what's goin on?",
+   "sentence": "I've tried to withdraw 500 taka from my DBBL account but it shows failed, please help me with this issue.",
+   "paragraph": "I'm really frustrated because I was supposed to pay my phone bill using my Rocket account yesterday (23rd Feb) but the money didn't go through. The amount was Tk 1200 and I've already checked my balance, everything looks fine on my side. Can you please look into this and help me resolve the issue? It would be great if you could sort out this dispute for me."
+  }
+ },
+ "3.4": {
+  "intent": "CARD_ISSUE",
+  "name": "3.4 List disputes",
+  "expected": [
+   "service_requests",
+   "disputes"
+  ],
+  "questions": {
+   "one_word": "disputes",
+   "two_words": "show me disputes",
+   "casual": "hey whats going on with my dispute for 500 tk i sent through rocket using my credit card last sat",
+   "sentence": "Can you please show me a list of all the disputes I have with this bank?",
+   "paragraph": "I'm trying to keep track of my transactions from last month, and I think there might be some issues. On the 15th, I tried to send money to my friend through Rocket using my Credit Card, but it got stuck in a dispute. Can you please list all my disputes so I can resolve them and get everything sorted out?"
+  }
+ },
+ "3.5": {
+  "intent": "CARD_ISSUE",
+  "name": "3.5 Submit complaint",
+  "expected": [
+   "support",
+   "submit_complaint"
+  ],
+  "questions": {
+   "one_word": "complaint",
+   "two_words": "poor service",
+   "casual": "bank sucks lol my atm card didnt work yesterday cant believe it",
+   "sentence": "I'm extremely dissatisfied with your app and would like to file a complaint.",
+   "paragraph": "I tried to withdraw money from my Dhaka Bank wallet on Eid day but the app kept freezing. My card got stuck in the ATM machine too. I was already running late for iftar. I need you to look into this ASAP."
+  }
+ },
+ "3.6": {
+  "intent": "CARD_ISSUE",
+  "name": "3.6 My complaints",
+  "expected": [
+   "polygon_services",
+   "my_tickets"
+  ],
+  "questions": {
+   "one_word": "Complaints",
+   "two_words": "My issues",
+   "casual": "hey, whats up w/ my existing complaints? i had some problems w/ my bkash transactions last week",
+   "sentence": "I need to see the status of my outstanding complaints with the bank.",
+   "paragraph": "i've been having some trouble with my dbbl account - my atm card was declined twice last week and once this week, on tuesday. i tried contacting customer support but they just gave me a reference number without resolving the issue. can you please look into this? I want to be able to view all of my existing complaints and their status in one place."
+  }
+ },
+ "4.1": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.1 Freeze card",
+  "expected": [
+   "card_services",
+   "frezz_unfrezz"
+  ],
+  "questions": {
+   "one_word": "Freeze",
+   "two_words": "Block card",
+   "casual": "plz freeze my card coz its lost!!",
+   "sentence": "I need to block my card as it's been stolen.",
+   "paragraph": "I went on a trip to India last week and I think someone swiped my wallet containing my bank card. It had Tk 50,000 in it. I don't want anyone to use it until I can replace it. Please freeze the card right away."
+  }
+ },
+ "4.2": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.2 Unfreeze card",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "unfreeze",
+   "two_words": "free my card",
+   "casual": "hey i got my card frozen by mistake yesterday pls unfreeze it tia",
+   "sentence": "Can you please unfreeze my card as it has been blocked since last night?",
+   "paragraph": "I was trying to withdraw some money from my Bkash wallet this morning but my card got declined, I think it's because it was frozen again. This is the third time this month and I'm getting really frustrated. Can you please unfreeze my card so I can use it for my daily needs?"
+  }
+ },
+ "4.3": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.3 Close card",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "CLOSE",
+   "two_words": "Close card",
+   "casual": "cncl my card pls",
+   "sentence": "I need to close my bank card, can you help me do that?",
+   "paragraph": "I was supposed to cancel my DBBL Debit Card last week but forgot to follow up. I think the deadline is 15th of this month and if I don't cancel it now, I'll be charged extra fees. Can you please close my card for me?"
+  }
+ },
+ "4.4": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.4 Contactless on/off",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "Disable",
+   "two_words": "Contactless off",
+   "casual": "hey can u turn contactless on/off pls?",
+   "sentence": "Can you please switch my contactless feature on and off for me today?",
+   "paragraph": "I'm trying to save money on gas by limiting my card usage, so I'd like to temporarily disable contactless payments. I've been using my bKash wallet with the bank's mobile app for the past week without any issues. The problem is that my brother accidentally made a big purchase last night and it was processed through the card instead of cash. Can you please turn off contactless on my account today so this doesn't happen again?"
+  }
+ },
+ "4.5": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.5 International transaction on/off",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "Turn",
+   "two_words": "On/Off",
+   "casual": "cammu off plz, thx",
+   "sentence": "Can you turn international transactions on/off for my Visa card?",
+   "paragraph": "I'm planning a trip abroad and I want to make sure my international transaction limit is sufficient. I have a HSBC visa card linked to my PayPal wallet and I've been getting some alerts about low balance. Can you please help me toggle this feature on or off so I can avoid any issues during my travels, which start tomorrow?"
+  }
+ },
+ "4.6": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.6 Reset card PIN",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "Reset",
+   "two_words": "Change PIN",
+   "casual": "cant remembr my pin lol help!",
+   "sentence": "I want to reset my card PIN, it's been expired since yesterday.",
+   "paragraph": "Hi, I've had a Visa debit card with DBBL for years now. I recently tried to withdraw some cash from an ATM using it, but the machine rejected it because my old PIN wasn't working. Can you please help me change or reset my card PIN so I can use it again? Thanks!"
+  }
+ },
+ "4.7": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.7 Limit change — submit",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "Submit",
+   "two_words": "Change limit",
+   "casual": "can i cnage my lmit pls thx",
+   "sentence": "I'd like to change my credit card's spending limit, please.",
+   "paragraph": "Hi, I'm trying to manage my expenses for the upcoming Eid festival. I want to reduce my daily cash withdrawal limit for my DBBL debit card from Tk 10,000 to Tk 5,000 by tomorrow, May 15th. Could you please help me with that? It would be a big help."
+  }
+ },
+ "4.8": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.8 Limit change — list",
+  "expected": [
+   "card_info",
+   "card_limit_requests"
+  ],
+  "questions": {
+   "one_word": "Status",
+   "two_words": "limit change",
+   "casual": "hey whats my new limit",
+   "sentence": "Can you please tell me what's going on with my card limit change request that I made last week?",
+   "paragraph": "I tried to increase my limit a few days ago, but I haven't received any updates. I had about 50,000 BDT in my Bkash wallet at the time, so I'm not sure if it got rejected or something went wrong. Can you look into this for me and let me know what's happening?"
+  }
+ },
+ "4.9": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.9 Limit change — cancel",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "Cancel",
+   "two_words": "Limit change",
+   "casual": "pls cancl limit change lol",
+   "sentence": "I need to cancel my daily limit change effective today.",
+   "paragraph": "Hi, I'm trying to pay for my daughter's tuition fees using my Bkash wallet. My account is almost full but the system won't let me transfer more than the usual limit. Can you please change this limit for me so I can send the extra amount? I need to do it today as the deadline is tonight."
+  }
+ },
+ "4.10": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.10 Card products list",
+  "expected": [
+   "card_info",
+   "card_products"
+  ],
+  "questions": {
+   "one_word": "cards",
+   "two_words": "card types",
+   "casual": "hey wht cards r available? got a cashback card but wanna upgrade...",
+   "sentence": "Can you tell me what kinds of credit cards this bank offers?",
+   "paragraph": "Hi, I've been using my Moneymen wallet since 2018 and recently got an overdraft limit. While browsing the bank's website, I noticed they have a 'Premium Card' but couldn't find any details on other types of cards offered. Can you help me with that?"
+  }
+ },
+ "4.11": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.11 Apply for debit card",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "Card",
+   "two_words": "Debit card",
+   "casual": "can i get debit card plz?",
+   "sentence": "I want to apply for a debit card so I can use it with my Bkash wallet.",
+   "paragraph": "I'm trying to set up online banking and need a debit card. I made a mistake last week and transferred Taka 1,000 to the wrong account from my Samba account, but thankfully they returned it today (10th May). Now I want to get a new debit card so this doesn't happen again."
+  }
+ },
+ "4.13": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.13 Apply for prepaid card",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "Card",
+   "two_words": "Prepaid Card",
+   "casual": "hey can i get a prepaid card pls",
+   "sentence": "I need to apply for a prepaid card as soon as possible.",
+   "paragraph": "I've been using my mobile wallet bKash to pay bills and transfer money, but I need a way to buy things online securely. My friend recommended a prepaid card, so I'd like to apply for one today. Can you help me with that?"
+  }
+ },
+ "4.15": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.15 Virtual card — submit",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "Card",
+   "two_words": "Virtual card",
+   "casual": "can i get vcard pls? lol",
+   "sentence": "Can you please create a virtual card for me today?",
+   "paragraph": "I've been trying to order something online from Amazon but they need a valid credit card number, and I don't want to give them my real one. I'm using my Bkash wallet to pay the bill, so can you help me generate a virtual card? It's for a small purchase of 1000 taka only, just a test run to see if it works."
+  }
+ },
+ "4.16": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.16 Virtual card — list",
+  "expected": [
+   "card_info",
+   "virtual_card_requests"
+  ],
+  "questions": {
+   "one_word": "Cards",
+   "two_words": "Virtual Cards",
+   "casual": "hey wot abt my virtul card??",
+   "sentence": "Can you please provide me with a list of my virtual cards?",
+   "paragraph": "I'm trying to keep track of all the virtual cards I've applied for - it's been since January 10th that I requested one from DBBL and another from Bkash. My account number is XXXX-XXXXX-XXXX. Can you please give me an update on the status of these requests, including any additional information about them like card numbers and amounts. Thanks in advance!"
+  }
+ },
+ "4.17": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.17 Virtual card — cancel",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "Cancel",
+   "two_words": "Virtual card",
+   "casual": "can u pls cancel virtual card? ty!",
+   "sentence": "I want to cancel my virtual card because I'm getting charged extra fees.",
+   "paragraph": "Hey, I just got a notification from my bKash wallet saying they're charging me a maintenance fee for my virtual card. This is the second time this month and it's really frustrating. Can you please cancel my virtual card so I don't get charged again? It was issued on January 10th."
+  }
+ },
+ "4.19": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.19 Star card",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "Star",
+   "two_words": "Get Star card",
+   "casual": "hey starcard plz",
+   "sentence": "I'd like to get a Star card as I'm having trouble getting loans with my current bank account.",
+   "paragraph": "I've been using my bKash wallet for months now, but I need a credit card for some personal expenses. My wife's birthday is coming up and we were planning to buy her a new phone, but the prices are steep without any financing options. So, can you please help me get a Star card as soon as possible? That would be really great."
+  }
+ },
+ "4.20": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.20 Credit card bill payment (card service)",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "Pay",
+   "two_words": "card bill",
+   "casual": "plz pay my card bill thx lol",
+   "sentence": "I want to pay my credit card bill online today.",
+   "paragraph": "I've been meaning to pay my credit card bill for weeks now. I made a mistake and paid it late last time, so I really need to get this sorted out ASAP. Can you please help me with the payment process? My card is with City Bank and I want to use my Bkash wallet to make the payment."
+  }
+ },
+ "4.21": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.21 Credit card bill payment (bill service)",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "Pay",
+   "two_words": "CC bill",
+   "casual": "hey pay my credit card bills pls thnx!!",
+   "sentence": "I need to make a payment for my Standard Chartered credit card.",
+   "paragraph": "I'm trying to pay my credit card bills on time, as I promised myself. Yesterday was the due date for my Visa card, but I forgot to make the payment. Now it's urgent that I pay my other cards too, like the ones with Bkash and Rocket. Can you please help me make the credit card bill payments online?"
+  }
+ },
+ "4.22": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.22 QR payment cards — list",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "cards",
+   "two_words": "payment list",
+   "casual": "can u pls give me a list of qr payment cards? thx!",
+   "sentence": "I need to know what QR payment cards my bank offers.",
+   "paragraph": "I tried making a payment using Rocket, but it didn't work yesterday. I think the issue might be with my bank's QR card options. Can you please give me a list of all the QR payment cards available through our bank? That would really help me troubleshoot and make a successful transaction today."
+  }
+ },
+ "4.23": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.23 QR payment card — enable/disable",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "Enable",
+   "two_words": "Turn off QR",
+   "casual": "hey can u turn qr thingy on/off pls? thx!",
+   "sentence": "I want to disable my QR payment card for now, thanks.",
+   "paragraph": "I tried using my bKash wallet with the QR code yesterday but it kept failing. I think it's because I have the QR payment card enabled by default. Can you please help me disable it so I can try again today?"
+  }
+ },
+ "5.1": {
+  "intent": "CARD_REPLACEMENT",
+  "name": "5.1 List replacement requests",
+  "expected": [
+   "card_info",
+   "replacement_requests"
+  ],
+  "questions": {
+   "one_word": "Status",
+   "two_words": "Card status",
+   "casual": "wot bout my card replacment?? i sent it in like last week...",
+   "sentence": "Can you please check on the status of my card replacement request?",
+   "paragraph": "I tried to pay with my Bkash wallet at a shop yesterday, but they said my card was expired. I realized it's been missing since I lost it on the bus on February 10th. Can you tell me if my card replacement is ready yet? Maybe I can pick it up and avoid more trouble."
+  }
+ },
+ "5.2": {
+  "intent": "CARD_REPLACEMENT",
+  "name": "5.2 Cancel replacement request",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "Cancel",
+   "two_words": "Replace now",
+   "casual": "cncl replcement pls i typed wrong earlier thx",
+   "sentence": "I want to cancel my replacement request for the wallet I tried to replace on Tuesday, please help.",
+   "paragraph": "Hi, I'm trying to cancel a replacement request for a Bkash wallet that got lost. I had requested it to be replaced last week but then I found it in my drawer. Now I want to cancel the replacement so it doesn't get sent again. Can you please cancel the request?"
+  }
+ },
+ "6.1": {
+  "intent": "CHECK_BALANCE",
+  "name": "6.1 Account balance",
+  "expected": [
+   "account_info",
+   "balance"
+  ],
+  "questions": {
+   "one_word": "Balance",
+   "two_words": "Account balance",
+   "casual": "what's my balance in DBBL wallet?",
+   "sentence": "I need to know how much money I have in my DBBL account as of today.",
+   "paragraph": "Hi, I'm trying to keep track of my finances and I recently loaded some money into my DBBL wallet. However, when I check the app, it's not showing up. Can you please tell me my current balance so I can be sure everything is accounted for?"
+  }
+ },
+ "6.2": {
+  "intent": "CHECK_BALANCE",
+  "name": "6.2 Credit card summary",
+  "expected": [
+   "card_info",
+   "credit_card_summary"
+  ],
+  "questions": {
+   "one_word": "Summary",
+   "two_words": "Credit Limit",
+   "casual": "can u pls send me my card summary?",
+   "sentence": "Can you please show me a credit card summary for today.",
+   "paragraph": "I'm trying to keep track of my expenses, and I need to see how much is left on my bKash wallet credit card. I made some big purchases online last week using the Mastercard that's linked to it, so I want to know if I've exceeded the limit or not. Can you please show me a summary of my credit card details, especially the available credit and due amount?"
+  }
+ },
+ "7.1": {
+  "intent": "EDIT_PERSONAL_DETAILS",
+  "name": "7.1 Get profile",
+  "expected": [
+   "profile",
+   "profile"
+  ],
+  "questions": {
+   "one_word": "Profile",
+   "two_words": "My Profile",
+   "casual": "hey get my pofile plz",
+   "sentence": "Can you please provide me with my profile details?",
+   "paragraph": "I've been trying to pay my bKash bill through the app but I think I need some information from my account. I'm trying to sort out my finances for next week's rent, which is due on 15th March. Can you please get my profile and send me a message with all my details? That would be super helpful."
+  }
+ },
+ "7.2": {
+  "intent": "EDIT_PERSONAL_DETAILS",
+  "name": "7.2 Update nickname",
+  "expected": [
+   "profile_update",
+   "update_nickname"
+  ],
+  "questions": {
+   "one_word": "rename",
+   "two_words": "change nick",
+   "casual": "can i plz change my nickname to somethin else?",
+   "sentence": "Can you please update my display name in the app to something more personalized?",
+   "paragraph": "I've been using this app since I opened my Dhaka Bank account last year and I've always loved it. However, I'd like to give myself a cool nickname that reflects my personality. I was thinking of changing it to 'DhakaDreamer' because I'm planning a big trip to Cox's Bazar soon. Could you please update my display name for me?"
+  }
+ },
+ "7.3/7.4": {
+  "intent": "EDIT_PERSONAL_DETAILS",
+  "name": "7.3/7.4 Upload profile image",
+  "expected": [
+   "profile_update",
+   "update_profile_image"
+  ],
+  "questions": {
+   "one_word": "Photo",
+   "two_words": "Profile pic",
+   "casual": "hey upload my profile pic from paytm kyc pls",
+   "sentence": "Can you please change my profile image to the one I uploaded last week?",
+   "paragraph": "I'm trying to link my mobile banking account to your app, but it's giving me an error. I've been using DBBL for years and just got a new Paytm wallet on Saturday. Anyway, can you upload my profile picture from the ID verification process? It's a photo of me taken last week, and I think it's still in your system."
+  }
+ },
+ "7.5": {
+  "intent": "EDIT_PERSONAL_DETAILS",
+  "name": "7.5 Update mobile number",
+  "expected": [
+   "profile_update",
+   "update_mobile"
+  ],
+  "questions": {
+   "one_word": "Update",
+   "two_words": "New number",
+   "casual": "hey can u pls change my mobile num lol thx!",
+   "sentence": "I want to update my mobile number as it's changed recently.",
+   "paragraph": "I've just got a new phone and I need to update the mobile number registered with DBBL, I was using my old SIM with number 017********* but now I have a new one so please help me change the number. My new phone is a Huawei P30 and it's been working fine since I activated it on January 10th. Thank you for your assistance in this matter."
+  }
+ },
+ "7.6": {
+  "intent": "EDIT_PERSONAL_DETAILS",
+  "name": "7.6 Update email address",
+  "expected": [
+   "profile_update",
+   "update_email"
+  ],
+  "questions": {
+   "one_word": "Update",
+   "two_words": "Email address",
+   "casual": "can i pls update my email to newemail@gmail.com thx",
+   "sentence": "I need to update my email address as it's not working properly.",
+   "paragraph": "Hi, I've been trying to pay my credit card bill on bKash yesterday but kept getting an error message. I think it's because my email is outdated and the bank hasn't sent me any notifications. Could you please help me change it to newEmail? It would be a huge relief for me."
+  }
+ },
+ "7.7": {
+  "intent": "EDIT_PERSONAL_DETAILS",
+  "name": "7.7 Get address",
+  "expected": [
+   "profile",
+   "address"
+  ],
+  "questions": {
+   "one_word": "Address",
+   "two_words": "Get Me",
+   "casual": "cmon wot's my addr???",
+   "sentence": "I need to update my address in your system as it is outdated.",
+   "paragraph": "I'm trying to send some money to my sister using Rocket, but I need to make sure my address is correct. It's been a while since I last updated it. Can you please help me retrieve or update my registered address? My KYC status is also due for renewal soon. Please let me know what I need to do."
+  }
+ },
+ "7.8": {
+  "intent": "EDIT_PERSONAL_DETAILS",
+  "name": "7.8 Update address",
+  "expected": [
+   "profile_update",
+   "update_address"
+  ],
+  "questions": {
+   "one_word": "Update",
+   "two_words": "Change Address",
+   "casual": "hey can u pls update my address lol i moved to sylhet last week thx",
+   "sentence": "I want to update my permanent address from Dhaka to Chittagong.",
+   "paragraph": "I've been living in my new flat in Uttara for the past month, but I just got a job at a company in Khulna and need to change my address on file. My present address is still the same as before, but my permanent address needs an update to reflect this move. Can you please help me with that?"
+  }
+ },
+ "7.9": {
+  "intent": "EDIT_PERSONAL_DETAILS",
+  "name": "7.9 Submit KYC",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "Submit",
+   "two_words": "Do KYC",
+   "casual": "hey cud u pls submit my kyc?",
+   "sentence": "I need to submit my KYC documents, could you help me with that?",
+   "paragraph": "I've been trying to use my Bkash wallet to pay bills online but it's not working because I haven't submitted my KYC yet. I tried last week on the 10th of March but got stuck somewhere. Can you please assist me in submitting my documents today?"
+  }
+ },
+ "7.10": {
+  "intent": "EDIT_PERSONAL_DETAILS",
+  "name": "7.10 My contacts",
+  "expected": [
+   "profile",
+   "contacts"
+  ],
+  "questions": {
+   "one_word": "Contacts",
+   "two_words": "My Numbers",
+   "casual": "can u show me my saved contacts pls thx",
+   "sentence": "I want to see who I've registered as my contact numbers in this account.",
+   "paragraph": "Hi, I'm trying to send money to a friend using Rocket for the first time. Last week on Wednesday, I used this app to pay some bills and was asked to save their phone number. Now I need to make sure I have all the right contacts registered so the transfer goes smoothly. Can you show me my saved contacts in the app?"
+  }
+ },
+ "7.11": {
+  "intent": "EDIT_PERSONAL_DETAILS",
+  "name": "7.11 Profile change — submit",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "Update",
+   "two_words": "Profile info",
+   "casual": "cant get it 2 change my profile pic its been stuck on same picture since january whats up with that?",
+   "sentence": "I need to update my account information as I've recently changed jobs and want to link my new salary account.",
+   "paragraph": "Hi, I'm trying to change my profile info because I recently got married and my wife wants me to reflect our new joint savings. We use our bKash wallet for daily transactions, but I think the bank's system is stuck on my old details. My old salary account was with DBBL, but now it's with HSBC. Can you please help me update my profile? Thank you so much in advance!"
+  }
+ },
+ "7.12": {
+  "intent": "EDIT_PERSONAL_DETAILS",
+  "name": "7.12 Profile change — list",
+  "expected": [
+   "profile",
+   "profile_change_requests"
+  ],
+  "questions": {
+   "one_word": "Profile",
+   "two_words": "profile update",
+   "casual": "hey whats r going on wth my profile??",
+   "sentence": "I want to know if my profile change request has been processed yet.",
+   "paragraph": "Hi, I've been trying to update my address in the account with my Bkash wallet for a few days now. I sent the new info on 20 February but haven't seen any changes yet. Could you please look into this and let me know what's going on? Thanks!"
+  }
+ },
+ "7.13": {
+  "intent": "EDIT_PERSONAL_DETAILS",
+  "name": "7.13 Contact priority — submit",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "help",
+   "two_words": "need assistance",
+   "casual": "hey i got problem wit my atm card last mony 2k20 wont workin pls help",
+   "sentence": "I need to contact priority because I'm having issues with my bank account.",
+   "paragraph": "Hi, I'm having a bit of trouble with my Bkash wallet. I tried to withdraw some money yesterday but the transaction failed. Can someone please contact me via this chat? Thanks!"
+  }
+ },
+ "7.14": {
+  "intent": "EDIT_PERSONAL_DETAILS",
+  "name": "7.14 Contact priority — list",
+  "expected": [
+   "profile",
+   "contact_priority_requests"
+  ],
+  "questions": {
+   "one_word": "status",
+   "two_words": "show me",
+   "casual": "whats goin on wit my contact list? i cant find me friend's number its been a week!",
+   "sentence": "Can you please show me the status of all my primary-contact change requests?",
+   "paragraph": "I tried to add my sister's number as a contact priority last Thursday, but I don't think it went through. I sent TakaPay money to her using Rocket this Sunday, and she hasn't received any updates on her end. Could you please check the status of all my primary-contact change requests for me?"
+  }
+ },
+ "8.1": {
+  "intent": "FAILED_TRANSFER",
+  "name": "8.1 Transaction history",
+  "expected": [
+   "polygon_services",
+   "transaction_history"
+  ],
+  "questions": {
+   "one_word": "History",
+   "two_words": "Transactions history",
+   "casual": "what's my transactions for last week?",
+   "sentence": "Can you show me my transaction history from last month please?",
+   "paragraph": "I'm trying to keep track of my expenses for the Eid festival, I spent a bit on some shopping online with bKash last weekend and I think it was around 5000 taka, could you please give me a statement for all transactions from May 15th onwards?"
+  }
+ },
+ "8.2": {
+  "intent": "FAILED_TRANSFER",
+  "name": "8.2 Raise dispute",
+  "expected": [
+   "service_requests",
+   "raise_dispute"
+  ],
+  "questions": {
+   "one_word": "Dispute",
+   "two_words": "Transaction Issue",
+   "casual": "hey my payoneer account got debited but no cash recieved pls help me out",
+   "sentence": "I'm trying to dispute a transaction from last night, it's for 500 taka from Bkash and I haven't received the money yet.",
+   "paragraph": "I had sent 1,000 taka to my friend's Rocket account on Sunday but they say it never reached them. I have tried contacting my friend again but still no response. Can you please help me raise a dispute for this transaction as soon as possible?"
+  }
+ },
+ "8.3": {
+  "intent": "FAILED_TRANSFER",
+  "name": "8.3 List disputes",
+  "expected": [
+   "service_requests",
+   "disputes"
+  ],
+  "questions": {
+   "one_word": "Disputes",
+   "two_words": "List disputes",
+   "casual": "i hav some issues wit my ecocash transaction from yesterday 10th feb, can i get a list of all my disputes?",
+   "sentence": "Can you please show me the list of existing transaction disputes so I can review them?",
+   "paragraph": "I'm having trouble with my Bkash wallet. Yesterday, I sent some money to a friend and it's still pending after 24 hours. Can you please help me resolve this issue? If there are any disputes related to this transaction, could you show me the list?"
+  }
+ },
+ "8.4": {
+  "intent": "FAILED_TRANSFER",
+  "name": "8.4 Submit complaint",
+  "expected": [
+   "support",
+   "submit_complaint"
+  ],
+  "questions": {
+   "one_word": "Complain",
+   "two_words": "Bad app",
+   "casual": "omg this app is soo slow wud like complain bout it pls help :(",
+   "sentence": "I'm very unhappy with my recent bank statement and I'd like to file a complaint about the mistake.",
+   "paragraph": "I've been trying to use the mobile banking app for weeks, but every time I try to check my balance or pay a bill, it just hangs. Yesterday was the last straw when I tried to deposit money into my bKash wallet and it got stuck in processing. Can you please help me submit a complaint about this terrible app?"
+  }
+ },
+ "8.5": {
+  "intent": "FAILED_TRANSFER",
+  "name": "8.5 My complaints",
+  "expected": [
+   "polygon_services",
+   "my_tickets"
+  ],
+  "questions": {
+   "one_word": "Help",
+   "two_words": "Check status",
+   "casual": "hey i typed in that complaint about my dbbl atm card not working 2 days ago can u pls update me?",
+   "sentence": "I want to check the status of my recent complaint about a transaction issue on my Nagad wallet.",
+   "paragraph": "I'm trying to pay my electricity bill through Rocket, but it's showing an error. I think it might be related to the previous issue I reported last week about a duplicate transaction. Can you please help me resolve this?"
+  }
+ },
+ "10.1": {
+  "intent": "FEES",
+  "name": "10.1 Transaction charge quote",
+  "expected": [
+   "fees",
+   "fee_quote"
+  ],
+  "questions": {
+   "one_word": "Quote",
+   "two_words": "Live fee",
+   "casual": "btw how much will it cost to send money to my sister's bkash account today?",
+   "sentence": "Can you please quote me the live transaction charge for sending 10,000 taka from my Polygon Bank account to someone else's BDBL account tomorrow?",
+   "paragraph": "I need to send some money to my cousin in Dhaka on Thursday, and I want to know how much it will cost. Can you tell me the current fee for transferring money through BEFTN to his Standard Chartered Bank account? I'm trying to plan my expenses for the week, so any information would be helpful."
+  }
+ },
+ "12.1": {
+  "intent": "LOST_OR_STOLEN_CARD",
+  "name": "12.1 Report lost/stolen card",
+  "expected": [
+   "card_requests",
+   "report_lost_card"
+  ],
+  "questions": {
+   "one_word": "LOST",
+   "two_words": "card stolen",
+   "casual": "oh no my card was used by someone else last week",
+   "sentence": "I think my credit card has been lost/stolen and I need a new one.",
+   "paragraph": "I'm really worried because I noticed some unusual transactions on my Mastercard yesterday - it must have been stolen from me. I remember using it at the market in Dhaka on Saturday, but now all the money is gone! Can you please help me get a new card ASAP? It's really urgent as I have to pay for rent tomorrow."
+  }
+ },
+ "12.2": {
+  "intent": "LOST_OR_STOLEN_CARD",
+  "name": "12.2 Freeze card immediately",
+  "expected": [
+   "card_services",
+   "frezz_unfrezz"
+  ],
+  "questions": {
+   "one_word": "Freeze",
+   "two_words": "Block Card",
+   "casual": "pls freeze my card it got stolen yesterday lol",
+   "sentence": "I need you to block my debit card immediately as I lost it yesterday.",
+   "paragraph": "I'm really worried that someone might use my credit card from my Spondonit wallet, which is linked to my DBBL account. It happened last night when I was at a restaurant in Gulshan. Can you please freeze the card ASAP? My account number is XXXX and the card number is XXXX."
+  }
+ },
+ "13.1": {
+  "intent": "MINI_STATEMENT",
+  "name": "13.1 Transaction list",
+  "expected": [
+   "polygon_services",
+   "transaction_history"
+  ],
+  "questions": {
+   "one_word": "trans",
+   "two_words": "show me",
+   "casual": "can u show my transaction for yesterday i had some issues with my cash wallet btw",
+   "sentence": "I need to see a list of all transactions on my account from last week.",
+   "paragraph": "Hey, I'm trying to keep track of my expenses and I think there might have been an error with my latest statement. I used my MBL card at a store in Dhaka on the 10th but it's not showing up in my mobile banking app. Can you please show me a list of all transactions for last week? That would be great, thanks!"
+  }
+ },
+ "13.2": {
+  "intent": "MINI_STATEMENT",
+  "name": "13.2 Account transactions",
+  "expected": [
+   "account_info",
+   "account_transactions"
+  ],
+  "questions": {
+   "one_word": "Transactions",
+   "two_words": "My balance",
+   "casual": "hey whats my account transactions for today?",
+   "sentence": "I want to check all the transactions in my account from last week.",
+   "paragraph": "I'm trying to keep track of my expenses for my vacation in Sylhet, which is next month. I deposited Tk 5,000 into my City Bank account and also used my Bkash wallet to pay some bills. Can you please show me all the transactions from the past 7 days? It would be a huge help!"
+  }
+ },
+ "13.3": {
+  "intent": "MINI_STATEMENT",
+  "name": "13.3 Credit card statement",
+  "expected": [
+   "card_info",
+   "credit_card_statement"
+  ],
+  "questions": {
+   "one_word": "Statement",
+   "two_words": "My credit",
+   "casual": "i wanna see my credet card statment plz",
+   "sentence": "Can you please provide me with my credit card statement for last month?",
+   "paragraph": "I'm trying to keep track of my expenses for the wedding I got married last year and I need to check if there are any outstanding transactions on my credit card. My card is with DBBL and I made a payment of 10,000 BDT to Payoneer wallet in January. Could you please provide me with the statement for that month?"
+  }
+ },
+ "14.1": {
+  "intent": "TRANSFER",
+  "name": "14.1 Own account transfer",
+  "expected": [
+   "transfer",
+   "bank_transfer",
+   "own_account"
+  ],
+  "questions": {
+   "one_word": "transfer",
+   "two_words": "Send money",
+   "casual": "hey i wanna transfer some cash from my ac to another one please help lol",
+   "sentence": "I want to move 1000 taka from my current account to my savings account now.",
+   "paragraph": "I'm in a hurry, I need to pay my electricity bill by tomorrow. I have 1500 taka available in my Polygon Bank account, but the money is in my other account at IDLC Bank. Can you please help me transfer some amount from my Polygon Bank account to IDLC Bank? I just want to send 800 taka for now."
+  }
+ },
+ "14.2": {
+  "intent": "TRANSFER",
+  "name": "14.2 City Bank transfer",
+  "expected": [
+   "transfer",
+   "bank_transfer",
+   "city_account"
+  ],
+  "questions": {
+   "one_word": "transfer",
+   "two_words": "send money",
+   "casual": "hey can u plz send 500 tk from my other ac to this one thanks :)",
+   "sentence": "I want to transfer some money from my City Bank account to someone else's Polygon Bank account today, please help.",
+   "paragraph": "I was at the market yesterday and forgot my wallet so I couldn't buy the stuff I needed. Luckily, I have a few hundred taka left in my other City Bank account which is linked to this app. Can you please transfer 800 tk from that account to someone's Polygon Bank account? Their name is Sohel and their account number is XXXXXX."
+  }
+ },
+ "14.3": {
+  "intent": "TRANSFER",
+  "name": "14.3 Other bank transfer",
+  "expected": [
+   "transfer",
+   "bank_transfer",
+   "other_bank"
+  ],
+  "questions": {
+   "one_word": "Transfer",
+   "two_words": "Send money",
+   "casual": "hey can u pls tranfer some cash from my poly account to my bkash wallet today?",
+   "sentence": "Can you please help me transfer 1000 taka from my Polygon Bank account to my bKash wallet today?",
+   "paragraph": "I'm trying to pay a bill, but I need to transfer some money from my Polygon Bank account to my friend's account at another bank. We're planning to go on a trip together and I want to cover my share of the expenses. Can you please help me with this? I have 500 taka in my other Polygon Bank account that I'd like to move over here and then send 1200 taka from here to my friend's account at Dutch Bangla Bank. Thanks!"
+  }
+ },
+ "14.4": {
+  "intent": "TRANSFER",
+  "name": "14.4 Other banks list",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "List",
+   "two_words": "Other banks",
+   "casual": "plz give me othr bank list than spondon wallet",
+   "sentence": "Can you please provide a list of other banks that I can link with my DBBL wallet?",
+   "paragraph": "I'm trying to find the best option for mobile banking and have been using Spondon Wallet but I'd like to explore other options. I checked DBBL's app yesterday and saw that they offer a feature to link wallets from other banks, so I'm curious to see which ones are available. Can you please provide me with a list of other banks that I can link with my DBBL wallet? This would really help me make an informed decision about switching or not."
+  }
+ },
+ "14.5": {
+  "intent": "TRANSFER",
+  "name": "14.5 Gift transfer",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "Transfer",
+   "two_words": "Gift money",
+   "casual": "can i trasfer some $$ to my bKash accnt pls?",
+   "sentence": "I want to transfer 1000 taka as a gift to my sister's Rocket account on her birthday today.",
+   "paragraph": "My sister's birthday is today and I want to surprise her with some money. She has an account in Rocket, but I have an account in DBBL. Can you help me transfer 500 taka from my account to hers? It would make her really happy if she gets it today."
+  }
+ },
+ "14.6": {
+  "intent": "TRANSFER",
+  "name": "14.6 Gifts received",
+  "expected": [
+   "transfer_info",
+   "gifts_received"
+  ],
+  "questions": {
+   "one_word": "Received",
+   "two_words": "Money Received",
+   "casual": "i got 500 taka from swadhin today lol",
+   "sentence": "I want to record that I received a gift of 1000 Taka from my sister on 15th February.",
+   "paragraph": "I'm trying to keep track of all the money gifts I receive throughout the year. It's getting harder to remember everything! My aunt sent me some money last week and now today I got 500 taka from Swadhin, but I don't see it in my account history yet. Can you please help me log this so I can keep everything organized?"
+  }
+ },
+ "14.7": {
+  "intent": "TRANSFER",
+  "name": "14.7 Generic transaction",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "Pay",
+   "two_words": "pay cash",
+   "casual": "hey can i pay some money from my bkash accnt thx?",
+   "sentence": "I need to send 500 taka to my friend's DBBL account today.",
+   "paragraph": "Hi, I'm trying to order food online but the payment gateway isn't working. It usually happens when I try to use my Rocket account. Can you help me pay for this transaction using a different method? My Rocket balance is low and I don't want to get charged extra fees."
+  }
+ },
+ "14.8": {
+  "intent": "TRANSFER",
+  "name": "14.8 Linked account check",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "Account",
+   "two_words": "Linked accounts",
+   "casual": "hey whats my linked account balance?",
+   "sentence": "Can you please check if my account is linked correctly today?",
+   "paragraph": "I tried to link my Bkash wallet with my DBBL account last week, but I'm not sure if it's successful. I remember entering the correct details, but I haven't checked since then. Can you please let me know if everything is fine and my accounts are linked properly?"
+  }
+ },
+ "14.9": {
+  "intent": "TRANSFER",
+  "name": "14.9 Email transfer — create",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "Transfer",
+   "two_words": "Money to account",
+   "casual": "hey i wanna send 1000 tk to my dbbl wallet pls help me out!",
+   "sentence": "I need to transfer some money from my bKash account to my DBBL wallet today.",
+   "paragraph": "I've been using your bank's mobile app for a while now, but I never tried the chat feature. I have 5000 taka in my bKash wallet and want to transfer it to my DBBL credit card wallet by tomorrow so I can pay my utility bills on time. Can you please help me with that?"
+  }
+ },
+ "14.10": {
+  "intent": "TRANSFER",
+  "name": "14.10 Email transfer — list",
+  "expected": [
+   "transfer_info",
+   "email_transfers"
+  ],
+  "questions": {
+   "one_word": "Email",
+   "two_words": "Transfer help",
+   "casual": "can i get my email transfer history pls?? been trying to find it for ages!",
+   "sentence": "Can you please show me a list of all the email transfers I've made recently?",
+   "paragraph": "I was supposed to send money to my sister via Rocket using their wallet on our bank's app, but it didn't go through last week. The amount was Tk5000 and the date was January 10th. Can you please help me find out what happened to it? I need that money for her birthday present."
+  }
+ },
+ "14.11": {
+  "intent": "TRANSFER",
+  "name": "14.11 Email transfer — details",
+  "expected": [
+   "transfer_info",
+   "email_transfers"
+  ],
+  "questions": {
+   "one_word": "Money",
+   "two_words": "Transfer status",
+   "casual": "i cant find my sent email transfe i need to know where its",
+   "sentence": "Can you please tell me about the status of my email transfer from yesterday?",
+   "paragraph": "I'm trying to keep track of my finances, and I made an email transfer last week for 50,000 BDT to be sent from my Sobi wallet to my bank account. I think it was supposed to go through on Wednesday, but now I can't seem to find the details anywhere in the app or on my account statement. Could you please help me out and tell me where I can find this information? Thanks!"
+  }
+ },
+ "14.12": {
+  "intent": "TRANSFER",
+  "name": "14.12 Email transfer — cancel",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "Cancel",
+   "two_words": "Transfer Email",
+   "casual": "cncl email transfer plz",
+   "sentence": "I'd like to cancel the email transfer I initiated yesterday.",
+   "paragraph": "Hi, I'm trying to cancel an email transfer I made on 23rd February from my Rocket account to my cousin's DBBL wallet. The amount was 10,000 taka. Please help me with this as soon as possible. Thank you."
+  }
+ },
+ "14.13": {
+  "intent": "TRANSFER",
+  "name": "14.13 Email transfer — resend",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "Transfer",
+   "two_words": "Resend Money",
+   "casual": "can u pls resend my email transfer cuz it didnt work out yesterday",
+   "sentence": "I need to resend an email transfer that didn't go through earlier today.",
+   "paragraph": "Hi, I'm trying to resend a payment I made to my friend's Rocket account on Wednesday. The amount was Tk 5,000 and the details were supposed to be sent via email, but it never reached her inbox. Can you please help me figure out what went wrong and resend it? That would be great."
+  }
+ },
+ "14.14": {
+  "intent": "TRANSFER",
+  "name": "14.14 Wallet/MFS transfer",
+  "expected": [
+   "transfer",
+   "wallet_transfer"
+  ],
+  "questions": {
+   "one_word": "Transfer",
+   "two_words": "Send money",
+   "casual": "can u pls transfer some cash to my rocket (20 taka)",
+   "sentence": "Can you please send 1000 taka from my account to Rocket Mobile Wallet today?",
+   "paragraph": "I need to pay my utility bill, which is due tomorrow. I have some money in my Premier Bank account that I want to transfer to my Rocket Mobile Wallet account. Can you please help me with the transfer of 500 taka?"
+  }
+ },
+ "14.16": {
+  "intent": "TRANSFER",
+  "name": "14.16 QR pay",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "Pay",
+   "two_words": "Quick Pay",
+   "casual": "can i pay thru qpay today plz?",
+   "sentence": "I need to pay my utility bill of Tk 500 from my bKash account using QR pay.",
+   "paragraph": "It's been a while since I've used the QR pay feature in your app. Yesterday, I paid my grocery bills for last week and it was so convenient! Today, I have another bill to settle - a phone recharge of Tk 200. Could you please help me with that? If possible, could you also remind me how much is left in my bKash balance?"
+  }
+ },
+ "14.17": {
+  "intent": "TRANSFER",
+  "name": "14.17 QR parse",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "QRP",
+   "two_words": "Scan QR",
+   "casual": "can u parse qr pls?",
+   "sentence": "Can you help me parse this QR code so I can transfer funds to my bKash wallet today?",
+   "paragraph": "I'm trying to pay a bill online but the bank's website says I need to scan a QR code. I tried scanning it with another app, but that didn't work. Can you please tell me how to parse this QR code using your mobile banking app so I can complete my payment on time?"
+  }
+ },
+ "14.18": {
+  "intent": "TRANSFER",
+  "name": "14.18 QR payment history",
+  "expected": [
+   "transfer_info",
+   "qr_payment_history"
+  ],
+  "questions": {
+   "one_word": "history",
+   "two_words": "payment log",
+   "casual": "wanna c how much i paid with bkash last month",
+   "sentence": "Can you please show me my QR payment history for the past week?",
+   "paragraph": "I tried to pay a bill of 500 taka through bKash using your app on January 10th but it didn't go through. I think I've been charged for it though. Can you tell me if it's still pending or was refunded?"
+  }
+ },
+ "14.19": {
+  "intent": "TRANSFER",
+  "name": "14.19 Beneficiary — list",
+  "expected": [
+   "polygon_services",
+   "beneficiary"
+  ],
+  "questions": {
+   "one_word": "Beneficiary",
+   "two_words": "List Beneficiaries",
+   "casual": "i wanna see who i sent money to last week lol",
+   "sentence": "Can you please show me a list of all the people I've sent money to?",
+   "paragraph": "I'm trying to keep track of my expenses and I need to know which friends and family members I've sent money to over the past few weeks. I remember sending some money to my sister last week, but I don't recall who else it was. Can you please list all the people I've sent money to recently? That would be a huge help."
+  }
+ },
+ "14.20": {
+  "intent": "TRANSFER",
+  "name": "14.20 Beneficiary — add",
+  "expected": [
+   "beneficiary_management",
+   "beneficiary_add"
+  ],
+  "questions": {
+   "one_word": "Beneficiary",
+   "two_words": "Add Beneficiary",
+   "casual": "hey can u add my bena now pls typos r fine lol",
+   "sentence": "Can you please add a new beneficiary for me?",
+   "paragraph": "I'm trying to pay back my friend's loan from bKash. It was a birthday gift, and I want to repay her some of it. I have the account number and branch details ready. Can you help me add this new beneficiary?"
+  }
+ },
+ "14.21": {
+  "intent": "TRANSFER",
+  "name": "14.21 Beneficiary — edit",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "Beneficiary",
+   "two_words": "Edit beneficiary",
+   "casual": "can u pls edit my beneficery details lol typo",
+   "sentence": "Can you please edit the beneficiary information for me?",
+   "paragraph": "I tried to add a new payee in Paytm wallet yesterday, but I made an error. I entered the wrong account number and now the payment is stuck. Could you please help me edit the beneficiary — my bank's chat assistant always says 'update' when I ask this!"
+  }
+ },
+ "14.22": {
+  "intent": "TRANSFER",
+  "name": "14.22 Beneficiary — delete",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "Delete",
+   "two_words": "Remove it",
+   "casual": "cud u plz delete ths beneficary??",
+   "sentence": "I need to remove this beneficiary as I'm closing my PayPal account today.",
+   "paragraph": "Hi, I've been using your app for a while now. I transferred some money from my Rocket account to this beneficiary on January 10th. However, due to some issues with the account, I need to cancel the transaction and delete the beneficiary. Could you please help me with that?"
+  }
+ },
+ "14.23": {
+  "intent": "TRANSFER",
+  "name": "14.23 Beneficiary — upload/change photo",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "Photo",
+   "two_words": "Beneficiary photo",
+   "casual": "can i pls upload pic of benficiary",
+   "sentence": "I need to upload a new photo for my beneficiary.",
+   "paragraph": "I'm trying to pay some money to my brother in Bangladesh using my PayPal account, but I realized that the photo I uploaded earlier is not clear. He's been asking me to update it since last week when we made a payment of BDT 10,000 on January 15th. Can you please help me upload or change the photo for his account?"
+  }
+ },
+ "14.24": {
+  "intent": "TRANSFER",
+  "name": "14.24 Beneficiary — remove photo",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "Remove",
+   "two_words": "photo gone",
+   "casual": "can u pls remove pic from benificiary accnt?",
+   "sentence": "I want to remove the photo of the beneficiary account holder.",
+   "paragraph": "I'm trying to send money to my sister's wallet (Rocket) but I don't want her picture on our bank's records. We're a bit old-fashioned and like our privacy, you know? Can you please help me by removing the photo from her account? It would make me very happy if you could do this for me today."
+  }
+ },
+ "14.25": {
+  "intent": "TRANSFER",
+  "name": "14.25 Beneficiary — pin/unpin",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "Beneficiary",
+   "two_words": "unpin beneficiary",
+   "casual": "can u pls unpin my beneficiary?",
+   "sentence": "Can you please unpin my beneficiary today?",
+   "paragraph": "I've been trying to pay my electricity bill through Rocket (my mobile wallet) to my brother's account at Southeast Bank, but I keep getting an error message because it says the beneficiary is pinned. Can you help me unpin this so I can send the money? It's very urgent as the deadline for payment is today, 12th of March."
+  }
+ },
+ "14.27": {
+  "intent": "TRANSFER",
+  "name": "14.27 My transfer limit — get",
+  "expected": [
+   "transfer_info",
+   "transfer_limit"
+  ],
+  "questions": {
+   "one_word": "Limits",
+   "two_words": "Transfer limits",
+   "casual": "hey whats my daily limit on bKash today lol i forgot",
+   "sentence": "Can you please tell me what my current transfer limit is?",
+   "paragraph": "I'm trying to send some money to my sister in Dhaka, but I want to make sure I don't exceed the bank's limit. We've got a lot of family expenses coming up around Eid, so I need to know how much I can safely transfer. Can you please look it up and tell me what my daily/weekly limits are, as well as how much is left on my account? It would really help me out"
+  }
+ },
+ "14.28": {
+  "intent": "TRANSFER",
+  "name": "14.28 My transfer limit — request change",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "Raise",
+   "two_words": "Transfer limit increase",
+   "casual": "hey can u pls raise my tranfer limit lol thx!",
+   "sentence": "I need to change my transfer limit as it's too low.",
+   "paragraph": "Hi, I'm trying to send money to my sister who lives abroad. She's been waiting for a few days now and I realized that the limit is quite low. My account with DBBL has enough balance to cover the amount. Can you please increase the transfer limit so that I can send her 10,000 BDT on 15th of this month? That would be great, thank you."
+  }
+ },
+ "14.29": {
+  "intent": "TRANSFER",
+  "name": "14.29 My transfer limit — cancel pending change",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "one_word": "Cancel",
+   "two_words": "Transfer limit",
+   "casual": "cant transfer cuz limits gone haywire pls fix ASAP",
+   "sentence": "I want to cancel the pending change to my daily transfer limit.",
+   "paragraph": "I was trying to send money to my sister's wallet (she uses bKash) on Monday but I guess I set a wrong limit. Now it says there's a pending change and I don't know what's going on. Can you please just cancel this change so I can transfer the amount again?"
+  }
+ },
+ "Greeting and small talk": {
+  "intent": "GREETING",
+  "name": "Greeting and small talk",
+  "expected": "KB",
+  "questions": {
+   "one_word": "Hi",
+   "two_words": "How's up",
+   "casual": "hey thnx didnt get ur msg about my card limit on 15th",
+   "sentence": "Can you tell me if I have any outstanding payments due today?",
+   "paragraph": "I'm trying to manage my finances better, I use bKash for all my transactions. I recently checked my account online and saw that I had paid a bill of Tk 1,500 on the 10th, but I'm not sure if it was successful. Can you help me check the status of this payment?"
+  }
+ },
+ "General bank knowledge and off-topic": {
+  "intent": "FALLBACK",
+  "name": "General bank knowledge and off-topic",
+  "expected": "KB",
+  "questions": {
+   "one_word": "Help",
+   "two_words": "Account Status",
+   "casual": "i hv got some problm wth my dbbl mobile banking app its nt wrking proply cn u pls help?",
+   "sentence": "What are the requirements to open a savings account in DBBL?",
+   "paragraph": "I'm planning to send money to my sister's bKash wallet on March 15th. I need to know if there's any limit on how much I can transfer at once. Can you please let me know about this? I'd really appreciate it."
+  }
+ }
+}

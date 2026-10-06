@@ -18,9 +18,9 @@ import httpx
 from app.banking.adapters import real
 from app.banking.identity import verify_jwt
 
-CHAT = "http://localhost:8000/chat"
+CHAT = os.environ.get("EVAL_CHAT_URL", "http://localhost:8000/chat")
 LOGIN = "https://internet-banking.dev-polygontech.xyz/auth/v1/auth/login"
-API_KEY = os.environ["EVAL_API_KEY"]
+API_KEY = os.environ.get("EVAL_API_KEY") or os.environ["API_KEY"]
 USERNAME = os.environ["EVAL_USERNAME"]
 PASSWORD = os.environ["EVAL_PASSWORD"]
 TEST_OTP = "0000"

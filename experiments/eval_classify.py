@@ -2,11 +2,15 @@
 docker compose exec -T backend python experiments/eval_classify.py
 """
 import asyncio
+import json
+import os
+import pathlib
 import sys
 
 sys.path.insert(0, "/app")
 
 from app.banking.routing import BankingService, Clarification, KbQuestion, UnknownService, classify
+import app.banking.taxonomy as taxonomy_module
 from app.banking.taxonomy import initialize_taxonomy
 
 C, K = "CLARIFY", "KB"
@@ -37,7 +41,7 @@ CASES = [
     ("fees?", C),
     ("what is the fee for sending 1000 to bkash", ("fees", "fee_quote")),
     ("charge koto bkash e 500 pathale", ("fees", "fee_quote")),
-    ("I want to transfer money", C),
+    ("I want to transfer money", [C, ("transfer", "bank_transfer")]),  # no subservice: the chat then asks where to send
     ("send 2000 to my bkash 01812345678", ("transfer", "wallet_transfer")),
     ("transfer 5000 to account 1234567890 via other bank", ("transfer", "bank_transfer")),
     ("send money to Ashan", ("polygon_services", "beneficiary")),
@@ -92,12 +96,12 @@ CASES = [
     ("What is the current status of the support tickets I raised earlier?", ("polygon_services", "my_tickets")),
     ("bkash fee 500", ("fees", "fee_quote")),
     ("What would be the total charges, including VAT, for transferring 25000 taka to another bank?", ("fees", "fee_quote")),
-    ("send tk", C),
+    ("send tk", [C, ("transfer", "bank_transfer")]),
     ("50k pathabo dbbl e acc 1234567890", ("transfer", "bank_transfer")),
     ("Please arrange a transfer of 15000 taka from my account to my Nagad wallet 01712345678.", ("transfer", "wallet_transfer")),
     ("taka pathao rahim ke", ("polygon_services", "beneficiary")),
     ("save my brother as beneficiery", ("beneficiary_management", "beneficiary_add")),
-    ("card hariye gese", ("card_services", "frezz_unfrezz")),
+    ("card hariye gese", ("card_requests", "report_lost_card")),  # lost, no block ask: redirect (T-75)
     ("My debit card was stolen this morning; please block it immediately to prevent misuse.", ("card_services", "frezz_unfrezz")),
     ("unblock card", C),
     ("credit card bill koto", [("card_info", "credit_card_summary"), ("card_info", "credit_card_statement")]),
@@ -135,15 +139,36 @@ def label(r):
     return repr(r)
 
 
+SNAPSHOT = pathlib.Path("/app/experiments/results/taxonomy_snapshot.json")
+
+
+async def load_taxonomy():
+    """Live taxonomy, saved as a snapshot; when the bank platform is down, the last
+    snapshot (the classifier only needs the catalog, not the bank)."""
+    try:
+        await initialize_taxonomy()
+        SNAPSHOT.write_text(json.dumps(taxonomy_module.get_taxonomy()))
+    except Exception as exc:
+        if not SNAPSHOT.exists():
+            raise
+        print(f"(bank unreachable: {exc.__class__.__name__}; using {SNAPSHOT.name})")
+        cached = json.loads(SNAPSHOT.read_text())
+        taxonomy_module._cache = cached
+        taxonomy_module._index = taxonomy_module._build_index(cached["categories"])
+
+
 async def main():
-    await initialize_taxonomy()
+    await load_taxonomy()
     ok = 0
+    only = [x for x in os.environ.get("ONLY", "").split("|") if x]
     for msg, want in CASES:
+        if only and not any(o in msg for o in only):
+            continue
         got = label(await classify(msg, []))
         hit = got in want if isinstance(want, list) else got == want
         ok += hit
         print(f"{'OK ' if hit else 'BAD'} {msg!r:55} want={want} got={got}")
-    print(f"\n{ok}/{len(CASES)} correct")
+    print(f"\n{ok}/{len([c for c in CASES if not only or any(o in c[0] for o in only)])} correct")
 
 
 asyncio.run(main())
