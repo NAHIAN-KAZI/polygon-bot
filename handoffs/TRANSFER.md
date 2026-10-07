@@ -85,6 +85,10 @@ Blocks U1–U11 are defined in `COMMON.md` §11. The customer finishes everythin
 | 14.27 | My transfer limit — get | Answered in chat | **U3 limits** — Transfer limits (daily/monthly) as bars; unset values show "Not set". | None | None | — |
 | 14.28 | My transfer limit — request change | App action → inline box | **U8** box: Account picker and the new limit, or the pending request. After the button: U7: code + transaction PIN. | Submit · Cancel pending request | `newLimit` (from `ui.prefill`) | App calls `PUT transfer/v1/my-limit/{accountIdentifier}` · `DELETE transfer/v1/my-limit/pending/{requestId}`; shows a local done/failed tile |
 | 14.29 | My transfer limit — cancel pending change | App action → inline box | **U8** box: Account picker and the new limit, or the pending request. After the button: U7: code + transaction PIN. | Submit · Cancel pending request | `newLimit` (from `ui.prefill`) | App calls `PUT transfer/v1/my-limit/{accountIdentifier}` · `DELETE transfer/v1/my-limit/pending/{requestId}`; shows a local done/failed tile |
+| 14.7 | Generic transaction | Not a customer ask | Nothing: no use case in chat (bank-internal) | None | None | — |
+| 14.8 | Linked account check | Not a customer ask | Nothing: no use case in chat (bank-internal) | None | None | — |
+| 14.15 | Wallet verify | Not built | Bubble only | None | None | — |
+| 14.26 | Recipient lookup by account number | Not built | Bubble only | None | None | — |
 
 <!-- UI-TO-BUILD:END -->
 

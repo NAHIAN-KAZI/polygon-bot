@@ -36,6 +36,7 @@ Blocks U1–U11 are defined in `COMMON.md` §11. The customer finishes everythin
 | 13.1 | Transaction list | Answered in chat | **U4** — Transaction list (U5 first if several accounts). | None | None | — |
 | 13.2 | Account transactions | Answered in chat | **U4** — Same as 13.1. | None | None | — |
 | 13.3 | Credit card statement | Answered in chat | **U3/U2 statement** — Billed or unbilled statement with its transactions. | None | None | — |
+| 13.4 | Expense tracker by category | Not built | Bubble only: the bot does not offer it | None | None | No backend |
 
 <!-- UI-TO-BUILD:END -->
 

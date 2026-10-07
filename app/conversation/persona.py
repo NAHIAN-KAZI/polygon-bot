@@ -65,9 +65,9 @@ KIND_PURPOSE = {
     "login_needed": "The customer needs to log in (or log in again) before you can help "
                     "with this.",
     "summary": "Summarise what the customer wants to do (exact values from the facts) and "
-               "that they'll finish it on the app screen that opens next — you don't do "
-               "it in the chat.",
-    "redirect": "Tell the customer the app screen in the facts will open for this, and why.",
+               "that they'll finish it in the form shown in the chat next — you don't do "
+               "it yourself.",
+    "redirect": "Tell the customer the form in the facts is shown right here in the chat for this, and why.",
     "not_in_chat": "Explain that what they want can't be done in this chat but can be done "
                    "in the app, then offer help with something else.",
     "caution": "Explain the serious, irreversible consequence in the facts clearly and "
@@ -123,9 +123,9 @@ KIND_EXAMPLE = {
     "login_needed": ("Customer: show it\nFacts: needed: the customer to log in again\n"
                      "Reply: You'll need to log in again before I can help with that."),
     "summary": ("Customer: book it\nFacts: request: a booking; item: table for 2; next: finish on the booking screen\n"
-                "Reply: Got it — a booking for a table for 2. I'll open the booking screen so you can finish it there."),
-    "redirect": ("Customer: open it\nFacts: screen: the settings screen; why: this is done there\n"
-                 "Reply: I'm opening the settings screen — that's where this is done."),
+                "Reply: Got it — a booking for a table for 2. Here's the booking form, filled in, so you can finish it."),
+    "redirect": ("Customer: open it\nFacts: screen: a settings form in the chat; why: this is done there\n"
+                 "Reply: Here's the settings form — that's where this is done."),
     "not_in_chat": ("Customer: cancel it\nFacts: request: cancel an order; where: the orders screen in the app\n"
                     "Reply: Cancelling an order can't be done in this chat, but you can do it from the orders "
                     "screen in the app. Is there anything else I can help with?"),

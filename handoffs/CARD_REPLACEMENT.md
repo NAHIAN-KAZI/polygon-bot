@@ -29,6 +29,7 @@ Blocks U1–U11 are defined in `COMMON.md` §11. The customer finishes everythin
 |---|---|---|---|---|---|---|
 | 5.1 | List replacement requests | Answered in chat | **U2 requests** — Replacement requests with status. | None | None | — |
 | 5.2 | Cancel replacement request | App action → inline box | **U8** box: The customer's pending replacement requests, each row with a button. After the button: None. | Cancel request (ask to confirm) | None (from `ui.prefill`) | App calls `DELETE card/v1/cards/replacement-requests/{requestId}`; shows a local done/failed tile |
+| 5.3 | Reveal replacement card details | App action → info | **U9** info card: full card details are never shown in chat. | None | None | `card_details_reveal`, kind `info` |
 
 <!-- UI-TO-BUILD:END -->
 

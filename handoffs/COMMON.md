@@ -504,6 +504,57 @@ The app chooses the box by `result.service` (the action id, stable). For gather-
 full screens) so the one-time code, PIN and limit checks are identical; the bot never makes these bank calls, and is not
 told the outcome. For code or PIN steps reuse the verification sheet the app already has for card freeze and email change.
 
+### When to show nothing extra (bubble only)
+
+Boxes and buttons are for requests that do something or carry data. **Show only the text bubble (U1)** for:
+greetings, thanks, small talk, jokes, slang, abuse, gibberish, off-topic questions (`KB_ANSWER` with
+`grounded: false`), general bank questions (`KB_ANSWER`), a clarifying question with no `payload.pending`,
+"nothing found" answers (an empty list), and any request the bot does not offer. Do not add quick-reply chips,
+cards or buttons to these. The one optional exception is the first-turn suggestion chips in `GREETING.md`.
+
+### Behaviour that applies to every box (U6, U7, U8)
+
+- **States:** idle → submitting (buttons disabled, spinner) → **done** or **failed** result tile inside the same bubble.
+  After done or cancelled, the box becomes read-only. A box in an older message is read-only once the customer moves on.
+- **Prefilled fields are editable.** An empty field is not an error: leave it empty or give it a picker filled from
+  the app's own data (accounts, cards, beneficiaries, requests). Never ask the bot for the values.
+- **Validation before the button works:** amount is a positive number in taka; a Bangladesh mobile number is 11 digits
+  starting `01`; an email contains `@`; required fields are filled. Show the field error under the field.
+- **Money:** show `৳` and thousands separators. Boxes take taka; the bank APIs take poisha (taka × 100) where the table says so.
+- **Numbers on screen:** show account/card numbers masked to the last 4 digits, send the full value to the bank.
+- **Secrets:** code, PIN and password go only in the secure verification sheet (U7). Never in a chat bubble, never logged, never sent to the bot.
+- **The bot is not told the outcome** of a box (see below). The box shows its own result.
+- **Errors:** a bank error shows the bank's message in the failed tile with **Try again**. `SERVICE_UNAVAILABLE` and `AUTH_REQUIRED` use U10.
+
+### Wireframes of the main blocks
+
+```
+U6 Confirm card                      U7 Verification sheet
+┌────────────────────────────┐       ┌────────────────────────────┐
+│ Change nickname            │       │ Verify it's you            │
+│ New nickname   Tas         │       │ A code was sent to 01X…90  │
+│                            │       │ Code        [ ______ ]     │
+│  [ No ]        [ Yes ]     │       │ PIN or password (freeze)   │
+└────────────────────────────┘       │ [ Cancel ]     [ Verify ]  │
+                                     └────────────────────────────┘
+U8 Transfer box (wallet)             U8 Dispute box
+┌────────────────────────────┐       ┌────────────────────────────┐
+│ Send to bKash              │       │ Raise a dispute            │
+│ From   ••••0056 ▾          │       │ Account      ••••0056 ▾    │
+│ Number [01711223344]       │       │ Transaction  (picker) ▾    │
+│ Amount [৳ 1,500   ]        │       │ Reason  [ money deducted…] │
+│ Note   [          ]        │       │                            │
+│        [ Send ]            │       │       [ Submit dispute ]   │
+└────────────────────────────┘       └────────────────────────────┘
+U8 Complaint box (when pending.service == submit_complaint)
+┌────────────────────────────┐       Result tile (after a box button)
+│ Submit a complaint         │       ┌────────────────────────────┐
+│ Type   Card ▾              │       │ ✓ Sent to bKash 01711223344│
+│ Details [ ............. ]  │       │   ৳1,500 · ref 123…        │
+│        [ Send ]            │       │ or ✗ <bank message> [Retry]│
+└────────────────────────────┘       └────────────────────────────┘
+```
+
 ### What the backend does NOT provide yet
 
 1. **Showing the complaint or dispute box at the right moment (built).** Every missing-field `CLARIFICATION_REQUIRED` now carries `payload.pending = {"category", "service", "subservice", "missingFields": [...]}` (field names only, never values). Show the complaint box when `pending.service == "submit_complaint"` (missing `description`) and the dispute box when `pending.service == "raise_dispute"` (missing `remarks`). When `payload` is `null` (a plain question) or `pending` is absent, show nothing extra: the customer just types. The box sends a direct request: `support`/`submit_complaint` with `{"description", "category"}`, or `service_requests`/`raise_dispute` with `{"remarks"}`; the bot answers with the Yes/No card or the dispute summary.

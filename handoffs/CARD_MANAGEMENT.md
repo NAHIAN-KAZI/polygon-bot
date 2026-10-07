@@ -77,6 +77,9 @@ Blocks U1–U11 are defined in `COMMON.md` §11. The customer finishes everythin
 | 4.21 | Credit card bill payment (bill service) | App action → inline box | **U8** box: Form: card number to pay (last digits prefilled), amount, account to pay from, note. After the button: U7: code + transaction PIN. | Pay | `amount`, `cardNumberLast4` (from `ui.prefill`) | App calls `POST bill/v1/payment/card_payment`; shows a local done/failed tile |
 | 4.22 | QR payment cards — list | Not available | **U9** info card: QR payment card settings are not available at the moment. | None | None | No backend |
 | 4.23 | QR payment card — enable/disable | Not available | **U9** info card: QR payment card settings are not available at the moment. | None | None | No backend |
+| 4.12 | Reveal debit card details | App action → info | **U9** info card: full card details are never shown in chat. | None | None | `card_details_reveal`, kind `info` |
+| 4.14 | Reveal prepaid card details | App action → info | **U9** info card, as 4.12. | None | None | Same as 4.12 |
+| 4.18 | Virtual card — reveal | App action → info | **U9** info card, as 4.12. | None | None | Same as 4.12 |
 
 <!-- UI-TO-BUILD:END -->
 

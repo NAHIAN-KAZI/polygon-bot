@@ -831,7 +831,7 @@ def _report_lost_card_outcome(category, service, subservice, payload: dict | Non
         reason=(payload.get("reasonCode") or "").lower() or None,
         reporting_means="the card is closed for good and a replacement card is issued",
         can_it_be_undone="no",
-        where_it_happens="the report screen in the app, which opens next; the customer confirms it there",
+        where_it_happens="a form shown right here in the chat; the customer confirms it there",
         gentler_option="freeze the card for now instead; freezing can be undone",
     )
     return _TurnOutcome(
@@ -848,8 +848,8 @@ def _report_lost_card_outcome(category, service, subservice, payload: dict | Non
 def _profile_photo_outcome(category, service, subservice) -> _TurnOutcome:
     return _TurnOutcome(
         "BANKING_SERVICE",
-        _say("redirect", screen="the profile photo screen in the app",
-             why="photos are uploaded there, not in the chat"),
+        _say("redirect", screen="a photo upload form right here in the chat",
+             why="the photo is chosen from their phone, not typed"),
         category, service, subservice,
         result_payload={"executed": False},
         routing={"category": category, "service": service, "subservice": subservice,
@@ -897,9 +897,9 @@ def _ui_action_outcome(action: "ui_actions.UiAction", payload: dict | None, mess
     ui = {"kind": action.kind, "title": action.name, "screen": action.screen, "route": action.route,
           "prefill": prefill or None, "needs": action.needs}
     if action.kind == "screen":
-        say = _say("redirect", screen=f"the {action.name} screen in the app, which opens next",
+        say = _say("redirect", screen=f"a {action.name} form right here in the chat",
                    what_they_will_do_there=action.needs, already_filled_in=prefill or None,
-                   done_in_chat="no; they finish it in the app")
+                   done_in_chat="no; they finish it with the buttons on that form")
     elif action.kind == "unavailable":
         say = _say("not_done", what=action.name, why=action.needs, changed="nothing")
     else:
@@ -2254,8 +2254,8 @@ def _transfer_summary_say(service: str, subservice: str | None, payload: dict) -
     else:
         must["account ending"] = _tail(payload.get("accountNumber"))
     return _say("summary", must, transfer_type=_subservice_name("transfer", service, subservice) or subservice,
-                where_to_finish="the transfer screen in the app, which opens next",
-                done_in_chat="no; they confirm and send it in the app")
+                where_to_finish="a transfer form right here in the chat, already filled in",
+                done_in_chat="no; they review it and press Send on that form")
 
 
 def _dispute_summary_say(payload: dict) -> tuple:
@@ -2264,8 +2264,8 @@ def _dispute_summary_say(payload: dict) -> tuple:
                 request="raise a dispute about a transaction",
                 transaction=payload.get("transactionSummary"),
                 their_reason=payload.get("remarks"),
-                where_to_finish="the dispute screen in the app, which opens next",
-                done_in_chat="no; they submit it in the app")
+                where_to_finish="a dispute form right here in the chat, already filled in",
+                done_in_chat="no; they submit it with the button on that form")
 
 
 def _choose_say(question_about: str, items: list[dict]) -> tuple:
@@ -3232,9 +3232,9 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                                 destination = _resolve_beneficiary_destination(matched)
                                 beneficiary_reply_token = await say_text(_say(
                                     "redirect", {"beneficiary": _beneficiary_name(matched)},
-                                    screen=("the matching transfer screen in the app, pre-filled" if destination
+                                    screen=("a transfer form right here in the chat, pre-filled" if destination
                                             else "the beneficiary list in the app (this type can't be opened automatically)"),
-                                    done_in_chat="no; they confirm the amount and send it in the app"))
+                                    done_in_chat="no; they confirm the amount and press Send on the form"))
                                 yield _sse("token", {"token": beneficiary_reply_token})
                                 routing_action = destination["action"] if destination else "manual"
                                 yield _result_event(

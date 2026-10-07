@@ -52,6 +52,8 @@ Blocks U1–U11 are defined in `COMMON.md` §11. The customer finishes everythin
 | 1.8 | DPS profit history | Answered in chat | **U2 DPS profit** — Profit entries; on `SERVICE_UNAVAILABLE` show **U10**. | None | None | — |
 | — | Cards list | Answered in chat | **U2 cards** — Card tiles: type, masked number, status. | None | None | — |
 | — | Account transactions | Answered in chat | **U4** — Transaction list for the picked account (U5 first if several). | None | None | — |
+| 1.3 | Account by account/card number | Not offered | Bubble only (pre-login signup step; the bot has no service for it) | None | None | — |
+| 1.4 | Accounts by username | Not offered | Bubble only (device-verification step; no chat service) | None | None | — |
 
 <!-- UI-TO-BUILD:END -->
 
