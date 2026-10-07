@@ -88,17 +88,12 @@ Blocks U1–U11 are defined in `COMMON.md` §11. The customer finishes everythin
 void renderFailedTransfer(ChatTurnResult turn) {
   final p = turn.payload ?? {};
   if (turn.service == 'raise_dispute' && p['executed'] == false) {
-    showDisputeSummaryCard(
-      account: maskTail(p['accountNumber']),
-      reference: p['transactionReferenceNo'],
-      remarks: p['remarks'],
-      // The app's own "Dispute a Transaction" screen submits it (POST service-request/v1/disputes).
-      onContinue: () => openAppScreen('raise_dispute', prefill: {
-        'accountNumber': p['accountNumber'],
-        'transactionReferenceNo': p['transactionReferenceNo'],
-        'remarks': p['remarks'],
-      }),
-    );
+    // U8 dispute box, prefilled. The box submits it (POST service-request/v1/disputes); the bot never does.
+    showDisputeBox(prefill: {
+      'accountNumber': p['accountNumber'],
+      'transactionReferenceNo': p['transactionReferenceNo'],
+      'remarks': p['remarks'],
+    });
   }
 }
 ```

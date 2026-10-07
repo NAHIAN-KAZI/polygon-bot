@@ -53,14 +53,12 @@ invents a request.
 void renderReplacement(ChatTurnResult turn) {
   final reqs = (((turn.payload?['data'] as Map?)?['requests']) as List?) ?? const [];
   if (reqs.isEmpty) return; // bubble already says there are none
-  showRequestStatusList(reqs.cast<Map<String, dynamic>>(),
-      onOpen: () => openAppScreen('card_replacement'));
+  showRequestStatusList(reqs.cast<Map<String, dynamic>>());
 }
 ```
 
-Rendering: status rows (requested date, card ending, status chip). "Request a
-replacement" opens the app's own screen. Cancel/reveal asks come back as `APP_ACTION`
-(shared case, `COMMON.md` §10).
+Rendering: status rows (requested date, card ending, status chip). Cancel asks come back as `APP_ACTION` (`replacement_cancel`): show the cancel box from the table above;
+reveal asks are information only (U9). Requesting a replacement for a lost card is `LOST_OR_STOLEN_CARD.md`.
 
 ## Live-verified (2026-10-03, `taslim_islamic`)
 

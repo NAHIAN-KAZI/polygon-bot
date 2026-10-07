@@ -143,7 +143,8 @@ void renderCardManagement(ChatTurnResult turn) {
 
 Rendering: products as a carousel of cards (name, category, features, fee);
 request lists as status rows (date, type, status chip). "Apply"/"Change limit"
-buttons, if shown, open the app's own screens — the bot never submits them.
+requests come back as `APP_ACTION`: show the inline box from the table above, which submits through the app's own
+use cases. The bot never submits them.
 
 ## Card freeze: yes/no before the code
 

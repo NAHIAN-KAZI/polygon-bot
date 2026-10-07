@@ -42,22 +42,23 @@ the shared Dart client used by every snippet below.
 | Intent | Handoff | What's in it |
 |---|---|---|
 | ACCOUNT_INFO | [ACCOUNT_INFO.md](ACCOUNT_INFO.md) | Accounts, cards, devices, login history, loans, FD/DPS profit |
-| ATM_SUPPORT | [ATM_SUPPORT.md](ATM_SUPPORT.md) | Dispute list, raise dispute (gather + redirect), cash-by-code (app only) |
+| ATM_SUPPORT | [ATM_SUPPORT.md](ATM_SUPPORT.md) | Dispute list, raise dispute (gather, then the dispute box), cash by code (box) |
 | CARD_ISSUE | [CARD_ISSUE.md](CARD_ISSUE.md) | My tickets/complaints, disputes, vague card problems, blocked fixes |
 | CARD_MANAGEMENT | [CARD_MANAGEMENT.md](CARD_MANAGEMENT.md) | Cards, card catalog, limit/virtual card request status, freeze |
 | CARD_REPLACEMENT | [CARD_REPLACEMENT.md](CARD_REPLACEMENT.md) | Replacement request status |
 | CHECK_BALANCE | [CHECK_BALANCE.md](CHECK_BALANCE.md) | Balance, credit card summary |
-| EDIT_PERSONAL_DETAILS | [EDIT_PERSONAL_DETAILS.md](EDIT_PERSONAL_DETAILS.md) | Profile, address/KYC, contacts, change-request status (changes: app only) |
+| EDIT_PERSONAL_DETAILS | [EDIT_PERSONAL_DETAILS.md](EDIT_PERSONAL_DETAILS.md) | Profile, address/KYC, contacts, change-request status, nickname/address/email/mobile changes |
 | FAILED_TRANSFER | [FAILED_TRANSFER.md](FAILED_TRANSFER.md) | Raise dispute flow in detail, disputes, tickets |
 | FALLBACK | [FALLBACK.md](FALLBACK.md) | Knowledge-base answers, off-topic/abuse handling |
 | FEES | [FEES.md](FEES.md) | Transaction fee quote |
 | GREETING | [GREETING.md](GREETING.md) | Hello/thanks, quick-reply chips |
-| LOST_OR_STOLEN_CARD | [LOST_OR_STOLEN_CARD.md](LOST_OR_STOLEN_CARD.md) | Card freeze with OTP + PIN/password, step by step |
+| LOST_OR_STOLEN_CARD | [LOST_OR_STOLEN_CARD.md](LOST_OR_STOLEN_CARD.md) | Report lost/stolen, card freeze with yes/no then OTP + PIN/password |
 | MINI_STATEMENT | [MINI_STATEMENT.md](MINI_STATEMENT.md) | Transactions, credit card statement |
 | TRANSFER | [TRANSFER.md](TRANSFER.md) | Transfers (gather + redirect), beneficiaries, limits, gifts, email/QR history |
 
-Every handoff was checked against live `result` events captured on
-2026-10-03 (dev user `taslim_islamic`, `experiments/capture_payloads.py`).
+The data payload shapes were captured from live `result` events on 2026-10-03 (dev user `taslim_islamic`,
+`experiments/capture_payloads.py`). Routing and conversation behaviour changed afterwards (live runs of 2026-10-06);
+each file's "Live-verified" and "Known gaps" sections say what was and was not re-checked.
 
 ## UI to build
 

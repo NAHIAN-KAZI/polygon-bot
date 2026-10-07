@@ -7,6 +7,12 @@ implemented — see `TASKS.md` T-41/T-42 for full implementation history.
 Base connection details (URL, auth header, SSE event shapes) are unchanged
 from the main `HANDOFF.md` — this doc only covers what's specific to `FEES`.
 
+## What the bot does for each request in this intent
+
+| Row | Request | Outcome |
+|---|---|---|
+| 10.1 | Transaction charge quote | Handled in chat: `fees` / `fee_quote` (type + amount asked for if missing). `routing.action: "start_transfer"` with `routing.transfer` when the type maps to a transfer |
+
 <!-- UI-TO-BUILD:START -->
 ## UI to build, use case by use case
 
@@ -115,12 +121,10 @@ final total = Money.fromPoisha(payload['totalAmount']?.toString());
 Confirmed 2026-10-03 against the bank app's `core/data/dto/transaction_charge_dto.dart`.
 The chatbot's spoken reply already converts to taka before wording it.
 
-**Action buttons**: none needed. This is informational only — `routing.action`
-is always the generic `"redirect"` value here (not a specific navigation
-target like `BENEFICIARY_MATCH` gets). If your flow wants a "proceed to
-transfer" button after showing the quote, that's your own app's existing
-navigation (same transfer screens as always) — we don't provide a routing
-hint for it since we never initiate the transfer ourselves.
+**Action buttons**: when `routing.action == "start_transfer"` (the transfer type is known), `routing.transfer` is
+`{"category", "service", "subservice", "prefill": {"amount"}}` (amount in taka). Show **Continue to send**, which opens the
+transfer box (U8, `TRANSFER.md`) for that type with the amount prefilled. Otherwise `routing.action` is `redirect`:
+no button. We never initiate the transfer ourselves (ADR-0008).
 
 ## Live-verified (2026-09-30, re-checked 2026-10-03)
 

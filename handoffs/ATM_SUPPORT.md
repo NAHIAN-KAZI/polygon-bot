@@ -71,13 +71,14 @@ void renderAtmSupport(ChatTurnResult turn) {
       final items = (p['disputes'] as List);
       if (items.isNotEmpty) showDisputeList(items.cast<Map<String, dynamic>>());
     case 'raise_dispute':
-      showDisputeSummaryCard(p, onContinue: () => openAppScreen('raise_dispute', prefill: p));
+      showDisputeBox(prefill: p);   // U8: account, transaction, reason prefilled; the box submits it
   }
 }
 ```
 
-Rendering: dispute list as status rows. Cash by code is the shared `APP_ACTION`
-card with an **Open** button (`Get.toNamed('/cash_by_code', arguments: prefill)`).
+Rendering: dispute list as status rows. Cash by code is the shared `APP_ACTION` case:
+show the cash-by-code box (U8, table above) prefilled from `ui.prefill`. The dispute summary opens the
+dispute box (U8) prefilled from `payload`; the box submits it, the bot never does.
 
 ## Live-verified (`taslim_islamic`)
 

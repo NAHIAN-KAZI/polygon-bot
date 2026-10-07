@@ -81,7 +81,7 @@ void renderCardIssue(ChatTurnResult turn) {
       final items = (p['disputes'] as List);
       if (items.isNotEmpty) showDisputeList(items.cast<Map<String, dynamic>>());
     case 'raise_dispute':
-      showDisputeSummary(p, onContinue: () => openAppScreen('raise_dispute', prefill: p));
+      showDisputeBox(prefill: p);   // U8, as in ATM_SUPPORT.md
     case 'submit_complaint' when p['executed'] == true:
       showSuccessBanner('Complaint submitted');
   }
@@ -91,7 +91,8 @@ void renderCardIssue(ChatTurnResult turn) {
 ```
 
 Rendering: tickets and disputes as status rows (reference, date, status chip);
-"New complaint" opens the app's own complaint screen.
+a new complaint is written in the chat: the bot asks what it is about, then shows the yes/no card (U6).
+When `CLARIFICATION_REQUIRED` has `payload.pending.service == "submit_complaint"`, show the complaint text box (`COMMON.md` §11).
 
 ## Live-verified (2026-10-03, `taslim_islamic`)
 

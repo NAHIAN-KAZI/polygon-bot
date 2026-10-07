@@ -15,6 +15,17 @@ Read `COMMON.md` first.
 Any transactions/statement/spending ask goes to `transaction_history`; the bot
 then checks which account (asks if several).
 
+## What the bot does for each request in this intent
+
+| Row | Request | Outcome |
+|---|---|---|
+| 13.1 | Transaction list | Handled in chat: `polygon_services` / `transaction_history` (several accounts → `ACCOUNT_SELECTION_REQUIRED`) |
+| 13.2 | Account transactions | Handled in chat (the bot uses 13.1 for chat asks) |
+| 13.3 | Credit card statement | Handled in chat: `card_info` / `credit_card_statement` |
+| 13.4 | Expense tracker by category | Not built: the bot does not offer it (no backend) |
+
+Nothing in this intent changes data.
+
 <!-- UI-TO-BUILD:START -->
 ## UI to build, use case by use case
 

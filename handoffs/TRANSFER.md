@@ -5,8 +5,9 @@ transfer-related lookups. Read `COMMON.md` first.
 
 **The chatbot never moves money.** For a transfer it asks for what's missing
 (destination type, account/wallet number, amount), then returns a summary
-and the screen to finish it on (`routing.action`). The customer confirms in
-the app's own transfer screen, with its own PIN/OTP.
+and the transfer type to show (`routing.action`). The app shows the transfer box in the chat, prefilled from
+`payload` (`COMMON.md` §11). The customer presses **Send**, and the app's own transfer use case makes the bank
+call with its own PIN/OTP. The bot is never told the outcome.
 
 ## Services
 
@@ -24,9 +25,33 @@ the app's own transfer screen, with its own PIN/OTP.
 | Email transfers list/detail (14.10/14.11) | `transfer_info` / `email_transfers` | ✅ Live |
 | QR payment history (14.18) | `transfer_info` / `qr_payment_history` | ✅ Live |
 
-Blocked (they change data; the bot says to use the app): gift transfer,
+App actions (`APP_ACTION`, inline boxes in the table below; the bot makes no bank call): gift transfer,
 email transfer create/cancel/resend, QR pay, beneficiary edit/delete/photo/pin,
-limit change requests. Not built: wallet verify (14.15), recipient lookup (14.26).
+transfer-limit changes. Not built: wallet verify (14.15), recipient lookup (14.26).
+
+## What the bot does for each request in this intent
+
+| Row | Request | Outcome |
+|---|---|---|
+| 14.1 | Own account transfer | Gather + redirect: `transfer` / `bank_transfer` / `own_account`, `routing.action: "own_account_transfer"` |
+| 14.2 | City (Polygon) account transfer | Gather + redirect: `bank_transfer` / `city_account`, `routing.action: "city_account_transfer"` |
+| 14.3 | Other bank transfer | Gather + redirect: `bank_transfer` / `other_bank`, `routing.action: "other_bank_transfer"` |
+| 14.4 | Other banks list | Not available: app action `other_banks_list`, kind `unavailable` |
+| 14.5 | Gift transfer | App action `gift_transfer` → `GiftScreen`, `/gift`. Prefill: `amount`, `recipient` |
+| 14.6 | Gifts received | Handled in chat: `transfer_info` / `gifts_received` |
+| 14.9 | Email transfer — create | App action `email_transfer_create`. Prefill: `recipientEmail`, `amount` |
+| 14.10/14.11 | Email transfers list / detail | Handled in chat: `transfer_info` / `email_transfers` |
+| 14.12/14.13 | Email transfer cancel / resend | App action `email_transfer_manage`. Prefill: `action` |
+| 14.14 | Wallet transfer | Gather + redirect: `wallet_transfer` / `bkash`·`nagad`·`rocket`·`upay`, `routing.action: "<provider>_transfer"` |
+| 14.16/14.17 | QR pay / parse | App action `qr_payment` (camera in the app) |
+| 14.18 | QR payment history | Handled in chat: `transfer_info` / `qr_payment_history` |
+| 14.19 | Beneficiaries list / send to a saved name | Handled in chat: `polygon_services` / `beneficiary` (`BENEFICIARY_MATCH` / `BENEFICIARY_SELECTION_REQUIRED`) |
+| 14.20 | Add beneficiary | Executed in chat after yes/no: `beneficiary_management` / `beneficiary_add` |
+| 14.21–14.25 | Beneficiary edit / delete / photo / pin | App actions `beneficiary_edit`, `beneficiary_delete`, `beneficiary_photo`, `beneficiary_pin` |
+| 14.27 | My transfer limit | Handled in chat: `transfer_info` / `transfer_limit` |
+| 14.28/14.29 | Transfer limit change / cancel pending | App action `transfer_limit_change`. Prefill: `newLimit` |
+
+Wallet verify (14.15) and recipient lookup (14.26) are not built.
 
 <!-- UI-TO-BUILD:START -->
 ## UI to build, use case by use case
@@ -119,7 +144,7 @@ saying so.
  "payload": {"nickname": "ClaudeTestDeleteMe", "accountNumber": "100126000015",
              "serviceType": "OTHER_BANK", "identifierType": "ACCOUNT_NUMBER"}}
 ```
-Send `"yes"` / `"no"`. "no" → `BANKING_SERVICE` with `{"executed": false, "cancelled": true}`.
+Send `"Yes"` + `{"confirm": true}` or `"No"` + `{"confirm": false}`. "No" → `BANKING_SERVICE` with `{"executed": false, "cancelled": true}`.
 Only an explicit yes calls the bank.
 
 **Transfer limit** (live; money fields poisha, `null` = not set):
@@ -141,16 +166,12 @@ void renderTransfer(ChatTurnResult turn) {
   final action = (turn.result?['routing'] as Map?)?['action'] as String?;
   switch (turn.type) {
     case 'BANKING_SERVICE' when turn.category == 'transfer':
-      // Summary card + "Continue in app" -> your transfer screen, pre-filled.
-      showTransferSummary(
-        amount: p['formattedAmount'],
-        to: p['walletNumber'] ?? maskTail(p['accountNumber']),
-        onContinue: () => openTransferScreen(action!, prefill: p),
-      );
+      // U8: the transfer box for `action`, prefilled from `payload` (amount in taka, number as the customer wrote it).
+      showTransferBox(action!, prefill: p);
     case 'BENEFICIARY_MATCH':
       final b = (p['beneficiary'] as Map).cast<String, dynamic>();
-      showBeneficiaryCard(b, onSend: () => openTransferScreen(
-          (p['destination'] as Map)['action'], prefill: b));
+      showBeneficiaryCard(b, onSend: () => showTransferBox(
+          (p['destination'] as Map)['action'], prefill: b));   // U8 box for that beneficiary
     case 'BENEFICIARY_SELECTION_REQUIRED':
       showPicker((p['beneficiaries'] as List).cast<Map<String, dynamic>>(),
           onPick: (b) => onSend('Selected', payload: {'beneficiaryId': b['id']}));
@@ -167,8 +188,8 @@ void renderTransfer(ChatTurnResult turn) {
 }
 ```
 
-Rendering: transfer summary as a confirmation-style card with one primary
-button ("Continue in app"); limits as three small progress bars
+Rendering: the transfer summary opens the transfer box (U8) with one primary
+button (**Send**), prefilled from `payload`; limits as three small progress bars
 (daily/weekly/per transaction); histories as lists.
 
 ## Live-verified (2026-10-03, `taslim_islamic`)

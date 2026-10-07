@@ -14,7 +14,6 @@ Everything else is an `APP_ACTION` or a redirect. Read `COMMON.md` first (§5, �
 | Registered contacts (7.10) | `profile` / `contacts` | `GET customer/v1/me/contacts` | ✅ Live |
 | Profile change requests (7.12) | `profile` / `profile_change_requests` | `GET service-request/v1/profile-changes` | ✅ Live |
 | Contact priority requests (7.14) | `profile` / `contact_priority_requests` | `GET service-request/v1/contact-priority` | ✅ Live |
-
 | Change nickname (7.2) | `profile_update` / `update_nickname` | `PATCH auth/v1/user/profile/nickname` | ✅ Built (yes/no); live test pending |
 | Change address (7.8) | `profile_update` / `update_address` | `PATCH customer/v1/me/demographic` | ✅ Built (yes/no); live test pending |
 | Change mobile (7.5) | `profile_update` / `update_mobile` | `POST otp/v1/send` + `otp/v1/verify`, `POST auth/v1/auth/mobile/update` | ✅ Built (code); live test pending |
@@ -135,12 +134,11 @@ void renderProfile(ChatTurnResult turn) {
       showProfileCard(
         name: p['name'], username: p['username'], email: p['email'],
         phone: maskTail(p['phone'], keep: 4), bankingMode: p['bankingMode'],
-        onEdit: () => openAppScreen('edit_profile'),
       );
     case 'address':
       final a = (p['data'] as Map).cast<String, dynamic>();
       showAddressCard(present: a['presentAddress'], permanent: a['permanentAddress'],
-          kycStatus: a['kycStatus'], onEdit: () => openAppScreen('edit_address'));
+          kycStatus: a['kycStatus']);
     case 'contacts':
       final items = (p['data'] as List);
       if (items.isNotEmpty) showContactList(items.cast<Map<String, dynamic>>());
@@ -149,7 +147,7 @@ void renderProfile(ChatTurnResult turn) {
       final reqs = (p['requests'] as List);
       if (reqs.isNotEmpty) showRequestStatusList(reqs.cast<Map<String, dynamic>>());
     case 'update_profile_image':
-      showOpenInAppChip('Change photo', onTap: () => openAppScreen('update_profile_image'));
+      showPhotoBox();   // U8 photo box: choose a photo and upload (7.3/7.4)
     case 'update_nickname':
     case 'update_address':
     case 'update_email':
@@ -164,7 +162,7 @@ void renderProfile(ChatTurnResult turn) {
 // APP_ACTION (KYC, profile change request, primary contact) use the shared cases in COMMON.md §10.
 ```
 
-Rendering: profile and address as cards with an "Edit in app" button; request lists
+Rendering: profile and address as read-only cards (changing them is a typed request: the bot shows the yes/no card or code form); request lists
 as status rows; an executed change as a short success tile built from the refreshed profile.
 
 ## Live-verified (2026-10-03, `taslim_islamic`)

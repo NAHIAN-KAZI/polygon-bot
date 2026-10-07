@@ -83,8 +83,7 @@ void renderBalance(ChatTurnResult turn) {
 ```
 
 Rendering: a single balance card (one number, big). Credit summary as a small
-card (limit / used / due / due date). Action button: optional "Open account"
-(`routing.action` is `redirect`).
+card (limit / used / due / due date). No buttons: nothing here changes data.
 
 ## Live-verified (2026-10-03, `taslim_islamic`)
 

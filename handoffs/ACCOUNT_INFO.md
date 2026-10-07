@@ -168,9 +168,8 @@ void renderAccountInfo(ChatTurnResult turn) {
 
 Rendering: accounts and cards as cards (few items, key facts); devices and
 logins as a list/timeline; empty lists as a one-line empty state (decide from
-the empty list, not from the bubble text). Action buttons: optional "Open in app" per item;
-nothing here changes data. "Star this account" comes back as `APP_ACTION`
-(`quick_view_star`); handle it with the shared `APP_ACTION` case in `COMMON.md` §8.
+the empty list, not from the bubble text). Nothing here changes data. "Star this account" comes back as `APP_ACTION`
+(`quick_view_star`); show the star box from the table above (shared `APP_ACTION` case, `COMMON.md` §10).
 
 FD/DPS `SERVICE_UNAVAILABLE` is the normal answer for a customer whose FD/DPS
 record the bank can't return (see gaps) — show the bubble only.

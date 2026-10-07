@@ -55,8 +55,8 @@ Always handle both `done` and `error`, because a stream is not guaranteed to rea
 | `type` | Meaning | What the app should do |
 |---|---|---|
 | `BANKING_SERVICE` | A service answered with data, a gather-only flow finished (transfer/dispute summary), or an approved change ran (`payload.executed: true`) or didn't (`executed: false`, maybe `cancelled: true`) | Show the bubble. Render `payload` as a card/table where the intent doc says so |
-| `APP_ACTION` | The request is something the chat does not carry out. The app has the screen for it, or it isn't available. No bank call was made | Show the bubble plus an info card from `payload.ui`, with an **Open** button only when the route is openable (§8) |
-| `CLARIFICATION_REQUIRED` | The bot asked a question. It may list concrete options in the text ("check your balance or see recent transactions?") | Show the bubble and keep the input open. `category`/`service`/`payload` are `null`. Options are text only. The customer answers by typing |
+| `APP_ACTION` | The request is something the chat does not carry out. The app has the screen for it, or it isn't available. No bank call was made | Show the bubble plus the inline box for `result.service` (U8, §11), or an info card (U9) when `ui.kind` is `info`/`unavailable`. **Open** (§8) is only the fallback for a box that is not built yet |
+| `CLARIFICATION_REQUIRED` | The bot asked a question. It may list concrete options in the text ("check your balance or see recent transactions?") | Show the bubble and keep the input open. `category`/`service` are `null`. `payload` is `null`, or `{"pending": {...}}` when a request is waiting for missing fields (§11). Options are text only. The customer answers by typing |
 | `ACCOUNT_SELECTION_REQUIRED` | Several accounts/cards, so the bot asked which one | Bubble plus a picker from `payload.accounts` (§6) |
 | `TRANSACTION_SELECTION_REQUIRED` | A dispute needs to know which recent transaction it's about | Bubble plus a picker from `payload.transactions` (§6) |
 | `CONFIRMATION_REQUIRED` | An approved change is ready and needs an explicit yes/no | Bubble plus **Yes** / **No** buttons (§7) |
@@ -262,7 +262,7 @@ is changed and the message is answered as a new request.
 | `prefill` | Optional fields **the customer actually wrote** (values the bot couldn't find in their message are dropped), or `null`. Amounts are taka |
 | `needs` | Plain description of what the customer does there (the bubble already words it) |
 
-**Dart handling:**
+**Fallback handling (U11), when the inline box for this action is not built yet:**
 - Show an info card with `title` (and `needs` if you like).
 - Show an **Open** button only when `kind == "screen"` and `route` is a plain
   openable path. On tap (never automatically): `Get.toNamed(route, arguments: prefill)`.
@@ -442,15 +442,27 @@ Future<void> onSend(String message, {Map<String, dynamic>? payload,
       });
     case 'APP_ACTION':
       final ui = (p['ui'] as Map).cast<String, dynamic>();
+      final prefill = (ui['prefill'] as Map?)?.cast<String, dynamic>();
+      // Primary design (U8): the inline box for this action id, prefilled.
+      // Boxes are keyed by `turn.service`; see the table in each intent file.
+      if (ui['kind'] == 'screen' && inlineBoxes.containsKey(turn.service)) {
+        showInlineBox(turn.service!, prefill: prefill);
+        break;
+      }
+      // Fallback (U9/U11): info card, plus Open only for a plain openable route.
       final route = ui['route'] as String?;
       final canOpen = ui['kind'] == 'screen' && isOpenableRoute(route);
       showAppActionCard(title: ui['title'], needs: ui['needs'],
-          onOpen: canOpen ? () => Get.toNamed(route!, arguments: ui['prefill']) : null);
+          onOpen: canOpen ? () => Get.toNamed(route!, arguments: prefill) : null);
     case 'SERVICE_UNAVAILABLE':
       showRetry(() => onSend(message, payload: payload, category: category, service: service));
     case 'AUTH_REQUIRED':
       await refreshLogin();
       showRetry(() => onSend(message, payload: payload, category: category, service: service));
+    case 'CLARIFICATION_REQUIRED':
+      // payload is null, or {pending: {service, missingFields}} (see §11 for the complaint/dispute box)
+      final pending = (p['pending'] as Map?)?.cast<String, dynamic>();
+      if (pending != null) showBoxFor(pending['service']);   // optional; the customer can also just type
     case 'BANKING_SERVICE':
       renderServiceCard(turn);   // per-intent rendering, see each handoff
     default:

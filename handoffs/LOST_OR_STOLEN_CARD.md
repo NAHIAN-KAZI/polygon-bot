@@ -1,14 +1,19 @@
 # LOST_OR_STOLEN_CARD — Integration Handoff
 
-Freezing a lost, stolen or misused card from chat. This is one of only two
-actions the chatbot performs on the bank (user-approved exception), so it is
-gated by an OTP **and** the card PIN or login password. Read `COMMON.md` §5 first.
+Freezing a lost, stolen or misused card from chat, and reporting a card lost or stolen. Freeze is one of the
+approved changes the chatbot performs on the bank. It needs an explicit yes, then an OTP **and** the card PIN or
+login password. Read `COMMON.md` §5 and §7 first.
 
 `category` / `service`: `card_services` / `frezz_unfrezz` →
 `PATCH card/v1/cards/{id}/freeze` (after `POST otp/v1/send` + `POST otp/v1/verify`).
 
-Not available in chat: reporting lost/stolen as a separate request (12.1)
-and **unfreezing** — the bot says to use the app.
+## What the bot does for each request in this intent
+
+| Row | Request | Outcome |
+|---|---|---|
+| 12.1 | Report lost/stolen card | Gather + redirect, no bank call: `BANKING_SERVICE`, `card_requests` / `report_lost_card`, `payload: {"cardId", "cardLast4", "reasonCode", "executed": false}`, `routing.action: "report_lost_card"` |
+| 12.2 | Freeze card immediately | Executed in chat after yes/no **and** a code: `card_services` / `frezz_unfrezz` |
+| — | Unfreeze | App action `card_unfreeze` (`CARD_MANAGEMENT.md`): never turned into a freeze |
 
 ## Flow
 
@@ -16,14 +21,15 @@ and **unfreezing** — the bot says to use the app.
    "Someone just used my debit card… please block it".
    The bot freezes only when the customer **asked to block** the card **or
    said what happened** to it. A vague "my card isn't working" or "reset my
-   PIN" gets a question instead — never a freeze.
+   PIN" gets a question instead, never a freeze.
 2. Which card: one card → used automatically; several →
    `ACCOUNT_SELECTION_REQUIRED` with card entries (`id`, masked `cardNumber`,
    `cardType`); answer with `payload: {"cardId": id}` or in words.
 3. Reason: if the customer only said "block my card", the bot asks why
    (`CLARIFICATION_REQUIRED`). The stored reason is the customer's own words.
-4. OTP sent → `OTP_REQUIRED` (below). The bubble text is fixed wording (security step).
-5. App submits the verification form → card frozen → `BANKING_SERVICE`.
+4. `CONFIRMATION_REQUIRED` (`payload: {"cardId", "cardLast4", "reason"}`): **no code has been sent yet**. Yes sends the code.
+5. `OTP_REQUIRED` (below). The bubble wording varies (model-written), so never match on it.
+6. App submits the verification form → card frozen → `BANKING_SERVICE`.
 
 ## Response — `result`
 
@@ -50,8 +56,8 @@ and **unfreezing** — the bot says to use the app.
 **Cancelled** ("cancel" while the form is open):
 `{"type": "BANKING_SERVICE", "payload": {"executed": false, "cancelled": true}}`.
 
-Errors stay `OTP_REQUIRED` with a new `verificationStatus` (see `COMMON.md` §5):
-wrong code → `OTP_INCORRECT` + `attemptsRemaining`; expired → `OTP_EXPIRED`
+Errors stay `OTP_REQUIRED` with a new `verificationStatus` (see `COMMON.md` §7):
+wrong code → `OTP_INCORRECT` + `attemptsRemaining`; wrong PIN/password → `INVALID_CREDENTIALS` (code still valid); expired → `OTP_RESENT`
 (new code sent); both PIN and password → `CREDENTIALS_INVALID_COMBINATION`;
 too many codes → `SEND_THROTTLED` / `OTP_BLOCKED`; bank failure → `SERVICE_UNAVAILABLE`
 ("Your card has not been frozen").
@@ -74,6 +80,10 @@ Blocks U1–U11 are defined in `COMMON.md` §11. The customer finishes everythin
 Future<void> handleFreeze(ChatTurnResult turn) async {
   final p = turn.payload ?? {};
   switch (turn.type) {
+    case 'CONFIRMATION_REQUIRED':
+      showYesNo(details: p,   // card ending + reason; no code sent yet
+          onYes: () => onSend('Yes', payload: {'confirm': true}),
+          onNo: () => onSend('No', payload: {'confirm': false}));
     case 'OTP_REQUIRED':
       final form = await showVerificationSheet(
         title: 'Freeze card ending ${p['cardLast4']}',
@@ -82,12 +92,13 @@ Future<void> handleFreeze(ChatTurnResult turn) async {
         allowPassword: (p['credentialOptions'] as List).contains('password'),
         error: switch (p['verificationStatus']) {
           'OTP_INCORRECT' => 'Wrong code. ${p['attemptsRemaining'] ?? ''} attempts left.',
-          'OTP_EXPIRED' => 'Code expired — we sent a new one.',
+          'OTP_RESENT' => 'Code expired — we sent a new one.',
+          'INVALID_CREDENTIALS' => 'Wrong PIN or password.',
           'CREDENTIALS_INVALID_COMBINATION' => 'Enter your PIN or your password, not both.',
           _ => null,
         },
       );
-      if (form == null) return onSend('cancel');
+      if (form == null) return onSend('cancel', payload: {'confirm': false});
       // Never echo these in the chat or logs.
       await onSend('Verify', payload: {
         'otp': form.otp,
@@ -108,5 +119,6 @@ Future<void> handleFreeze(ChatTurnResult turn) async {
 
 ## Known gaps
 
-1. Dev OTP accepts `0000` (no SMS). Production sends a real SMS — test the form against production OTP behaviour before go-live.
-2. Multi-card selection unit-tested only (dev user has one card).
+1. The report-lost bubble is model-written from facts that still say "the report screen in the app, which opens next". The app shows a box instead (table above), so the wording can disagree with the UI until the backend facts are changed.
+2. Dev OTP accepts `0000` (no SMS). Production sends a real SMS — test the form against production OTP behaviour before go-live.
+3. Multi-card selection unit-tested only (dev user has one card).
