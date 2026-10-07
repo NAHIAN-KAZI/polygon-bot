@@ -9,6 +9,7 @@ TASKS.md whenever a task changes an intent's coverage** — don't let it go
 stale.
 
 Legend:
+- ✅ **App action (T-79)** — the bot makes no bank call; it returns `APP_ACTION` with prefill and the app shows an inline box (see `handoffs/COMMON.md` §8 and §11).
 - ✅ **Done** — real adapter calls this live endpoint, wired end-to-end.
 - ✅ **Done (gather+redirect)** — never calls the real (mutating) endpoint
   by design (ADR-0008: inform/redirect only) — the bot gathers details via
@@ -89,7 +90,7 @@ included).
 | 1.2 Get account detail | ✅ Done |
 | 1.3 Get account by account/card number | ❌ Skipped — not a real chatbot ask (pre-login signup only) |
 | 1.4 Get accounts by username | ❌ Skipped — not a real chatbot ask (device verification only) |
-| 1.5 Star account | ⛔ Blocked |
+| 1.5 Star account | ✅ App action (T-79): the bot returns `APP_ACTION` `quick_view_star` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
 | 1.6 My loans | ✅ Done (T-58, live `loan_services`/`my_loans`) |
 | 1.7 FD profit history | ✅ Done (T-58) — this test customer's FD record 404s platform-side; surfaces as `SERVICE_UNAVAILABLE` (left as-is per user) |
 | 1.8 DPS profit history | ✅ Done (T-58) |
@@ -99,15 +100,15 @@ included).
 ## ATM_SUPPORT — *Done (except cash-by-code)*
 | # | Endpoint | Status |
 |---|---|---|
-| 2.1 Cash by code | ⛔ Blocked |
+| 2.1 Cash by code | ✅ App action (T-79): the bot returns `APP_ACTION` `cash_by_code` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
 | 2.2 Raise dispute | ✅ Done (gather+redirect — T-61, `service_requests`/`raise_dispute`) |
 | 2.3 List disputes | ✅ Done (T-58, `service_requests`/`disputes`) |
 
 ## CARD_ISSUE — *Done (read-only + redirects)*
 | # | Endpoint | Status |
 |---|---|---|
-| 3.1 Reset card PIN | ⛔ Blocked |
-| 3.2 Unfreeze card | ⛔ Blocked (bot points the customer to the app) |
+| 3.1 Reset card PIN | ✅ App action (T-79): the bot returns `APP_ACTION` `card_pin_reset` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
+| 3.2 Unfreeze card | ✅ App action (T-79): the bot returns `APP_ACTION` `card_unfreeze` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
 | 3.3 Raise dispute | ✅ Done (gather+redirect — T-61) |
 | 3.4 List disputes | ✅ Done (shared `disputes` adapter; routing covers card-issue phrasing) |
 | 3.5 Submit complaint | 🔶 Built (same flow as 8.4, T-75) |
@@ -117,35 +118,35 @@ included).
 | # | Endpoint | Status |
 |---|---|---|
 | 4.1 Freeze card | ✅ Done (T-57 exception — reason → OTP + PIN/password → freeze; live-verified 2026-10-03, card restored by unfreeze) |
-| 4.2 Unfreeze card | ⛔ Blocked |
-| 4.3 Close card | ⛔ Blocked |
-| 4.4 Contactless on/off | ⛔ Blocked |
-| 4.5 International transaction on/off | ⛔ Blocked |
-| 4.6 Reset card PIN | ⛔ Blocked |
-| 4.7 Limit change — submit | ⛔ Blocked |
+| 4.2 Unfreeze card | ✅ App action (T-79): the bot returns `APP_ACTION` `card_unfreeze` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
+| 4.3 Close card | ✅ App action (T-79): the bot returns `APP_ACTION` `card_close` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
+| 4.4 Contactless on/off | ✅ App action (T-79): the bot returns `APP_ACTION` `card_contactless` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
+| 4.5 International transaction on/off | ✅ App action (T-79): the bot returns `APP_ACTION` `card_international` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
+| 4.6 Reset card PIN | ✅ App action (T-79): the bot returns `APP_ACTION` `card_pin_reset` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
+| 4.7 Limit change — submit | ✅ App action (T-79): the bot returns `APP_ACTION` `card_limit_change` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
 | 4.8 Limit change — list | ✅ Done (T-64, `card_info`/`card_limit_requests`) |
-| 4.9 Limit change — cancel | ⛔ Blocked |
+| 4.9 Limit change — cancel | ✅ App action (T-79): the bot returns `APP_ACTION` `card_limit_cancel` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
 | 4.10 Card products list | ✅ Done (T-64, `card_info`/`card_products`) |
-| 4.11 Apply for debit card | ⛔ Blocked |
-| 4.12 Reveal debit card details | ❌ Not built (sensitive — real card number) |
-| 4.13 Apply for prepaid card | ⛔ Blocked |
-| 4.14 Reveal prepaid card details | ❌ Not built (sensitive) |
-| 4.15 Virtual card — submit | ⛔ Blocked |
+| 4.11 Apply for debit card | ✅ App action (T-79): the bot returns `APP_ACTION` `card_apply` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
+| 4.12 Reveal debit card details | ✅ Info only (T-79): `APP_ACTION` `card_details_reveal`, kind `info`, no box and no button |
+| 4.13 Apply for prepaid card | ✅ App action (T-79): the bot returns `APP_ACTION` `card_apply` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
+| 4.14 Reveal prepaid card details | ✅ Info only (T-79): `APP_ACTION` `card_details_reveal`, kind `info`, no box and no button |
+| 4.15 Virtual card — submit | ✅ App action (T-79): the bot returns `APP_ACTION` `card_apply` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
 | 4.16 Virtual card — list | ✅ Done (T-64, `card_info`/`virtual_card_requests`) |
-| 4.17 Virtual card — cancel | ⛔ Blocked |
-| 4.18 Virtual card — reveal | ❌ Not built (sensitive) |
-| 4.19 Star card | ⛔ Blocked |
-| 4.20 Credit card bill payment (card service) | ⛔ Blocked |
-| 4.21 Credit card bill payment (bill service) | ⛔ Blocked |
-| 4.22 QR payment cards — list | 🚫 No backend |
-| 4.23 QR payment card — enable/disable | 🚫 No backend |
+| 4.17 Virtual card — cancel | ✅ Info only (T-79): `APP_ACTION` `card_virtual_cancel`, kind `info`, no box and no button |
+| 4.18 Virtual card — reveal | ✅ Info only (T-79): `APP_ACTION` `card_details_reveal`, kind `info`, no box and no button |
+| 4.19 Star card | ✅ App action (T-79): the bot returns `APP_ACTION` `quick_view_star` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
+| 4.20 Credit card bill payment (card service) | ✅ App action (T-79): the bot returns `APP_ACTION` `credit_card_pay` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
+| 4.21 Credit card bill payment (bill service) | ✅ App action (T-79): the bot returns `APP_ACTION` `other_card_pay` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
+| 4.22 QR payment cards — list | 🚫 No backend — the bot says so (T-79: `APP_ACTION` `qr_payment_cards`, kind `unavailable`) |
+| 4.23 QR payment card — enable/disable | 🚫 No backend — the bot says so (T-79: `APP_ACTION` `qr_payment_cards`, kind `unavailable`) |
 
 ## CARD_REPLACEMENT — *Done (read-only)*
 | # | Endpoint | Status |
 |---|---|---|
 | 5.1 List replacement requests | ✅ Done (T-64, `card_info`/`replacement_requests`) |
-| 5.2 Cancel replacement request | ⛔ Blocked |
-| 5.3 Reveal replacement card details | ❌ Not built (sensitive) |
+| 5.2 Cancel replacement request | ✅ App action (T-79): the bot returns `APP_ACTION` `replacement_cancel` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
+| 5.3 Reveal replacement card details | ✅ Info only (T-79): `APP_ACTION` `card_details_reveal`, kind `info`, no box and no button |
 
 ## CHECK_BALANCE — *Done*
 | # | Endpoint | Status |
@@ -163,11 +164,11 @@ included).
 | 7.6 Update email address | 🔶 Built (T-75 — OTP to the registered phone then POST; live test pending) |
 | 7.7 Get address | ✅ Done (T-64, `profile`/`address`) |
 | 7.8 Update address | 🔶 Built (T-75 — yes/no then PATCH; live test pending) |
-| 7.9 Submit KYC | ⛔ Blocked |
+| 7.9 Submit KYC | ✅ App action (T-79): the bot returns `APP_ACTION` `kyc_submit` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
 | 7.10 My contacts | ✅ Done (T-64, `profile`/`contacts`) |
-| 7.11 Profile change — submit | ⛔ Blocked |
+| 7.11 Profile change — submit | ✅ App action (T-79): the bot returns `APP_ACTION` `profile_change_request` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
 | 7.12 Profile change — list | ✅ Done (T-64, `profile`/`profile_change_requests`) |
-| 7.13 Contact priority — submit | ⛔ Blocked |
+| 7.13 Contact priority — submit | ✅ App action (T-79): the bot returns `APP_ACTION` `contact_priority_change` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
 | 7.14 Contact priority — list | ✅ Done (T-64, `profile`/`contact_priority_requests`) |
 
 ## FAILED_TRANSFER — *Done (read-only + redirects)*
@@ -213,29 +214,29 @@ No API needed — handled conversationally.
 | 14.1 Own account transfer | ✅ Done (gather+redirect — T-56, never executes) |
 | 14.2 City Bank transfer | ✅ Done (gather+redirect — T-56) |
 | 14.3 Other bank transfer | ✅ Done (gather+redirect — T-56) |
-| 14.4 Other banks list | 🚫 No backend |
-| 14.5 Gift transfer | ⛔ Blocked |
+| 14.4 Other banks list | 🚫 No backend — the bot says so (T-79: `APP_ACTION` `other_banks_list`, kind `unavailable`) |
+| 14.5 Gift transfer | ✅ App action (T-79): the bot returns `APP_ACTION` `gift_transfer` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
 | 14.6 Gifts received | ✅ Done (T-64, `transfer_info`/`gifts_received`) |
-| 14.7 Generic transaction | ⛔ Blocked |
-| 14.8 Linked account check | ⛔ Blocked |
-| 14.9 Email transfer — create | ⛔ Blocked |
+| 14.7 Generic transaction | ⛔ Not a customer ask (bank-internal), no chat use case |
+| 14.8 Linked account check | ⛔ Not a customer ask (bank-internal), no chat use case |
+| 14.9 Email transfer — create | ✅ App action (T-79): the bot returns `APP_ACTION` `email_transfer_create` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
 | 14.10 Email transfer — list | ✅ Done (T-64, `transfer_info`/`email_transfers`) |
 | 14.11 Email transfer — details | ✅ Done (same adapter, with a transfer id) |
-| 14.12 Email transfer — cancel | ⛔ Blocked |
-| 14.13 Email transfer — resend | ⛔ Blocked |
+| 14.12 Email transfer — cancel | ✅ App action (T-79): the bot returns `APP_ACTION` `email_transfer_manage` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
+| 14.13 Email transfer — resend | ✅ App action (T-79): the bot returns `APP_ACTION` `email_transfer_manage` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
 | 14.14 Wallet/MFS transfer | ✅ Done (gather+redirect — T-56) |
 | 14.15 Wallet verify | ❌ Not built |
-| 14.16 QR pay | ⛔ Blocked |
-| 14.17 QR parse | ⛔ Blocked |
+| 14.16 QR pay | ✅ App action (T-79): the bot returns `APP_ACTION` `qr_payment` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
+| 14.17 QR parse | ✅ App action (T-79): the bot returns `APP_ACTION` `qr_payment` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
 | 14.18 QR payment history | ✅ Done (T-64, `transfer_info`/`qr_payment_history` — amounts already taka) |
 | 14.19 Beneficiary — list | ✅ Done |
 | 14.20 Beneficiary — add | ⛔ Blocked live (T-60 — chat flow + confirmation work, but the bank returns 500 for the add; waiting on the API team's required fields per serviceType) |
-| 14.21 Beneficiary — edit | ⛔ Blocked |
-| 14.22 Beneficiary — delete | ⛔ Blocked |
-| 14.23 Beneficiary — upload/change photo | ⛔ Blocked |
-| 14.24 Beneficiary — remove photo | ⛔ Blocked |
-| 14.25 Beneficiary — pin/unpin | ⛔ Blocked |
+| 14.21 Beneficiary — edit | ✅ App action (T-79): the bot returns `APP_ACTION` `beneficiary_edit` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
+| 14.22 Beneficiary — delete | ✅ App action (T-79): the bot returns `APP_ACTION` `beneficiary_delete` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
+| 14.23 Beneficiary — upload/change photo | ✅ App action (T-79): the bot returns `APP_ACTION` `beneficiary_photo` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
+| 14.24 Beneficiary — remove photo | ✅ App action (T-79): the bot returns `APP_ACTION` `beneficiary_photo` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
+| 14.25 Beneficiary — pin/unpin | ✅ App action (T-79): the bot returns `APP_ACTION` `beneficiary_pin` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
 | 14.26 Recipient lookup by account number | ❌ Not built (same endpoint as 1.3) |
 | 14.27 My transfer limit — get | ✅ Done (T-64, `transfer_info`/`transfer_limit`) |
-| 14.28 My transfer limit — request change | ⛔ Blocked |
-| 14.29 My transfer limit — cancel pending change | ⛔ Blocked |
+| 14.28 My transfer limit — request change | ✅ App action (T-79): the bot returns `APP_ACTION` `transfer_limit_change` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
+| 14.29 My transfer limit — cancel pending change | ✅ App action (T-79): the bot returns `APP_ACTION` `transfer_limit_change` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
