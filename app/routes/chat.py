@@ -532,7 +532,7 @@ _FREEZE_FACTS = {
     "action": "freeze (temporarily block) the card",
     "code_sent_to": "their registered phone number",
     "enter_in_the_app_secure_form": ["the one-time code", "either the card PIN or the login password (only one of them)"],
-    "what_freezing_does": "stops all payments and withdrawals with the card; it can be unfrozen later in the app",
+    "what_freezing_does": "stops all payments and withdrawals with the card; it can be unfrozen later",
     "to_stop": "reply cancel",
 }
 
@@ -700,7 +700,7 @@ async def _handle_freeze_otp_reply(
     return _TurnOutcome(
         "BANKING_SERVICE",
         _say("done", _card_must(stored_payload), what="the card was frozen",
-             can_it_be_undone="yes, it can be unfrozen in the app"),
+             can_it_be_undone="yes, it can be unfrozen later"),
         category, service, subservice,
         result_payload=executed_data,
         routing={"category": category, "service": service, "subservice": subservice, "action": "redirect"},
@@ -1040,7 +1040,7 @@ async def _handle_contact_otp_reply(
         what, must = _contact_change(key, stored)
         return _TurnOutcome(
             "SERVICE_UNAVAILABLE",
-            _say("unavailable", must, request=f"change {what}", also_possible="change it in the app"),
+            _say("unavailable", must, request=f"change {what}", also_possible="try the change again in a little while"),
             category, service, None,
         )
     what, must = _contact_change(key, stored)

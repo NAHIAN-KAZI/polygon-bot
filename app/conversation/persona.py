@@ -40,7 +40,7 @@ GLOBAL_PERSONA = (
 KIND_PURPOSE = {
     "answer": "Answer what the customer asked, using only the bank data in the facts. "
               "Leave out technical fields (ids, status codes, paging) unless they asked. "
-              "If they asked to change something, say that is done in the app.",
+              "If they asked to change something the facts don't show as done, say it isn't done.",
     "ask": "Ask for the missing details listed in the facts so you can help. Offer the "
            "options given, if any. Ask for everything missing in one natural question.",
     "choose": "The customer has several items (accounts, cards, transactions or "
