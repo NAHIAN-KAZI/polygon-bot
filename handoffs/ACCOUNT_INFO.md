@@ -18,7 +18,42 @@ Read `COMMON.md` first (Dart client, result types, selection, money units).
 
 Not implemented on purpose: account by number (1.3) and by username (1.4) —
 pre-login signup/device-verification steps, not chat asks. Starring an
-account (1.5) changes data and is blocked; the bot says it's done in the app.
+account (1.5) is an `APP_ACTION` (see below).
+
+## What the bot does for each request in this intent
+
+| Row | Request | Outcome |
+|---|---|---|
+| 1.1 | All accounts | Handled in chat: `account_info` / `accounts` |
+| 1.2 | Account detail | Handled in chat: `account_info` / `accounts` (with `id`) |
+| 1.3 | Account by account/card number | Not available (pre-login signup step; no chat service) |
+| 1.4 | Accounts by username | Not available (device-verification step; no chat service) |
+| 1.5 | Star account | App action `quick_view_star` → `CustomizeQuickViewScreen`, `/customize_quick_view` (Open) |
+| 1.6 | My loans | Handled in chat: `loan_services` / `my_loans` |
+| 1.7 | FD profit history | Handled in chat: `account_info` / `fd_profit_history` (`SERVICE_UNAVAILABLE` when the bank has no record, see gaps) |
+| 1.8 | DPS profit history | Handled in chat: `account_info` / `dps_profit_history` |
+| — | Cards list | Handled in chat: `account_info` / `cards` |
+| — | One account's transactions | Handled in chat: `account_info` / `account_transactions` |
+
+Nothing in this intent changes data in chat.
+
+<!-- UI-TO-BUILD:START -->
+## UI to build, use case by use case
+
+Blocks U1–U11 are defined in `COMMON.md` §11. The customer finishes everything inside the chat, as with the nickname and email change. Drive every block from `result.type`/`category`/`service`/`routing`/`payload`, never from bubble text.
+
+| # | Use case | Outcome | What the customer sees | Buttons | Prefilled from | Calls / notes |
+|---|---|---|---|---|---|---|
+| 1.1 | Get all accounts | Answered in chat | **U3/U2 accounts** — Account cards. Show the **ledger balance** (`ledgerAccounts[].balanceFormatted`), not the core record's `balance`. | None | None | — |
+| 1.2 | Get account detail | Answered in chat | **U3 accounts** — One account's detail, same ledger-balance rule. | None | None | — |
+| 1.5 | Star account | App action → inline box | **U8** box: Accounts and cards, each with a star switch; the one named in the message starts switched on. After the button: None. | Star switch | None (from `ui.prefill`) | App calls `PUT polygon-bank/v1/accounts/{id}/quick-view` · `PUT card/v1/cards/{id}/quick-view?isStarred=`; shows a local done/failed tile |
+| 1.6 | My loans | Answered in chat | **U2 loans** — One row per loan (see `payload` in ACCOUNT_INFO.md). | None | None | — |
+| 1.7 | FD profit history | Answered in chat | **U2 FD profit** — Profit entries; on `SERVICE_UNAVAILABLE` show **U10**. | None | None | — |
+| 1.8 | DPS profit history | Answered in chat | **U2 DPS profit** — Profit entries; on `SERVICE_UNAVAILABLE` show **U10**. | None | None | — |
+| — | Cards list | Answered in chat | **U2 cards** — Card tiles: type, masked number, status. | None | None | — |
+| — | Account transactions | Answered in chat | **U4** — Transaction list for the picked account (U5 first if several). | None | None | — |
+
+<!-- UI-TO-BUILD:END -->
 
 ## How to trigger
 
@@ -132,9 +167,10 @@ void renderAccountInfo(ChatTurnResult turn) {
 ```
 
 Rendering: accounts and cards as cards (few items, key facts); devices and
-logins as a list/timeline; empty lists as a one-line empty state — the bubble
-text already says "none". Action buttons: optional "Open in app" per item;
-nothing here changes data.
+logins as a list/timeline; empty lists as a one-line empty state (decide from
+the empty list, not from the bubble text). Action buttons: optional "Open in app" per item;
+nothing here changes data. "Star this account" comes back as `APP_ACTION`
+(`quick_view_star`); handle it with the shared `APP_ACTION` case in `COMMON.md` §8.
 
 FD/DPS `SERVICE_UNAVAILABLE` is the normal answer for a customer whose FD/DPS
 record the bank can't return (see gaps) — show the bubble only.

@@ -7,6 +7,17 @@ implemented — see `TASKS.md` T-41/T-42 for full implementation history.
 Base connection details (URL, auth header, SSE event shapes) are unchanged
 from the main `HANDOFF.md` — this doc only covers what's specific to `FEES`.
 
+<!-- UI-TO-BUILD:START -->
+## UI to build, use case by use case
+
+Blocks U1–U11 are defined in `COMMON.md` §11. The customer finishes everything inside the chat, as with the nickname and email change. Drive every block from `result.type`/`category`/`service`/`routing`/`payload`, never from bubble text.
+
+| # | Use case | Outcome | What the customer sees | Buttons | Prefilled from | Calls / notes |
+|---|---|---|---|---|---|---|
+| 10.1 | Transaction charge quote | Answered in chat | **Fee quote card (existing)** — Principal, charge, VAT, total (poisha → divide by 100). When `routing.action == "start_transfer"`, show **Continue to send**: open the transfer box (U8) for the type in `routing.transfer`, prefilled with `routing.transfer.prefill.amount`. | See text | None | — |
+
+<!-- UI-TO-BUILD:END -->
+
 ## How to trigger it
 
 Two ways, same as every other banking-service intent:

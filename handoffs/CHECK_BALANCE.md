@@ -10,6 +10,27 @@ Read `COMMON.md` first.
 | Account balance (6.1) | `account_info` / `balance` | `GET transfer/v1/accounting/balance` | ✅ Live |
 | Credit card summary (6.2) | `card_info` / `credit_card_summary` | `GET card/v1/cards/{id}/credit-summary` | ✅ Live ("no credit card" verified) |
 
+## What the bot does for each request in this intent
+
+| Row | Request | Outcome |
+|---|---|---|
+| 6.1 | Account balance | Handled in chat: `account_info` / `balance` (several accounts → `ACCOUNT_SELECTION_REQUIRED`) |
+| 6.2 | Credit card summary | Handled in chat: `card_info` / `credit_card_summary` (several credit cards → selection, card shape) |
+
+Nothing in this intent changes data.
+
+<!-- UI-TO-BUILD:START -->
+## UI to build, use case by use case
+
+Blocks U1–U11 are defined in `COMMON.md` §11. The customer finishes everything inside the chat, as with the nickname and email change. Drive every block from `result.type`/`category`/`service`/`routing`/`payload`, never from bubble text.
+
+| # | Use case | Outcome | What the customer sees | Buttons | Prefilled from | Calls / notes |
+|---|---|---|---|---|---|---|
+| 6.1 | Account balance | Answered in chat | **U3 balance** — Balance prominent, account ending below; U5 first if several accounts. | None | None | — |
+| 6.2 | Credit card summary | Answered in chat | **U3 credit card** — Limit, outstanding or due amount, available credit. No credit card → bubble only. | None | None | — |
+
+<!-- UI-TO-BUILD:END -->
+
 ## How to trigger
 
 Live-tested: "balance", "blance", "amar account e koto taka ase",

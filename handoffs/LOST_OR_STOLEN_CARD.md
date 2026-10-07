@@ -56,6 +56,18 @@ wrong code → `OTP_INCORRECT` + `attemptsRemaining`; expired → `OTP_EXPIRED`
 too many codes → `SEND_THROTTLED` / `OTP_BLOCKED`; bank failure → `SERVICE_UNAVAILABLE`
 ("Your card has not been frozen").
 
+<!-- UI-TO-BUILD:START -->
+## UI to build, use case by use case
+
+Blocks U1–U11 are defined in `COMMON.md` §11. The customer finishes everything inside the chat, as with the nickname and email change. Drive every block from `result.type`/`category`/`service`/`routing`/`payload`, never from bubble text.
+
+| # | Use case | Outcome | What the customer sees | Buttons | Prefilled from | Calls / notes |
+|---|---|---|---|---|---|---|
+| 12.1 | Report lost/stolen card | Gather → inline box | Card picker if several → **U8** caution box: card (preselected), reason (lost, stolen, damaged, expired, other), a warning that the card is closed for good and a replacement issued | Report and replace · Freeze instead (sends the message `Freeze my card`) | `cardId`, `reasonCode` | U7: code + PIN or password · `POST card/v1/cards/{id}/replacement-requests` |
+| 12.2 | Freeze card immediately | Executed in chat | Same as 4.1 (explicit freeze/block request) | Yes / No, Verify / Cancel | None | Same as 4.1 |
+
+<!-- UI-TO-BUILD:END -->
+
 ## Frontend integration (Dart)
 
 ```dart

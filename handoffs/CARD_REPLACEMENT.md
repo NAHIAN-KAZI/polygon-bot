@@ -7,8 +7,30 @@ Status of the customer's card replacement requests. Read `COMMON.md` first.
 | Ask | `category` / `service` | Bank endpoint | Status |
 |---|---|---|---|
 | Replacement requests (5.1) | `card_info` / `replacement_requests` | `GET card/v1/cards/replacement-requests` | ✅ Live |
-| Cancel a request (5.2) | — | — | ⛔ Blocked (bot: "only in the app") |
-| Reveal replacement card (5.3) | — | — | ❌ Not built on purpose (returns the full card number) |
+| Cancel a request (5.2) | `app_actions` / `replacement_cancel` | — | ✅ App action (`APP_ACTION`, no bank call) |
+| Reveal replacement card (5.3) | `app_actions` / `card_details_reveal` | — | ✅ App action, information only (full card numbers are never shown in chat) |
+
+## What the bot does for each request in this intent
+
+| Row | Request | Outcome |
+|---|---|---|
+| 5.1 | List replacement requests | Handled in chat: `card_info` / `replacement_requests` |
+| 5.2 | Cancel replacement request | App action `replacement_cancel` → `CardReplacementScreen`, `/request_card_replacement` (Info only: the screen needs a `CardReplacementArgs` object, see `COMMON.md` §8) |
+| 5.3 | Reveal replacement card details | App action `card_details_reveal` (kind `info`; `CardDetailScreen`, `/card_detail`, Info only) |
+
+Requesting a new replacement for a lost/stolen card is `LOST_OR_STOLEN_CARD.md` (12.1).
+
+<!-- UI-TO-BUILD:START -->
+## UI to build, use case by use case
+
+Blocks U1–U11 are defined in `COMMON.md` §11. The customer finishes everything inside the chat, as with the nickname and email change. Drive every block from `result.type`/`category`/`service`/`routing`/`payload`, never from bubble text.
+
+| # | Use case | Outcome | What the customer sees | Buttons | Prefilled from | Calls / notes |
+|---|---|---|---|---|---|---|
+| 5.1 | List replacement requests | Answered in chat | **U2 requests** — Replacement requests with status. | None | None | — |
+| 5.2 | Cancel replacement request | App action → inline box | **U8** box: The customer's pending replacement requests, each row with a button. After the button: None. | Cancel request (ask to confirm) | None (from `ui.prefill`) | App calls `DELETE card/v1/cards/replacement-requests/{requestId}`; shows a local done/failed tile |
+
+<!-- UI-TO-BUILD:END -->
 
 ## How to trigger
 
@@ -37,7 +59,8 @@ void renderReplacement(ChatTurnResult turn) {
 ```
 
 Rendering: status rows (requested date, card ending, status chip). "Request a
-replacement" opens the app's own screen.
+replacement" opens the app's own screen. Cancel/reveal asks come back as `APP_ACTION`
+(shared case, `COMMON.md` §10).
 
 ## Live-verified (2026-10-03, `taslim_islamic`)
 

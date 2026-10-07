@@ -28,6 +28,41 @@ Blocked (they change data; the bot says to use the app): gift transfer,
 email transfer create/cancel/resend, QR pay, beneficiary edit/delete/photo/pin,
 limit change requests. Not built: wallet verify (14.15), recipient lookup (14.26).
 
+<!-- UI-TO-BUILD:START -->
+## UI to build, use case by use case
+
+Blocks U1–U11 are defined in `COMMON.md` §11. The customer finishes everything inside the chat, as with the nickname and email change. Drive every block from `result.type`/`category`/`service`/`routing`/`payload`, never from bubble text.
+
+| # | Use case | Outcome | What the customer sees | Buttons | Prefilled from | Calls / notes |
+|---|---|---|---|---|---|---|
+| 14.1 | Own account transfer | Gather → inline box | **U8** transfer box: from-account (picker), to-account (the customer's other accounts), amount, note | Send | `amount` (from `payload`) | U7: code + transaction PIN · `POST transfer/v1/bank-transfer/own-account` |
+| 14.2 | City Bank transfer | Gather → inline box | **U8** transfer box: from-account, recipient (account or mobile), amount, note | Send | `accountNumber`, `amount` | U7: code + transaction PIN · `POST transfer/v1/bank-transfer/city-bank` |
+| 14.3 | Other bank transfer | Gather → inline box | **U8** transfer box: from-account, transfer type (BEFTN, NPSB or RTGS), beneficiary name, account, bank, branch details, amount | Send | `accountNumber`, `amount` | U7: code + transaction PIN · `POST transfer/v1/bank-transfer/other-bank` |
+| 14.4 | Other banks list | Not available | **U9** info card: This list is not available at the moment. | None | None | No backend |
+| 14.5 | Gift transfer | App action → inline box | **U8** box: Form: recipient (account or mobile), gift design, wish message, amount. After the button: U7: code + transaction PIN. | Send gift | `amount`, `recipient` (from `ui.prefill`) | App calls `POST transfer/v1/bank-transfer/gift`; shows a local done/failed tile |
+| 14.6 | Gifts received | Answered in chat | **U2 gifts** — Gifts received. | None | None | — |
+| 14.9 | Email transfer — create | App action → inline box | **U8** box: Form: recipient email, amount, security question and answer. After the button: U7: code + transaction PIN. | Send | `recipientEmail`, `amount` (from `ui.prefill`) | App calls `POST transfer/v1/email-transfer`; shows a local done/failed tile |
+| 14.10 | Email transfer — list | Answered in chat | **U2 email transfers** — Email transfers with status. | None | None | — |
+| 14.11 | Email transfer — details | Answered in chat | **U3 email transfer** — One email transfer's details. | None | None | — |
+| 14.12 | Email transfer — cancel | App action → inline box | **U8** box: The customer's email transfers, each with two buttons. After the button: None. | Cancel (ask to confirm) · Resend | `action` (from `ui.prefill`) | App calls `POST transfer/v1/email-transfer/{id}/cancel` · `.../resend-notification`; shows a local done/failed tile |
+| 14.13 | Email transfer — resend | App action → inline box | **U8** box: The customer's email transfers, each with two buttons. After the button: None. | Cancel (ask to confirm) · Resend | `action` (from `ui.prefill`) | App calls `POST transfer/v1/email-transfer/{id}/cancel` · `.../resend-notification`; shows a local done/failed tile |
+| 14.14 | Wallet/MFS transfer | Gather → inline box | **U8** wallet box: from-account, wallet provider (from `subservice`) and number, transfer type (direct or NPSB), amount, note | Send | `walletNumber`, `amount` | U7: code + transaction PIN · `POST transfer/v1/wallet-transfer` |
+| 14.16 | QR pay | App action → inline box | **U8** box: Scan area (camera) that shows the merchant and amount once read. After the button: U7: code + PIN. | Scan · Pay | None (from `ui.prefill`) | App calls `POST merchant/v1/qr/parse`, then `POST merchant/v1/qr/pay`; shows a local done/failed tile |
+| 14.17 | QR parse | App action → inline box | **U8** box: Scan area (camera) that shows the merchant and amount once read. After the button: U7: code + PIN. | Scan · Pay | None (from `ui.prefill`) | App calls `POST merchant/v1/qr/parse`, then `POST merchant/v1/qr/pay`; shows a local done/failed tile |
+| 14.18 | QR payment history | Answered in chat | **U2 QR payments** — QR payment history (amounts are already taka). | None | None | — |
+| 14.19 | Beneficiary — list | Answered in chat | **Beneficiary cards (existing)** — List; `BENEFICIARY_MATCH` shows one card with **Send** → the transfer box (U8) for the type in `payload.destination` / `routing.action` (`own_bank_transfer`, `other_bank_transfer`, `wallet_transfer` + provider, or manual); several matches use the beneficiary picker. | See text | None | — |
+| 14.20 | Beneficiary — add | Executed in chat | U1 asks for name and account number (bank details for another bank) → **U6** (name, account ending, bank) → done notice | Yes / No | None | The bot makes the call after Yes |
+| 14.21 | Beneficiary — edit | App action → inline box | **U8** box: Form: beneficiary (preselected by name), nickname field. After the button: None. | Save | `nickname` (from `ui.prefill`) | App calls `PATCH beneficiary/v1/beneficiaries/{id}` with `nickname` (only the nickname is editable); shows a local done/failed tile |
+| 14.22 | Beneficiary — delete | App action → inline box | **U8** box: Confirm card with the beneficiary's name and masked account. After the button: None. | Delete · Keep | None (from `ui.prefill`) | App calls `DELETE beneficiary/v1/beneficiaries/{id}`; shows a local done/failed tile |
+| 14.23 | Beneficiary — upload/change photo | App action → inline box | **U8** box: Beneficiary (preselected) with a photo area. After the button: None. | Choose photo · Remove photo · Save | None (from `ui.prefill`) | App calls `PATCH beneficiary/v1/beneficiaries/{id}/photo` (multipart) · `DELETE .../photo`; shows a local done/failed tile |
+| 14.24 | Beneficiary — remove photo | App action → inline box | **U8** box: Beneficiary (preselected) with a photo area. After the button: None. | Choose photo · Remove photo · Save | None (from `ui.prefill`) | App calls `PATCH beneficiary/v1/beneficiaries/{id}/photo` (multipart) · `DELETE .../photo`; shows a local done/failed tile |
+| 14.25 | Beneficiary — pin/unpin | App action → inline box | **U8** box: Beneficiary list with a pin switch each (list pinning, not a security PIN). After the button: None. | Pin switch | None (from `ui.prefill`) | App calls `PATCH beneficiary/v1/beneficiaries/{id}/pin` with `pinned`; shows a local done/failed tile |
+| 14.27 | My transfer limit — get | Answered in chat | **U3 limits** — Transfer limits (daily/monthly) as bars; unset values show "Not set". | None | None | — |
+| 14.28 | My transfer limit — request change | App action → inline box | **U8** box: Account picker and the new limit, or the pending request. After the button: U7: code + transaction PIN. | Submit · Cancel pending request | `newLimit` (from `ui.prefill`) | App calls `PUT transfer/v1/my-limit/{accountIdentifier}` · `DELETE transfer/v1/my-limit/pending/{requestId}`; shows a local done/failed tile |
+| 14.29 | My transfer limit — cancel pending change | App action → inline box | **U8** box: Account picker and the new limit, or the pending request. After the button: U7: code + transaction PIN. | Submit · Cancel pending request | `newLimit` (from `ui.prefill`) | App calls `PUT transfer/v1/my-limit/{accountIdentifier}` · `DELETE transfer/v1/my-limit/pending/{requestId}`; shows a local done/failed tile |
+
+<!-- UI-TO-BUILD:END -->
+
 ## How to trigger
 
 Live-tested: "send money" (→ "Where do you want to send the money?"),

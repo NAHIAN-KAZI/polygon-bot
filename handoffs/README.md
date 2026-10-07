@@ -58,3 +58,7 @@ the shared Dart client used by every snippet below.
 
 Every handoff was checked against live `result` events captured on
 2026-10-03 (dev user `taslim_islamic`, `experiments/capture_payloads.py`).
+
+## UI to build
+
+`COMMON.md` §11 defines the UI building blocks (U1–U11) and lists what the backend does not provide yet. Every intent file has a table **"UI to build, use case by use case"**: for each use case, what the customer sees, the buttons, and what is prefilled into which screen. Build from those tables; drive every block from `result.type`, `category`, `service`, `routing` and `payload`, never from the bubble text.

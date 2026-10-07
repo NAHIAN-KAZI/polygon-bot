@@ -15,6 +15,19 @@ Read `COMMON.md` first.
 Any transactions/statement/spending ask goes to `transaction_history`; the bot
 then checks which account (asks if several).
 
+<!-- UI-TO-BUILD:START -->
+## UI to build, use case by use case
+
+Blocks U1–U11 are defined in `COMMON.md` §11. The customer finishes everything inside the chat, as with the nickname and email change. Drive every block from `result.type`/`category`/`service`/`routing`/`payload`, never from bubble text.
+
+| # | Use case | Outcome | What the customer sees | Buttons | Prefilled from | Calls / notes |
+|---|---|---|---|---|---|---|
+| 13.1 | Transaction list | Answered in chat | **U4** — Transaction list (U5 first if several accounts). | None | None | — |
+| 13.2 | Account transactions | Answered in chat | **U4** — Same as 13.1. | None | None | — |
+| 13.3 | Credit card statement | Answered in chat | **U3/U2 statement** — Billed or unbilled statement with its transactions. | None | None | — |
+
+<!-- UI-TO-BUILD:END -->
+
 ## How to trigger
 
 Live-tested: "statement", "trnsactions", "Hello team, … Please show my latest
