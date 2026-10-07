@@ -147,11 +147,13 @@ def test_other_results_pass_through_without_a_model_call(monkeypatch, result):
     assert prompts == []
 
 
-def test_long_digit_runs_are_masked_in_the_prompt(monkeypatch):
-    prompts = _model(monkeypatch, None)
-    _ground(_bank({"accountNumber": "999"}), "send 500 from 2001000011112222 please")
-    assert "2001000011112222" not in prompts[0]
-    assert "••••••••••••2222" in prompts[0]
+def test_prompt_shows_the_real_message_so_the_models_quote_can_be_matched(monkeypatch):
+    """Live: masked, the model quoted "nagad •••••••3786", which never matched the message, so
+    the wallet type was dropped from "send 1.5k to nagad 01719093786"."""
+    prompts = _model(monkeypatch, "nagad 01719093786")
+    result = _ground(_wallet(sub="nagad"), "send 1.5k to nagad 01719093786")
+    assert "01719093786" in prompts[0] and "••" not in prompts[0]
+    assert result.subservice == "nagad"  # the quote with the number is grounded
 
 
 def test_the_transfer_keys_are_the_two_transfer_services():

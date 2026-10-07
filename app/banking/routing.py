@@ -534,7 +534,43 @@ async def _post_classification(messages: list[dict]) -> list[dict]:
         )
         resp.raise_for_status()
         data = resp.json()
-    return data.get("message", {}).get("tool_calls") or []
+    message = data.get("message", {})
+    return message.get("tool_calls") or _tool_call_from_text(message.get("content"))
+
+
+_TOOL_NAMES = ("route_banking_service", "ask_clarification", "answer_kb_question")
+
+
+def _tool_call_from_text(content: str | None) -> list[dict]:
+    """llama3.1 sometimes writes its tool call as JSON text in the message instead of a tool call
+    -- and often leaves off the closing brace(s), so Ollama can't parse it (live: "send 12500 to
+    bkash 0152..." came back as a correct route that was thrown away, twice, and the customer got
+    the fallback question). Recover it: parse the JSON (closing missing braces), and accept only
+    one of our three tools. Anything else is not a tool call."""
+    text = (content or "").strip()
+    if not text.startswith("{"):
+        return []
+    depth, in_string, escaped = 0, False, False
+    for ch in text:
+        if in_string:
+            escaped = (ch == "\\") and not escaped
+            if ch == '"' and not escaped:
+                in_string = False
+        elif ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+    candidate = text + "}" * max(0, min(depth, 4))
+    try:
+        call = json.loads(candidate)
+    except ValueError:
+        return []
+    if not isinstance(call, dict) or call.get("name") not in _TOOL_NAMES:
+        return []
+    arguments = call.get("parameters", call.get("arguments"))
+    return [{"function": {"name": call["name"], "arguments": arguments if isinstance(arguments, dict) else {}}}]
 
 
 class _Domain(str):
@@ -728,12 +764,14 @@ async def _classify_scoped(
                 "content": (
                     "PREVIOUS ANSWERED REQUEST: the customer's last message "
                     f'"{last_turn.message}" was answered as route_banking_service({prev}) with '
-                    f"payload {details}. If the new message is a short follow-up that only "
-                    "changes or adds a detail of that same request (another provider, bank or "
-                    "amount, \"and for X?\", \"what about Y?\"), call "
-                    f"route_banking_service({prev}) with ONLY the changed/added details in "
+                    f"payload {details}. Treat the new message as a follow-up ONLY when it asks "
+                    "for nothing of its own and just changes or adds a detail of that same "
+                    "request (another provider, bank, amount or date; a phrase like \"and for X?\"). "
+                    f"Then call route_banking_service({prev}) with ONLY the changed/added details in "
                     "payload. " + _send_after_fee_hint(last_classification)
-                    + "Otherwise ignore this and classify the new message on its own."
+                    + "A message that asks for something — even in the same area (a complaint after "
+                    "a dispute, a different card action, a lookup after an action) — is a NEW "
+                    "request: classify it on its own."
                 ),
             })
         elif last_classification.get("type") == "ACCOUNT_SELECTION_REQUIRED":

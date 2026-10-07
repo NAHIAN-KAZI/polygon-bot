@@ -2153,7 +2153,8 @@ def test_fees_fee_quote_payload_none_yields_clarification_without_calling_adapte
     assert result_event["category"] is None
     assert result_event["service"] is None
     assert result_event["subservice"] is None
-    assert result_event["payload"] is None
+    assert result_event["payload"] == {"pending": {"category": "fees", "service": "fee_quote", "subservice": None,
+                                                   "missingFields": ["transactionType", "amount"]}}
     assert result_event["routing"] is None
 
 
@@ -2402,7 +2403,8 @@ def test_transfer_bank_transfer_missing_amount_asks_for_amount_naming_account(cl
 
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "CLARIFICATION_REQUIRED"
-    assert result_event["payload"] is None
+    assert result_event["payload"] == {"pending": {"category": "transfer", "service": "bank_transfer",
+                                                   "subservice": "other_bank", "missingFields": ["amount"]}}
     assert result_event["routing"] is None
 
 

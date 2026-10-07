@@ -500,6 +500,13 @@ def _service_name(category: str | None, service: str | None) -> str:
     return str(service or "that service").replace("_", " ")
 
 
+def _pending_payload(category: str, service: str, subservice: str | None, missing_fields: list[str]) -> dict:
+    """`payload.pending` of a missing-field CLARIFICATION_REQUIRED: the request being filled in and
+    the fields still missing (field names only, never values)."""
+    return {"pending": {"category": category, "service": service, "subservice": subservice,
+                        "missingFields": list(missing_fields)}}
+
+
 def _service_unavailable(category, service, subservice) -> _TurnOutcome:
     changes = ((category, service) in _CONFIRM_CHANGE_KEYS or (category, service) == _FREEZE_KEY
                or category in ("profile_update", "beneficiary_management", "support"))
@@ -1115,6 +1122,11 @@ async def _llm_fill_pending_fields(recent_turns: list[ChatTurn], message: str) -
         required = _REQUIRED_PAYLOAD_FIELDS.get(key)
         if not required or key in _NO_FOLLOW_UP_KEYS:
             return None
+        # A request whose destination TYPE is part of it (a bkash vs nagad transfer, a bank vs a
+        # wallet) is never a "detail change" of the last one: filling the old subservice made
+        # "send 750 to nagad 0173..." come back as bkash. Those go to classify() as new requests.
+        if last.get("subservice"):
+            return None
         last = {**last, "missingFields": list(required), "payload": last.get("request") or {},
                 "question": f"(follow-up to their last request: {_service_name(*key)})"}
     elif last.get("type") != "CLARIFICATION_REQUIRED":
@@ -1125,6 +1137,8 @@ async def _llm_fill_pending_fields(recent_turns: list[ChatTurn], message: str) -
     return await _fill_fields(key, last.get("subservice"), dict(last.get("payload") or {}), fields,
                               str(last.get("question")), message)
 
+
+_NUMBER_FIELDS = ("accountNumber", "walletNumber", "recipientMobile", "toAccount")
 
 # Fields that are free text in the customer's own words: a value must come from what they wrote.
 _OWN_WORDS_FIELDS = ("remarks", "reason", "description", "nickname", "nickName")
@@ -1160,6 +1174,11 @@ async def _fill_fields(key: tuple, subservice, payload: dict, fields: list[str],
     a live id, a wallet was named, an amount is a number they wrote times a power of ten, free
     text comes from their own words). Nothing filled -> None."""
     valid_types = fee_transaction_types() if "transactionType" in fields else []
+    # Long digit runs are masked before the model sees them -- except when the missing detail IS
+    # the number the customer typed (a recipient account or wallet number): masked, the model
+    # copied "rocket •••••••9099" back. Open code/PIN steps are handled before this runs.
+    wants_number = any(f in _NUMBER_FIELDS for f in fields)
+    shown = message if wants_number else _LONG_DIGITS_RE.sub(_mask_digit_run, message)
     lines = []
     for field in fields:
         line = f'- "{field}": {_CLARIFICATION_FIELD_DESCRIPTIONS.get(field, field)}'
@@ -1171,7 +1190,7 @@ async def _fill_fields(key: tuple, subservice, payload: dict, fields: list[str],
     prompt = (
         f"A bank chat assistant asked the customer: \"{question}\"\n"
         "It needs these details:\n" + "\n".join(lines) + "\n\n"
-        f"The customer replied: \"{_LONG_DIGITS_RE.sub(_mask_digit_run, message)}\"\n\n"
+        f"The customer replied: \"{shown}\"\n\n"
         "Fill ONLY the details the reply actually gives; leave out anything it doesn't. "
         "If the reply is about something else entirely, return {}. "
         "Respond only with a JSON object of the filled details."
@@ -1438,7 +1457,7 @@ async def _ground_transfer_destination(result, message: str):
         if len(digits) >= 6 and digits in wrote_digits:
             return result
     prompt = (
-        f'A bank customer wrote: "{_LONG_DIGITS_RE.sub(_mask_digit_run, message)}"\n\n'
+        f'A bank customer wrote: "{message}"\n\n'
         "Copy, exactly as written, the words in which the customer says WHERE the money should go "
         "(a bank, a mobile wallet, a person, another account of theirs). Use null when the message "
         "does not say where it goes.\n"
@@ -1487,7 +1506,7 @@ async def _ground_requested_action(result, message: str):
     if (result.payload or {}).get("cardId") or (result.payload or {}).get("reason") or (result.payload or {}).get("nickName"):
         return result  # they already gave specifics of the request
     prompt = (
-        f'A bank customer wrote: "{_LONG_DIGITS_RE.sub(_mask_digit_run, message)}"\n\n'
+        f'A bank customer wrote: "{message}"\n\n'
         "Copy, exactly as written, (1) the words that say what they want DONE (an action, such as "
         "freeze, close, cancel, apply, change, pay, reset) and (2) the words naming WHAT it is for "
         "(the card, account, limit, beneficiary, PIN...). Use null for any part the message does not "
@@ -2950,7 +2969,10 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                     clarification_question = await say_text(
                         _ask_say(category, service, subservice, payload, missing_fields))
                     yield _sse("token", {"token": clarification_question})
-                    yield _result_event("CLARIFICATION_REQUIRED", None, None, None)
+                    # What is being asked for, so the app can show a box for it (a complaint or
+                    # dispute text box, an amount field...). Optional for the app: absent = plain chat.
+                    yield _result_event("CLARIFICATION_REQUIRED", None, None, None,
+                                        payload=_pending_payload(category, service, subservice, missing_fields))
                     turn_classification = {
                         "type": "CLARIFICATION_REQUIRED",
                         "category": category,

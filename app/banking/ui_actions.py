@@ -124,7 +124,7 @@ _LIST = [
        [("reason", "why they want it changed")]),
     # ---- transfers and money ------------------------------------------------------------------
     _a("cash_by_code", "Cash by code", "transfers", "screen",
-       "send cash by code (a code the recipient uses to withdraw) or withdraw cash using a code",
+       "send cash by code (a code the recipient uses to withdraw) or withdraw cash using a code; only when a code or a cash pickup is mentioned, not for an ordinary transfer",
        "choose the account, the recipient's mobile number, the amount and how the code is delivered, then confirm with a one-time code and transaction PIN",
        ["2.1"], "CashByCodeScreen", "/cash_by_code",
        [("amount", "amount in taka"), ("recipientMobile", "the recipient's mobile number")]),

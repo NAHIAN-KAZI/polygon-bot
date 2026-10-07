@@ -190,10 +190,13 @@ def test_domain_of_finds_the_services_domain():
     assert chat_module._domain_of(("nope", "nope")) is None
 
 
-def test_prompt_masks_long_digit_runs(monkeypatch):
-    prompts = _model(monkeypatch, "close", "card")
-    _ground(_freeze(), "close card 4001230000000251")
-    assert "4001230000000251" not in prompts[0] and "••••••••••••0251" in prompts[0]
+def test_prompt_shows_the_real_message_so_the_models_quote_can_be_matched(monkeypatch):
+    """A masked message made the model quote "card ••••0251", which can never match what the
+    customer wrote, so every action with a card number was turned into a question."""
+    prompts = _model(monkeypatch, "close", "card 4001230000000251")
+    result = _ground(_freeze(), "close card 4001230000000251")
+    assert "4001230000000251" in prompts[0] and "••" not in prompts[0]
+    assert isinstance(result, BankingService)  # the quote with the number is grounded
 
 
 def test_render_taxonomy_lists_the_app_actions_before_other_categories():

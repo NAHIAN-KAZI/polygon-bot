@@ -73,9 +73,10 @@ KIND_PURPOSE = {
     "caution": "Explain the serious, irreversible consequence in the facts clearly and "
                "kindly before they continue, and the gentler alternative if one is given.",
     "clarify": "You're not sure what the customer wants. Ask one short, friendly question "
-               "about it, using what they said. When the facts list what they could mean, "
-               "name those options in plain words; otherwise offer a few things you can "
-               "help with.",
+               "about it, using only what their latest message contains. When the facts list "
+               "what they could mean, name those options in plain words; otherwise offer a few "
+               "things you can help with. If the message is only a greeting, greet them back "
+               "and say what you can help with.",
     "greet": "Greet the customer back (by first name if given) and say briefly what you "
              "can help with, from the services in the facts.",
     "smalltalk": "Respond briefly and kindly to their message, then offer help with their "
