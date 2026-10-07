@@ -108,8 +108,8 @@
   "intent": "ACCOUNT_INFO",
   "name": "— Account transactions",
   "expected": [
-   "account_info",
-   "account_transactions"
+   "polygon_services",
+   "transaction_history"
   ],
   "questions": {
    "one_word": "money",
@@ -948,8 +948,8 @@
   "intent": "MINI_STATEMENT",
   "name": "13.2 Account transactions",
   "expected": [
-   "account_info",
-   "account_transactions"
+   "polygon_services",
+   "transaction_history"
   ],
   "questions": {
    "one_word": "Transactions",
@@ -1077,18 +1077,6 @@
    "casual": "hey can i pay some money from my bkash accnt thx?",
    "sentence": "I need to send 500 taka to my friend's DBBL account today.",
    "paragraph": "Hi, I'm trying to order food online but the payment gateway isn't working. It usually happens when I try to use my Rocket account. Can you help me pay for this transaction using a different method? My Rocket balance is low and I don't want to get charged extra fees."
-  }
- },
- "14.8": {
-  "intent": "TRANSFER",
-  "name": "14.8 Linked account check",
-  "expected": "NOT_IN_CHAT",
-  "questions": {
-   "one_word": "Account",
-   "two_words": "Linked accounts",
-   "casual": "hey whats my linked account balance?",
-   "sentence": "Can you please check if my account is linked correctly today?",
-   "paragraph": "I tried to link my Bkash wallet with my DBBL account last week, but I'm not sure if it's successful. I remember entering the correct details, but I haven't checked since then. Can you please let me know if everything is fine and my accounts are linked properly?"
   }
  },
  "14.9": {

@@ -89,6 +89,20 @@ def _no_generated_clarifications(monkeypatch):
 
     monkeypatch.setattr(chat_module, "_fill_known_from_message", _unchanged)
 
+    # Checking that a transfer's destination was actually written is a model call too: off
+    # by default (the classification stands); tests of it capture the real function.
+    async def _destination_ok(result, message):
+        return result
+
+    monkeypatch.setattr(chat_module, "_ground_transfer_destination", _destination_ok)
+
+    # Checking that a request names both an action and what it is for is a model call too:
+    # off by default (the classification stands); tests of it capture the real function.
+    async def _action_ok(result, message):
+        return result
+
+    monkeypatch.setattr(chat_module, "_ground_requested_action", _action_ok)
+
     # Telling "unfreeze" apart from "freeze" is a model call: off by default (never an
     # undo request); tests of it patch httpx or this function explicitly.
     async def _no_undo(messages):

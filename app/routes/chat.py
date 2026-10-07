@@ -25,11 +25,14 @@ from app.banking.adapters.base import (
 from app.banking.identity import extract_jwt, verify_jwt
 from app.banking.routing import (
     AMOUNT_GUIDANCE,
+    DOMAINS,
     SERVICE_DESCRIPTIONS,
     BankingService,
     Clarification,
     KbQuestion,
     UnknownService,
+    _DO_KEYS as routing_do_keys_set,
+    _option_names as routing_option_names,
     _subservice_ids,
     classify,
     fee_transaction_types,
@@ -856,6 +859,7 @@ def _ui_prefill(action: "ui_actions.UiAction", payload: dict | None, message: st
     text is in their own words). Anything else the classifier guessed is dropped."""
     out: dict = {}
     wrote_digits = re.sub(r"\D", "", message or "")
+    wrote_numbers = re.findall(r"\d+", message or "")
     for field, _meaning in action.prefill:
         value = (payload or {}).get(field)
         if value in (None, "", [], {}):
@@ -867,7 +871,10 @@ def _ui_prefill(action: "ui_actions.UiAction", payload: dict | None, message: st
         elif field.endswith("Last4") or field == "recipientMobile":
             digits = re.sub(r"\D", "", text)
             digits = digits[-4:] if field.endswith("Last4") else digits
-            if not digits or digits not in wrote_digits:
+            if field.endswith("Last4"):  # the end of a number they wrote (the card's last digits)
+                if not digits or not any(run.endswith(digits) for run in wrote_numbers):
+                    continue
+            elif not digits or digits not in wrote_digits:
                 continue
             value = digits
         elif not _grounded(text, message):
@@ -1411,6 +1418,102 @@ async def _freeze_request_facts(messages: list[str]) -> tuple[str | None, str | 
     )
 
 
+_TRANSFER_KEYS = (("transfer", "bank_transfer"), ("transfer", "wallet_transfer"))
+
+
+async def _ground_transfer_destination(result, message: str):
+    """A transfer's destination type (own account, Polygon Bank account, other bank, a wallet
+    provider) must come from words the customer wrote. Live: a bare "send money" was routed
+    to a guessed type and answered as "you only have one account". The model extracts the
+    customer's own words about where the money goes (a quote, checked against the message);
+    with none, the type is dropped and the bot asks where to send it. A destination number
+    they gave counts as saying it."""
+    if not (isinstance(result, BankingService) and (result.category, result.service) in _TRANSFER_KEYS
+            and result.subservice):
+        return result
+    payload = result.payload or {}
+    wrote_digits = re.sub(r"\D", "", message or "")
+    for field in ("accountNumber", "walletNumber"):
+        digits = re.sub(r"\D", "", str(payload.get(field) or ""))
+        if len(digits) >= 6 and digits in wrote_digits:
+            return result
+    prompt = (
+        f'A bank customer wrote: "{_LONG_DIGITS_RE.sub(_mask_digit_run, message)}"\n\n'
+        "Copy, exactly as written, the words in which the customer says WHERE the money should go "
+        "(a bank, a mobile wallet, a person, another account of theirs). Use null when the message "
+        "does not say where it goes.\n"
+        'Reply only with JSON: {"destination": "<words>" or null}'
+    )
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.post(
+                f"{settings.OLLAMA_BASE_URL}/api/generate",
+                json={"model": settings.OLLAMA_MODEL, "prompt": prompt, "stream": False, "format": "json",
+                      "think": settings.OLLAMA_THINK,
+                      "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0}},
+            )
+            resp.raise_for_status()
+            parsed = json.loads(resp.json().get("response") or "{}")
+    except Exception:
+        return result  # can't check: keep the classifier's choice rather than block the customer
+    said = _grounded(_quoted(parsed.get("destination") if isinstance(parsed, dict) else None), message)
+    if said:
+        return result
+    return BankingService(result.category, result.service, None, result.payload)
+
+
+# Requests that DO something to an account, card or profile. A transfer's destination is checked
+# separately (_ground_transfer_destination); a complaint or dispute may be just the word.
+_ACT_KEYS = frozenset(k for k in routing_do_keys_set if k not in (
+    ("transfer", "bank_transfer"), ("transfer", "wallet_transfer"), ("polygon_services", "beneficiary"),
+    ("support", "submit_complaint"), ("service_requests", "raise_dispute")))
+
+
+def _domain_of(key: tuple[str, str]) -> str | None:
+    for domain, (_desc, keys) in DOMAINS.items():
+        if key in keys:
+            return domain
+    return None
+
+
+async def _ground_requested_action(result, message: str):
+    """Doing something to the customer's card, account or profile needs the customer to have
+    asked for it: words for WHAT to do and to WHAT. A bare "Card", "Cancel" or "Pay" used to
+    start a card freeze, a card closing or a beneficiary edit. The model extracts both as quotes
+    (checked against the message); if either is missing the bot asks what they want, offering
+    what it can do for that kind of request. A model failure keeps the classifier's choice."""
+    if not (isinstance(result, BankingService) and (result.category, result.service) in _ACT_KEYS):
+        return result
+    if (result.payload or {}).get("cardId") or (result.payload or {}).get("reason") or (result.payload or {}).get("nickName"):
+        return result  # they already gave specifics of the request
+    prompt = (
+        f'A bank customer wrote: "{_LONG_DIGITS_RE.sub(_mask_digit_run, message)}"\n\n'
+        "Copy, exactly as written, (1) the words that say what they want DONE (an action, such as "
+        "freeze, close, cancel, apply, change, pay, reset) and (2) the words naming WHAT it is for "
+        "(the card, account, limit, beneficiary, PIN...). Use null for any part the message does not "
+        "contain; a message that only names a thing, or only says an action word, has a null part.\n"
+        'Reply only with JSON: {"action": "<words>" or null, "object": "<words>" or null}'
+    )
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.post(
+                f"{settings.OLLAMA_BASE_URL}/api/generate",
+                json={"model": settings.OLLAMA_MODEL, "prompt": prompt, "stream": False, "format": "json",
+                      "think": settings.OLLAMA_THINK,
+                      "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0}},
+            )
+            resp.raise_for_status()
+            parsed = json.loads(resp.json().get("response") or "{}")
+    except Exception:
+        return result
+    parsed = parsed if isinstance(parsed, dict) else {}
+    if _grounded(_quoted(parsed.get("action")), message) and _grounded(_quoted(parsed.get("object")), message):
+        return result
+    domain = _domain_of((result.category, result.service))
+    options = routing_option_names(DOMAINS[domain][1] & _ACT_KEYS) if domain else ()
+    return Clarification("what they want to do (the message does not say both what to do and what it is for)", options)
+
+
 async def _undo_request(messages: list[str]) -> str | None:
     """The customer's own words asking for a blocked card to be made usable again
     (unfreeze, unblock, reactivate, release), or None. The bank's service is named
@@ -1822,7 +1925,8 @@ def _accounts_for_prompt(data: dict) -> dict:
     return {**data, "data": view}
 
 
-def _reply_prompt(message: str, service: str, subservice: str | None, data: dict) -> tuple[list[dict], str, dict]:
+def _reply_prompt(message: str, service: str, subservice: str | None, data: dict,
+                  retry_reason: str | None = None) -> tuple[list[dict], str, dict]:
     """(chat messages, data_json, redacted) for the data-answering reply -- shared by the
     streamed and non-streamed paths so both send the model the identical prompt."""
     if (subservice or service) == "accounts":
@@ -1835,7 +1939,7 @@ def _reply_prompt(message: str, service: str, subservice: str | None, data: dict
                            separators=(",", ":"))
     messages = build_messages(
         "answer", {"what you know about their account": _compact_for_prompt(redacted)},
-        message, None, {})
+        message, None, {}, retry_reason)
     return messages, data_json, redacted
 
 
@@ -1849,8 +1953,11 @@ async def _synthesize_reply(message: str, service: str, subservice: str | None, 
         text = await generate_chat(messages, temperature)
         if text is None:
             break
-        if text and check_reply(text, data_json, {}) is None:
+        reason = check_reply(text, data_json, {})
+        if reason is None:
             return text
+        # Retry knowing what was wrong (a number that isn't in the data, markdown, ...).
+        messages, _, _ = _reply_prompt(message, service, subservice, data, reason)
     return _data_fallback(redacted)
 
 
@@ -1965,7 +2072,7 @@ def _data_fallback(data) -> str:
     if isinstance(data, dict):
         for key, value in data.items():
             if isinstance(value, list):
-                flat[key] = f"{len(value)} item(s)"
+                flat[key] = "none" if not value else f"{len(value)} found"
             elif not isinstance(value, dict):
                 flat[key] = value
     return facts_listing(flat)
@@ -2224,11 +2331,22 @@ async def _kb_stream(req: ChatRequest, request_id: str):
 _REDACTED_SUBMISSION = "[redacted: verification submission]"
 
 
+_OPEN_QUESTION_TYPES = ("CLARIFICATION_REQUIRED", "CONFIRMATION_REQUIRED", "OTP_REQUIRED",
+                        "ACCOUNT_SELECTION_REQUIRED", "TRANSACTION_SELECTION_REQUIRED",
+                        "BENEFICIARY_SELECTION_REQUIRED")
+
+
 def _history(turns: list[ChatTurn] | None) -> list[tuple[str, str]]:
-    """Recent conversation for the composer: what the customer said and what the
-    assistant asked/said, oldest first. Verification submissions are never included."""
+    """Recent conversation for the composer, oldest first -- but only while a question is
+    open (the customer is answering something we asked). Once a topic is finished, earlier
+    turns are left out: the 8B kept dragging them into unrelated replies (a "Hi" got a
+    comment on last turn's transfer limit). Routing has its own context for follow-ups
+    like "and for nagad?", and the composer always gets fresh facts. Verification
+    submissions are never included."""
+    if not turns or (turns[-1].classification or {}).get("type") not in _OPEN_QUESTION_TYPES:
+        return []
     out: list[tuple[str, str]] = []
-    for turn in (turns or [])[-3:]:
+    for turn in turns[-2:]:
         if turn.message and not turn.message.startswith("[redacted"):
             out.append(("Customer", turn.message))
         said = (turn.classification or {}).get("question")
@@ -2591,6 +2709,8 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
             result = _carry_forward_gathered(result, classify_context)
             result = await _ground_freeze_request(result, req.message, recent_turns)
             result = _normalize_fee_type(result, req.message)
+            result = await _ground_transfer_destination(result, req.message)
+            result = await _ground_requested_action(result, req.message)
             result = await _fill_known_from_message(result, req.message)
 
     result = _clean_extracted_fields(result)

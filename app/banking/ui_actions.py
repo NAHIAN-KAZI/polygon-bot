@@ -171,7 +171,7 @@ _LIST = [
        [("newLimit", "the new limit in taka")]),
     # ---- no backend ---------------------------------------------------------------------------
     _a("qr_payment_cards", "QR payment cards", "cards", "unavailable",
-       "see or switch on/off the cards used for QR payments",
+       "see, list or switch on/off the cards used for QR payments (the QR payment card settings; the bank's card products are a different thing)",
        "QR payment card settings are not available at the moment",
        ["4.22", "4.23"]),
     _a("other_banks_list", "List of other banks", "transfers", "unavailable",

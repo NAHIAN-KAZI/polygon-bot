@@ -124,7 +124,7 @@ SERVICE_DESCRIPTIONS: dict[tuple[str, str], tuple[str, tuple[str, ...]]] = {
         ("startDate", "endDate"),
     ),
     ("polygon_services", "beneficiary"): (
-        'send money to a saved beneficiary by their name, or list the saved beneficiaries',
+        'send money to a saved beneficiary by their name, or list the saved beneficiaries (not editing, deleting, pinning or changing the photo of one)',
         ("nameQuery", "amount"),
     ),
     ("beneficiary_management", "beneficiary_add"): (
@@ -142,8 +142,7 @@ SERVICE_DESCRIPTIONS: dict[tuple[str, str], tuple[str, tuple[str, ...]]] = {
     # It stays in the taxonomy for explicit category+service requests.
     ("card_info", "card_limit_requests"): ('view the status of limit-change requests the customer has already submitted (it only shows existing requests)', ()),
     ("card_info", "card_products"): (
-        "which cards the bank offers: any question about the card types/products available "
-        "(not general knowledge — this bank's own live catalog)",
+        "which cards the bank offers: any question about the card types and products available from this bank's live catalog (not the cards used for QR payments, and not applying for one)",
         (),
     ),
     ("card_info", "virtual_card_requests"): ('view the status of virtual-card requests the customer has already submitted (it only shows existing requests)', ()),
@@ -161,11 +160,11 @@ SERVICE_DESCRIPTIONS: dict[tuple[str, str], tuple[str, tuple[str, ...]]] = {
     ("profile", "contacts"): ('the phone numbers and email addresses registered for the customer (which numbers or emails are on their account)', ()),
     ("profile", "profile_change_requests"): ('view the status of profile-change requests the customer has already submitted (it only shows existing requests)', ()),
     ("profile", "contact_priority_requests"): ('view the status of primary-contact change requests the customer has already submitted (it only shows existing requests)', ()),
-    ("transfer_info", "gifts_received"): ("money gifts the customer has RECEIVED from others (incoming only, never sending)", ()),
-    ("transfer_info", "email_transfers"): ("history/status of their email transfers", ()),
-    ("transfer_info", "qr_payment_history"): ("history of their QR payments", ()),
+    ("transfer_info", "gifts_received"): ('view the gifts the customer has received (information only, not sending one)', ()),
+    ("transfer_info", "email_transfers"): ('view the email transfers the customer has sent or received and their status or details (information only, not creating, cancelling or resending one)', ()),
+    ("transfer_info", "qr_payment_history"): ('view the history of QR payments the customer has already made (information only, not making one)', ()),
     ("transfer_info", "transfer_limit"): (
-        "their transfer limits (daily/weekly/per-transaction) and remaining amount",
+        "view the customer's current transfer limits and any pending limit change (information only, not requesting or cancelling a change)",
         (),
     ),
     ("service_requests", "raise_dispute"): (
@@ -206,16 +205,11 @@ SERVICE_DESCRIPTIONS: dict[tuple[str, str], tuple[str, tuple[str, ...]]] = {
         ("transactionType", "amount"),
     ),
     ("transfer", "bank_transfer"): (
-        "send/transfer money; subservice required: own_account = moving money between the "
-        "customer's OWN accounts (their other account, between their accounts; which "
-        "account is looked up for them, so route even with no account number); "
-        "other_bank = to an account at ANY bank other than Polygon Bank (whenever a bank "
-        "name or abbreviation is mentioned); city_account = to someone else's account at "
-        "Polygon Bank itself",
+        "send or transfer money to a bank account. A subservice is required and comes from what the customer said: own_account when they move money between their OWN accounts (one of their accounts to another of theirs); city_account when the recipient holds an account at Polygon Bank and is not the customer; other_bank when the recipient's account is at any other bank (a bank name or abbreviation is mentioned). When the message says nothing about where the money goes, leave the subservice out and ask where to send it",
         ("accountNumber", "amount"),
     ),
     ("transfer", "wallet_transfer"): (
-        "send to a mobile wallet number (subservice = provider)",
+        'send money to a mobile wallet; the subservice is the wallet provider the customer named, even when no wallet number is given yet',
         ("walletNumber", "amount"),
     ),
     ("card_services", "frezz_unfrezz"): (
@@ -332,7 +326,10 @@ def _render_taxonomy(
     """
     supported = []
     other = []
-    for category in taxonomy.get("categories", []):
+    # The "do something in the app" services are listed first, so they get the same attention as
+    # the lookups they are often confused with (stable sort: everything else keeps its order).
+    categories = sorted(taxonomy.get("categories", []), key=lambda c: c.get("id") != ui_actions.CATEGORY)
+    for category in categories:
         described_lines = []
         other_services = []
         for service in category.get("services", []):

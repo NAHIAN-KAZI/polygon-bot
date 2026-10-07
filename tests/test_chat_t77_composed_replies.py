@@ -202,16 +202,111 @@ def test_composer_sees_ordinary_text_as_is():
     assert chat_module._safe_for_model("what is my balance", None) == "what is my balance"
 
 
-def test_history_is_recent_and_skips_verification_submissions():
-    turns = [
-        ChatTurn(timestamp=None, message="old", classification={"question": "old q"}),
-        ChatTurn(timestamp=None, message="freeze my card", classification={"question": "Enter the code"}),
-        ChatTurn(timestamp=None, message="[redacted: verification submission]", classification={"question": ""}),
-        ChatTurn(timestamp=None, message="balance", classification=None),
-    ]
-    assert chat_module._history(turns) == [
-        ("Customer", "freeze my card"), ("Assistant", "Enter the code"), ("Customer", "balance")]
+def _turn(message, **classification):
+    return ChatTurn(timestamp=None, message=message, classification=classification or None)
+
+
+def test_history_is_empty_for_nothing_or_no_turns():
     assert chat_module._history(None) == []
+    assert chat_module._history([]) == []
+
+
+@pytest.mark.parametrize("answered", [
+    {"type": "BANKING_SERVICE", "question": "an old question"},
+    {"type": "AUTH_REQUIRED"}, {"type": "SERVICE_UNAVAILABLE"}, {"type": "UNKNOWN_SERVICE"},
+    {"type": "BENEFICIARY_MATCH"}, {},
+])
+def test_history_is_empty_once_the_topic_is_finished(answered):
+    turns = [_turn("freeze my card", type="CONFIRMATION_REQUIRED", question="Shall I?"),
+             _turn("what is my balance", **answered)]
+    assert chat_module._history(turns) == []
+
+
+def test_history_is_empty_when_the_last_turn_has_no_classification():
+    assert chat_module._history([_turn("open q", type="CLARIFICATION_REQUIRED", question="?"),
+                                 ChatTurn(timestamp=None, message="what is a DPS", classification=None)]) == []
+
+
+@pytest.mark.parametrize("open_type", [
+    "CLARIFICATION_REQUIRED", "CONFIRMATION_REQUIRED", "OTP_REQUIRED", "ACCOUNT_SELECTION_REQUIRED",
+    "TRANSACTION_SELECTION_REQUIRED", "BENEFICIARY_SELECTION_REQUIRED",
+])
+def test_history_while_a_question_is_open_is_the_last_two_turns_with_the_question(open_type):
+    turns = [_turn("older topic", type="BANKING_SERVICE", question="old q"),
+             _turn("send money", type="CLARIFICATION_REQUIRED", question="To whom?"),
+             _turn("to Rahim", type=open_type, question="Which Rahim?")]
+    assert chat_module._history(turns) == [
+        ("Customer", "send money"), ("Assistant", "To whom?"),
+        ("Customer", "to Rahim"), ("Assistant", "Which Rahim?")]
+
+
+def test_history_skips_verification_submissions_even_while_open():
+    turns = [_turn("freeze my card", type="CONFIRMATION_REQUIRED", question="Shall I?"),
+             _turn("[redacted: verification submission]", type="OTP_REQUIRED", question="Enter the code")]
+    assert chat_module._history(turns) == [
+        ("Customer", "freeze my card"), ("Assistant", "Shall I?"), ("Assistant", "Enter the code")]
+
+
+def test_history_with_a_single_open_turn():
+    assert chat_module._history([_turn("hmm", type="CLARIFICATION_REQUIRED", question="What?")]) == [
+        ("Customer", "hmm"), ("Assistant", "What?")]
+
+
+# --- _synthesize_reply: the retry knows what was wrong ------------------------------------------
+
+
+def _chat_model(monkeypatch, *texts):
+    sent = []
+    queue = list(texts)
+
+    class _R:
+        def __init__(self, text):
+            self._text = text
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"message": {"content": self._text}}
+
+    async def fake_post(self, url, *args, **kwargs):
+        sent.append(kwargs["json"])
+        return _R(queue.pop(0))
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+    return sent
+
+
+def test_second_attempt_is_told_why_the_first_was_rejected(monkeypatch):
+    sent = _chat_model(monkeypatch, "Your balance is Tk 31,000.00.", "Your balance is Tk 90,000.00.")
+    out = asyncio.run(chat_module._synthesize_reply("balance?", "balance", None, {"balance": 9000000}))
+    assert out == "Your balance is Tk 90,000.00."
+    assert len(sent) == 2
+    first, second = (body["messages"][1]["content"] for body in sent)
+    assert "rejected because" not in first
+    assert "Your previous reply was rejected because it contained numbers that are not in the facts" in second
+    assert "31,000" in second  # names the offending number
+    assert sent[1]["options"]["temperature"] == 0.0
+    assert sent[0]["messages"][0] == sent[1]["messages"][0]  # same persona both times
+
+
+def test_two_rejected_replies_fall_back_to_the_data_facts(monkeypatch):
+    sent = _chat_model(monkeypatch, "- Your balance is $5", "Your balance is Tk 31,000.00.")
+    out = asyncio.run(chat_module._synthesize_reply("balance?", "balance", None, {"balance": 9000000}))
+    assert len(sent) == 2
+    assert out == "balance: Tk 90,000.00"
+    assert "rejected because it used a currency" in sent[1]["messages"][1]["content"] or \
+        "rejected because it used markdown" in sent[1]["messages"][1]["content"]
+
+
+def test_reply_prompt_forwards_a_retry_reason_to_the_user_message():
+    plain, _, _ = chat_module._reply_prompt("balance?", "balance", None, {"balance": 9000000})
+    retry, _, _ = chat_module._reply_prompt("balance?", "balance", None, {"balance": 9000000},
+                                            "it used markdown formatting; write plain text")
+    assert "rejected because" not in plain[1]["content"]
+    assert "Your previous reply was rejected because it used markdown formatting; write plain text. Fix that." \
+        in retry[1]["content"]
+    assert plain[0] == retry[0]
 
 
 # --- data-answer prompt --------------------------------------------------------------

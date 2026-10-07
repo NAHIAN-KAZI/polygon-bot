@@ -1559,7 +1559,7 @@ def test_synthesize_reply_fallback_on_exception_redacts_description(monkeypatch)
     assert "100126000015" not in reply
     assert "4600000" not in reply
     # Degraded mode is a plain facts listing (T-77) -- never the raw numbers.
-    assert "transactions: 1 item(s)" in reply
+    assert "transactions: 1 found" in reply
 
 
 def test_synthesize_reply_fallback_on_empty_response_redacts_description(monkeypatch):
@@ -1577,7 +1577,7 @@ def test_synthesize_reply_fallback_on_empty_response_redacts_description(monkeyp
     assert "100126000015" not in reply
     assert "4600000" not in reply
     # Degraded mode is a plain facts listing (T-77) -- never the raw numbers.
-    assert "transactions: 1 item(s)" in reply
+    assert "transactions: 1 found" in reply
 
 
 def test_chat_stream_fallback_redacts_token_but_not_payload(client, monkeypatch):
@@ -1614,7 +1614,7 @@ def test_chat_stream_fallback_redacts_token_but_not_payload(client, monkeypatch)
     token_event = next(data for name, data in events if name == "token")
     assert "100126000015" not in token_event["token"]
     assert "4600000" not in token_event["token"]
-    assert "transactions: 1 item(s)" in token_event["token"]
+    assert "transactions: 1 found" in token_event["token"]
 
     result_event = next(data for name, data in events if name == "result")
     txn = result_event["payload"]["transactions"][0]
@@ -3184,3 +3184,15 @@ def test_chat_follow_up_to_an_answered_request_does_not_crash(client, monkeypatc
     result = next(data for name, data in _parse_sse(resp.text) if name == "result")
     assert result["type"] == "BANKING_SERVICE" and result["service"] == "fee_quote"
     assert fulfill_calls == [("fees", "fee_quote", {"transactionType": "nagad", "amount": 500})]
+
+
+def test_data_fallback_lists_counts_and_none_never_a_template():
+    out = chat_module._data_fallback({"transactions": [{"a": 1}, {"a": 2}], "beneficiaries": [],
+                                      "balance": "Tk 5", "nested": {"x": 1}})
+    assert out == "transactions: 2 found\nbeneficiaries: none\nbalance: Tk 5"
+
+
+def test_data_fallback_of_nothing_is_the_down_message():
+    from app.conversation.persona import LLM_DOWN_MESSAGE
+    assert chat_module._data_fallback({}) == LLM_DOWN_MESSAGE
+    assert chat_module._data_fallback(None) == LLM_DOWN_MESSAGE

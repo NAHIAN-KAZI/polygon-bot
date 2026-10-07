@@ -13,7 +13,7 @@ from pathlib import Path
 import app.banking.taxonomy as taxonomy_module
 from app.banking import ui_actions
 from app.banking.routing import classify
-from app.routes.chat import _ground_freeze_request
+from app.routes.chat import _ground_freeze_request, _ground_requested_action, _ground_transfer_destination
 from experiments.dynamic_suite.checks import judge
 from experiments.dynamic_suite.route_only import SNAPSHOT, as_result
 
@@ -39,6 +39,8 @@ async def main():
         want = tuple(want) if isinstance(want, list) else want
         routed = await classify(r["question"], [])
         routed = await _ground_freeze_request(routed, r["question"], [])
+        routed = await _ground_transfer_destination(routed, r["question"])
+        routed = await _ground_requested_action(routed, r["question"])
         result = as_result(routed)
         status, why = judge(want, "", result)
         out[status] += 1
