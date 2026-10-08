@@ -205,5 +205,6 @@ button (**Send**), prefilled from `payload`; limits as three small progress bars
 ## Known gaps
 
 1. **Add beneficiary**: after "yes" the bank returns `500 An internal error occurred` for both `OTHER_BANK` and `OWN_BANK` bodies. Waiting on the API team for the required fields per `serviceType`. Until then a "yes" shows `SERVICE_UNAVAILABLE`.
-2. "move 5000 between my own accounts" asks for an account even when the customer has only one.
-3. Wallet verify and recipient lookup not built.
+2. Own-account transfer (14.1) with only one account: the bot answers that there is no other account to move money to (`BANKING_SERVICE`, `executed: false`, no `routing.action`): show the bubble only, no box. With two or more accounts it asks which one (`ACCOUNT_SELECTION_REQUIRED`) and then the box applies.
+3. For an other-bank transfer the bank name, branch and transfer type (BEFTN, NPSB, RTGS) are not in `payload`: the customer picks them in the box.
+4. Wallet verify and recipient lookup not built.

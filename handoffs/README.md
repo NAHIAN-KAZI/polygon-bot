@@ -60,6 +60,10 @@ The data payload shapes were captured from live `result` events on 2026-10-03 (d
 `experiments/capture_payloads.py`). Routing and conversation behaviour changed afterwards (live runs of 2026-10-06);
 each file's "Live-verified" and "Known gaps" sections say what was and was not re-checked.
 
+## Test messages
+
+[TEST_MESSAGES.md](TEST_MESSAGES.md) lists, for every use case, 5–10 messages of different types to type, and what to expect (result type, service, UI). Use it to test each box.
+
 ## UI to build
 
 `COMMON.md` §11 defines the UI building blocks (U1–U11) and lists what the backend does not provide yet. Every intent file has a table **"UI to build, use case by use case"**: for each use case, what the customer sees, the buttons, and what is prefilled into which screen. Build from those tables; drive every block from `result.type`, `category`, `service`, `routing` and `payload`, never from the bubble text.

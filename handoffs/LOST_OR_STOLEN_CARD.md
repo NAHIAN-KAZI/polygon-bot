@@ -17,11 +17,12 @@ login password. Read `COMMON.md` §5 and §7 first.
 
 ## Flow
 
-1. Customer: "i lost my card" / "card churi hoye gese, block koro" /
-   "Someone just used my debit card… please block it".
-   The bot freezes only when the customer **asked to block** the card **or
-   said what happened** to it. A vague "my card isn't working" or "reset my
-   PIN" gets a question instead, never a freeze.
+1. The bot decides from the customer's own words:
+   - **Lost or stolen, no block asked** ("i lost my card", "my card was stolen") → report-lost (12.1): a `BANKING_SERVICE`
+     `card_requests` / `report_lost_card` result and the report box. No code is sent.
+   - **Asks to block / freeze / lock it** ("block my card", "card churi hoye gese, block koro", "someone used my card, please
+     freeze it") → the freeze flow below (12.2).
+   - **Vague** ("my card isn't working", "reset my PIN") → a question about what is wrong, never a freeze.
 2. Which card: one card → used automatically; several →
    `ACCOUNT_SELECTION_REQUIRED` with card entries (`id`, masked `cardNumber`,
    `cardType`); answer with `payload: {"cardId": id}` or in words.
@@ -113,7 +114,7 @@ Future<void> handleFreeze(ChatTurnResult turn) async {
 ## Live-verified (2026-10-03, `taslim_islamic`, dev)
 
 - "my debit card was stolen, please freeze it" → OTP sent → form with OTP + password → card 45 ACTIVE → **BLOCKED**; restored afterwards via the bank's unfreeze endpoint (outside chat).
-- "i lost my card", Banglish "card churi hoye gese, block koro", multi-line misuse story → `OTP_REQUIRED` with the customer's own reason.
+- "block my card" phrasings (Banglish "card churi hoye gese, block koro", multi-line misuse story that ends with a block request) → the freeze flow with the customer's own reason (2026-10-03). Since T-75, plain "i lost my card" goes to the report-lost box instead (not re-run live).
 - "my card isnt working", "reset my card pin" → no freeze; a question / "only in the app".
 - "actually forget that, what's my balance" while the form is open → leaves the freeze step, answers the balance.
 
