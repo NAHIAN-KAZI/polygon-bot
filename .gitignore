@@ -7,3 +7,7 @@ chatbot.png
 .pytest_cache/
 .mypy_cache/
 experiments/results/
+
+# local debug scratch scripts
+experiments/_dbg*.py
+experiments/_prompt.py
