@@ -524,3 +524,82 @@ def test_health_response_shape_matches_integration_doc(client, monkeypatch):
     assert body["status"] in ("ok", "degraded")
     assert isinstance(body["ollama"], bool)
     assert isinstance(body["qdrant"], bool)
+
+
+# --- include_stats: opt-in "stats" event before "done" -----------------------
+
+
+def test_include_stats_adds_stats_event_before_done(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        from app import llm_backend
+        llm_backend._record(1500, 12, 0.0)  # a model call made while answering
+        return KbQuestion()
+
+    async def fake_window():
+        return 8192
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module.llm_backend, "context_window", fake_window)
+    _install_kb_fakes(monkeypatch)
+    _install_session_fakes(monkeypatch)
+
+    resp = client.post(
+        "/chat",
+        json={"message": "What is the refund policy?", "include_stats": True},
+        headers=AUTH_HEADERS,
+    )
+
+    events = _parse_sse(resp.text)
+    assert [name for name, _ in events] == ["token", "token", "result", "stats", "done"]
+    stats = next(data for name, data in events if name == "stats")
+    assert stats["llm_calls"] == 1
+    assert stats["context_tokens"] == 1500
+    assert stats["prompt_tokens"] == 1500
+    assert stats["completion_tokens"] == 12
+    assert stats["context_window"] == 8192
+    assert stats["server_ms"] >= 0 and stats["llm_ms"] >= 0
+    assert "model" in stats
+
+
+def test_stats_not_sent_unless_asked(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        return KbQuestion()
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    _install_kb_fakes(monkeypatch)
+    _install_session_fakes(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "What is the refund policy?"}, headers=AUTH_HEADERS)
+    assert "stats" not in [name for name, _ in _parse_sse(resp.text)]
+
+
+# --- model server failures during classification ---------------------------------
+
+
+def test_classification_model_failure_is_an_error_event_not_a_broken_stream(client, monkeypatch):
+    async def fake_classify(message, recent_turns=None):
+        raise httpx.ReadTimeout("model server stalled")
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    _install_session_fakes(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "what is my balance"}, headers=AUTH_HEADERS)
+
+    assert resp.status_code == 200
+    assert _parse_sse(resp.text) == [("error", {"detail": "Generation model failed or is unreachable"})]
+
+
+def test_every_model_call_has_a_timeout(monkeypatch):
+    import asyncio
+
+    from app.banking import routing
+
+    seen = {}
+
+    async def fake_post(path, payload, *, timeout):
+        seen["timeout"] = timeout
+        return {"message": {"content": ""}}
+
+    monkeypatch.setattr(routing.llm_backend, "post", fake_post)
+    asyncio.run(routing._post_classification([{"role": "user", "content": "x"}]))
+    assert seen["timeout"] is not None and seen["timeout"] > 0

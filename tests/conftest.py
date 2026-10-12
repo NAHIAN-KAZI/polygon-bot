@@ -22,6 +22,14 @@ def client():
 
 
 @pytest.fixture(autouse=True)
+def _ollama_provider(monkeypatch):
+    """Tests fake Ollama's native API, so pin the provider even when the environment
+    (e.g. a loaded .env) selects an OpenAI-compatible server."""
+    from app.config import settings
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "ollama")
+
+
+@pytest.fixture(autouse=True)
 def _no_generated_clarifications(monkeypatch):
     """Every customer-facing message is LLM-composed in production (T-77,
     app.conversation.composer). Tests swap in a deterministic rendering of the

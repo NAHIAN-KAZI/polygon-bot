@@ -16,8 +16,8 @@ import logging
 import re
 from typing import Mapping, Sequence
 
-import httpx
 
+from app import llm_backend
 from app.config import settings
 from app.conversation.persona import GLOBAL_PERSONA, KIND_EXAMPLE, KIND_PURPOSE, LLM_DOWN_MESSAGE
 
@@ -67,6 +67,25 @@ def _label_kept(label: str, value: str, text: str) -> bool:
     return bool(re.search(pattern, text, re.IGNORECASE))
 
 
+# Words that say what a number IS. Next to a value they claim it for themselves.
+_DESCRIBING_WORDS = frozenset({
+    "amount", "fee", "charge", "balance", "limit", "card", "account", "phone", "mobile",
+    "wallet", "number", "otp", "pin", "reference", "id", "ending",
+})
+
+
+def _not_claimed_elsewhere(label: str, value: str, text: str) -> bool:
+    """`value` written without its label ("a transfer of Tk 500 to 01711111111") is still
+    fine when no other describing word sits just before it -- "phone number 0293" for a
+    card ending is not. gemma4 writes values this way; llama3.1 repeated the label."""
+    own = {w.rstrip("s") for w in re.findall(r"\w+", label.lower())}
+    for match in re.finditer(re.escape(value), text):
+        before = [w.rstrip("s") for w in re.findall(r"\w+", text[:match.start()].lower())[-5:]]
+        if not any(w in _DESCRIBING_WORDS and w not in own for w in before):
+            return True
+    return False
+
+
 def _find_value(value: str, text: str) -> str | None:
     """How `value` appears in `text`: verbatim, or -- for amounts -- the same number
     written with/without thousands separators, "Tk" spacing or ".00"."""
@@ -96,7 +115,7 @@ def check_reply(text: str, facts_json: str, must_include: Mapping[str, str]) -> 
         found = _find_value(value, text)
         if found is None:
             return f'it did not include the exact value "{value}" ({label})'
-        if label and not _label_kept(label, found, text):
+        if label and not _label_kept(label, found, text) and not _not_claimed_elsewhere(label, found, text):
             return f'"{value}" must stay attached to "{label}"'
     support = facts_json + " " + " ".join(map(str, must_include.values()))
     unmasked = [run for run in _UNMASKED_RE.findall(text) if run not in support.replace(",", "")]
@@ -172,20 +191,19 @@ _MAX_TOKENS = 400  # user decision 2026-10-05: replies capped at 400 tokens
 async def generate_chat(messages: list[dict], temperature: float) -> str | None:
     """The model's text for chat `messages`, or None when the model can't be reached."""
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                f"{settings.OLLAMA_BASE_URL}/api/chat",
-                json={
-                    "model": settings.OLLAMA_MODEL,
-                    "messages": messages,
-                    "stream": False,
-                    "think": settings.OLLAMA_THINK,
-                    "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": temperature,
-                                "num_predict": _MAX_TOKENS},
-                },
-            )
-            resp.raise_for_status()
-            return ((resp.json().get("message") or {}).get("content") or "").strip().strip('"').strip()
+        data = await llm_backend.post(
+            "/api/chat",
+            {
+                "model": settings.OLLAMA_MODEL,
+                "messages": messages,
+                "stream": False,
+                "think": settings.OLLAMA_THINK,
+                "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": temperature,
+                            "num_predict": _MAX_TOKENS},
+            },
+            timeout=30.0,
+        )
+        return ((data.get("message") or {}).get("content") or "").strip().strip('"').strip()
     except Exception as exc:  # unreachable / timeout / bad body
         logger.warning("composer: model call failed: %s", exc)
         return None
@@ -217,7 +235,12 @@ async def compose(
     return facts_listing({**facts, **must_include})
 
 
-_SENTENCE_END_RE = re.compile(r"[.!?\n](?=\s)")
+# Where streamed text may be released: the end of a sentence or clause (. ! ? , ; : or a
+# newline) followed by whitespace -- never inside a number ("90,000.00." has no space after
+# the comma or first dot). Clauses, not just sentences: a one-sentence list reply used to
+# appear only once fully written (12 s at gemma4's speed). Each released piece is still
+# number-checked before it goes out.
+_RELEASE_AT_RE = re.compile(r"[.!?,;:\n](?=\s)")
 
 
 async def compose_stream(
@@ -239,37 +262,31 @@ async def compose_stream(
     messages = build_messages(kind, facts, message, history, must_include)
     full, sent = "", 0
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            async with client.stream(
-                "POST",
-                f"{settings.OLLAMA_BASE_URL}/api/chat",
-                json={
-                    "model": settings.OLLAMA_MODEL, "messages": messages, "stream": True,
-                    "think": settings.OLLAMA_THINK,
-                    "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0.1,
-                                "num_predict": _MAX_TOKENS},
-                },
-            ) as resp:
-                resp.raise_for_status()
-                async for line in resp.aiter_lines():
-                    if not line:
-                        continue
-                    chunk = json.loads(line)
-                    full += (chunk.get("message") or {}).get("content") or ""
-                    done = bool(chunk.get("done"))
-                    ends = [m.end() for m in _SENTENCE_END_RE.finditer(full)]
-                    cut = len(full) if done else (ends[-1] if ends else 0)
-                    safe = full[:cut]
-                    if any(sym in safe for sym in _FOREIGN_CURRENCY) or unsupported_numbers(safe, support):
-                        raise ValueError("unsupported number in streamed reply")
-                    piece = safe[sent:]
-                    if sent == 0:
-                        piece = piece.lstrip().lstrip('"')
-                    if piece:
-                        yield piece
-                        sent = cut
-                    if done:
-                        break
+        async for chunk in llm_backend.stream(
+            "/api/chat",
+            {
+                "model": settings.OLLAMA_MODEL, "messages": messages, "stream": True,
+                "think": settings.OLLAMA_THINK,
+                "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0.1,
+                            "num_predict": _MAX_TOKENS},
+            },
+            timeout=30.0,
+        ):
+            full += (chunk.get("message") or {}).get("content") or ""
+            done = bool(chunk.get("done"))
+            ends = [m.end() for m in _RELEASE_AT_RE.finditer(full)]
+            cut = len(full) if done else (ends[-1] if ends else 0)
+            safe = full[:cut]
+            if any(sym in safe for sym in _FOREIGN_CURRENCY) or unsupported_numbers(safe, support):
+                raise ValueError("unsupported number in streamed reply")
+            piece = safe[sent:]
+            if sent == 0:
+                piece = piece.lstrip().lstrip('"')
+            if piece:
+                yield piece
+                sent = cut
+            if done:
+                break
     except Exception as exc:
         logger.info("composer: %s stream stopped: %s", kind, exc)
         if sent == 0:

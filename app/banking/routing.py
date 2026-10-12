@@ -12,11 +12,11 @@ import json
 import re
 from dataclasses import dataclass
 
-import httpx
 
 from app.banking.session import ChatTurn
 from app.banking import ui_actions
 from app.banking.taxonomy import get_taxonomy, is_valid_path
+from app import llm_backend
 from app.config import settings
 
 
@@ -520,20 +520,18 @@ _CLARIFICATION_FALLBACK = "Could you tell me more specifically what you'd like t
 
 
 async def _post_classification(messages: list[dict]) -> list[dict]:
-    async with httpx.AsyncClient(timeout=None) as client:
-        resp = await client.post(
-            f"{settings.OLLAMA_BASE_URL}/api/chat",
-            json={
-                "model": settings.OLLAMA_CLASSIFY_MODEL,
-                "messages": messages,
-                "tools": build_tools(),
-                "stream": False,
-                "think": settings.OLLAMA_THINK,
-                "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0},
-            },
-        )
-        resp.raise_for_status()
-        data = resp.json()
+    data = await llm_backend.post(
+        "/api/chat",
+        {
+            "model": settings.OLLAMA_CLASSIFY_MODEL,
+            "messages": messages,
+            "tools": build_tools(),
+            "stream": False,
+            "think": settings.OLLAMA_THINK,
+            "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0},
+        },
+        timeout=60.0,  # never hang the turn on a stalled model server
+    )
     message = data.get("message", {})
     return message.get("tool_calls") or _tool_call_from_text(message.get("content"))
 
@@ -635,21 +633,20 @@ async def _pick_domain(message: str, recent_turns: list[ChatTurn] | None) -> str
                      {"role": "assistant", "content": json.dumps({"domain": answer, "wants": wants})}]
     messages.append({"role": "user", "content": message})
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(
-                f"{settings.OLLAMA_BASE_URL}/api/chat",
-                json={
-                    "model": settings.OLLAMA_CLASSIFY_MODEL,
-                    "messages": messages,
-                    "stream": False,
-                    "format": "json",
-                    "think": settings.OLLAMA_THINK,
-                    "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0},
-                },
-            )
-            resp.raise_for_status()
-            parsed = json.loads((resp.json().get("message") or {}).get("content") or "{}")
-            domain = parsed.get("domain")
+        data = await llm_backend.post(
+            "/api/chat",
+            {
+                "model": settings.OLLAMA_CLASSIFY_MODEL,
+                "messages": messages,
+                "stream": False,
+                "format": "json",
+                "think": settings.OLLAMA_THINK,
+                "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0},
+            },
+            timeout=60.0,
+        )
+        parsed = json.loads((data.get("message") or {}).get("content") or "{}")
+        domain = parsed.get("domain")
     except Exception:
         return None
     if domain not in DOMAINS:

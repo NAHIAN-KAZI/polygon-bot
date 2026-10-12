@@ -482,3 +482,11 @@ def test_stream_posts_the_persona_as_a_system_message_to_api_chat(monkeypatch):
     url, body = seen[0]
     assert url.endswith("/api/chat")
     assert [m["role"] for m in body["messages"]] == ["system", "user"]
+
+
+def test_stream_releases_clauses_not_only_sentences(monkeypatch):
+    # Live: "Your last 3 transactions are: a bKash debit of Tk 500.00 ..., another ..." was one
+    # sentence, so nothing reached the customer until all 89 tokens were written (12 s).
+    _stream_with(monkeypatch, ["Your balance is Tk 90,000.00, ", "available ", "now."])
+    out = _collect(_REAL_STREAM("balance?", "balance", None, {"balance": 9000000}))
+    assert out == ["Your balance is Tk 90,000.00,", " available now."]

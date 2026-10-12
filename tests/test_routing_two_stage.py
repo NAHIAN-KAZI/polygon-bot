@@ -3,6 +3,7 @@ import asyncio
 import json
 from collections import Counter
 
+import httpx
 import pytest
 
 from app.banking import routing
@@ -100,7 +101,7 @@ def test_pick_domain_returns_none_on_unknown_domain(monkeypatch):
     async def fake_post(self, *args, **kwargs):
         return FakeResp()
 
-    monkeypatch.setattr(routing.httpx.AsyncClient, "post", fake_post)
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
     assert asyncio.run(_REAL_PICK_DOMAIN("hi", None)) is None
 
 
@@ -125,7 +126,7 @@ def _stage1_says(monkeypatch, payload):
         sent.append((url, kwargs["json"]))
         return _Resp(payload if isinstance(payload, str) else json.dumps(payload))
 
-    monkeypatch.setattr(routing.httpx.AsyncClient, "post", fake_post)
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
     return sent
 
 

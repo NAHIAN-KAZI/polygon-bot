@@ -19,6 +19,12 @@
         <span class="brand-text">Polygon <b>Bot</b></span>
       </div>
       <div class="actions">
+        <button id="ctxChip" class="pill ctx-pill" type="button" disabled hidden
+                title="Largest prompt sent to the model for the last message, out of its context window">
+          <span class="ctx-label">Context</span>
+          <span class="ctx-bar"><i id="ctxFill"></i></span>
+          <span id="ctxValue">0 / 0</span>
+        </button>
         <button id="healthChip" class="pill" type="button" disabled>
           <i class="dot"></i><span id="healthLabel">…</span>
         </button>
@@ -73,8 +79,22 @@
         </div>
       </details>
 
+      <div id="attachTray" class="attach-tray" hidden>
+        <img id="attachThumb" alt="Attached image" />
+        <span id="attachName" class="attach-name"></span>
+        <button id="attachRemove" type="button" class="attach-remove" aria-label="Remove image">&times;</button>
+      </div>
       <form id="chatForm" class="composer">
-        <input id="chatInput" type="text" placeholder="Message Polygon Bot..." autocomplete="off" required />
+        <button id="attachBtn" type="button" class="attach-btn" aria-label="Attach image" title="Attach an image (or paste one)" hidden>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="3.5" y="5" width="17" height="14" rx="2.5" stroke="currentColor" stroke-width="1.6"/><circle cx="9" cy="10" r="1.6" stroke="currentColor" stroke-width="1.4"/><path d="m4.5 17 4.8-4.6a1.2 1.2 0 0 1 1.6 0L14 15.2l2-1.8a1.2 1.2 0 0 1 1.6 0l2.9 2.7" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+        </button>
+        <input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden />
+        <input id="chatInput" type="text" placeholder="Message Polygon Bot..." autocomplete="off" />
+        <span id="recTimer" class="rec-timer" hidden>0:00</span>
+        <button id="micBtn" type="button" class="mic-btn" aria-label="Record a voice message" title="Record a voice message" hidden>
+          <svg class="mic-icon" width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="9" y="3.5" width="6" height="11" rx="3" stroke="currentColor" stroke-width="1.6"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          <svg class="stop-icon" width="14" height="14" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="3" fill="currentColor"/></svg>
+        </button>
         <button type="submit" class="send-btn" aria-label="Send">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 12h15M13 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>

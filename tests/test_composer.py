@@ -472,3 +472,41 @@ def test_compose_stream_stops_on_a_foreign_currency_symbol(monkeypatch):
     _stream_replies(monkeypatch, ["Your fee is €5. ", "Okay."])
     _model_replies(monkeypatch, "Your fee is Tk 5.")
     assert _collect(compose_stream("answer", {"fee": "Tk 5"})) == ["Your fee is Tk 5."]
+
+
+# --- values written without their label (gemma4 style) ----------------------------
+
+
+def test_check_reply_accepts_values_that_describe_themselves():
+    # Live gemma4 reply, rejected twice by the old rule ("amount" not written) -> robotic fallback.
+    text = ("You are making a Bkash transfer of Tk 500 to 01711111111. Please review the transfer "
+            "form right here in the chat, already filled in, and press Send to complete it.")
+    assert check_reply(text, "{}", {"amount": "Tk 500", "wallet number": "01711111111"}) is None
+
+
+def test_check_reply_still_rejects_a_value_claimed_by_another_word():
+    must = {"amount": "Tk 500", "wallet number": "01711111111"}
+    assert check_reply("A fee of Tk 500 applies to 01711111111.", "{}", must) == \
+        '"Tk 500" must stay attached to "amount"'
+    assert check_reply("Shall I freeze your account 0293?", "{}", {"card ending": "0293"}) == \
+        '"0293" must stay attached to "card ending"'
+
+
+def test_not_claimed_elsewhere_ignores_the_labels_own_words():
+    from app.conversation.composer import _not_claimed_elsewhere
+    assert _not_claimed_elsewhere("card ending", "0293", "your card 0293")
+    assert _not_claimed_elsewhere("wallet number", "01711111111", "to wallet 01711111111")
+    assert not _not_claimed_elsewhere("card ending", "0293", "your phone number 0293")
+
+
+def test_compose_stream_releases_at_clause_boundaries(monkeypatch):
+    # A long one-sentence reply shows its first clause as soon as it is written.
+    _stream_replies(monkeypatch, ["Your card ending 0293 is frozen, ", "and nobody can ", "use it now."])
+    out = _collect(compose_stream("done", {"what": "frozen"}, must_include={"card ending": "0293"}))
+    assert out == ["Your card ending 0293 is frozen,", " and nobody can use it now."]
+
+
+def test_compose_stream_never_releases_inside_a_number(monkeypatch):
+    _stream_replies(monkeypatch, ["You sent Tk 5,", "000.00 today, ", "all done."])
+    out = _collect(compose_stream("done", {"amount": "Tk 5,000.00"}))
+    assert out == ["You sent Tk 5,000.00 today,", " all done."]

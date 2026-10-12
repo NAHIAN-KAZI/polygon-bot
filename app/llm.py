@@ -1,8 +1,6 @@
-import json
 from typing import AsyncGenerator
 
-import httpx
-
+from app import llm_backend
 from app.config import settings
 from app.conversation.persona import GLOBAL_PERSONA, KIND_PURPOSE
 
@@ -58,34 +56,24 @@ def build_prompt(question: str, context_chunks: list[dict]) -> str:
 
 
 async def stream_generate(prompt: str) -> AsyncGenerator[str, None]:
-    async with httpx.AsyncClient(timeout=None) as client:
-        async with client.stream(
-            "POST",
-            f"{settings.OLLAMA_BASE_URL}/api/generate",
-            json={
-                "model": settings.OLLAMA_MODEL,
-                "prompt": prompt,
-                "stream": True,
-                "think": settings.OLLAMA_THINK,
-                "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0.2},
-            },
-        ) as resp:
-            resp.raise_for_status()
-            async for line in resp.aiter_lines():
-                if not line:
-                    continue
-                data = json.loads(line)
-                token = data.get("response", "")
-                if token:
-                    yield token
-                if data.get("done"):
-                    break
+    async for data in llm_backend.stream(
+        "/api/generate",
+        {
+            "model": settings.OLLAMA_MODEL,
+            "prompt": prompt,
+            "stream": True,
+            "think": settings.OLLAMA_THINK,
+            "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0.2},
+        },
+        timeout=60.0,  # per read: a stalled model server ends the stream instead of hanging it
+    ):
+        token = data.get("response", "")
+        if token:
+            yield token
+        if data.get("done"):
+            break
 
 
 async def check_ollama() -> bool:
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(f"{settings.OLLAMA_BASE_URL}/api/tags")
-            return resp.status_code == 200
-    except httpx.HTTPError:
-        return False
+    """Whether the text-generation server (Ollama, or the OpenAI-compatible one) answers."""
+    return await llm_backend.healthy()

@@ -8,7 +8,7 @@ from app.banking.taxonomy import initialize_taxonomy
 from app.config import settings
 from app.llm import check_ollama
 from app.vectorstore import check_qdrant, ensure_collection
-from app.routes import documents, chat
+from app.routes import documents, chat, demo_login
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
@@ -39,5 +39,7 @@ async def health():
 
 app.include_router(documents.router)
 app.include_router(chat.router)
+app.include_router(demo_login.router)
+app.include_router(demo_login.config_router)
 
 app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")

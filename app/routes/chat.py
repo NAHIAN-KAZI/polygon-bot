@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 import httpx
 from fastapi import APIRouter, Depends, Header
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.auth import require_api_key
 from app.banking import audit
@@ -41,7 +41,10 @@ from app.banking.routing import (
 from app.banking import ui_actions
 from app.banking.session import ChatTurn, get_classification_context, get_session, record_turn
 from app.banking.taxonomy import get_taxonomy, is_valid_path
+from app import llm_backend
 from app.config import settings
+from app.conversation.speech import AudioInputError, transcribe
+from app.conversation.vision import ImageInputError, read_image, with_image_text
 from app.conversation.composer import (
     _FOREIGN_CURRENCY, build_messages, check_reply, compose, compose_stream, facts_listing, generate_chat,
     unsupported_numbers,
@@ -121,21 +124,39 @@ def _looks_like_typed_secret(message: str) -> bool:
 
 
 class ChatRequest(BaseModel):
-    message: str = Field(..., min_length=1, max_length=4000)
+    # Required, except with `audio`: then the transcript is the message (any text typed
+    # alongside is kept in front of it).
+    message: str = Field(default=None, max_length=4000)
     session_id: str | None = None
     top_k: int | None = Field(default=None, ge=1, le=settings.MAX_TOP_K)
     category: str | None = None
     service: str | None = None
     subservice: str | None = None
     payload: dict | None = None
+    # Opt-in: adds a "stats" event (timings, model calls, tokens, context use) before "done".
+    include_stats: bool = False
+    # Optional image (data:image/png|jpeg|webp|gif;base64,...) when LLM_IMAGE_INPUT is on.
+    # The model reads it into text, sent first as an "image" event, then joined to message.
+    image: str | None = None
+    # Optional voice message (data:audio/wav;base64,...) when LLM_AUDIO_INPUT is on. The
+    # model transcribes it, the transcript is sent first as a "transcript" event, then
+    # answered like typed text.
+    audio: str | None = None
 
     @field_validator("message")
     @classmethod
-    def message_not_blank(cls, v: str) -> str:
-        v = v.strip()
-        if not v:
+    def message_not_blank(cls, v: str | None) -> str | None:
+        return v.strip() if isinstance(v, str) else v
+
+    @model_validator(mode="after")
+    def message_or_audio(self):
+        if self.audio:
+            self.message = self.message or ""
+        elif self.message is None:
+            raise ValueError("message is required")
+        elif not self.message:
             raise ValueError("message must not be blank")
-        return v
+        return self
 
 
 # T-49: deterministic, code-level payload-completeness check for banking services whose
@@ -343,17 +364,16 @@ async def _read_pending_reply(question: str | None, message: str, payload: dict 
         'Respond only with JSON: {"answer": "confirm|decline|unsure|other", "quote": "<words>"}'
     )
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            resp = await client.post(
-                f"{settings.OLLAMA_BASE_URL}/api/generate",
-                json={
-                    "model": settings.OLLAMA_MODEL, "prompt": prompt, "stream": False,
-                    "format": "json", "think": settings.OLLAMA_THINK,
-                    "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0},
-                },
-            )
-            resp.raise_for_status()
-            parsed = json.loads(resp.json().get("response") or "{}")
+        data = await llm_backend.post(
+            "/api/generate",
+            {
+                "model": settings.OLLAMA_MODEL, "prompt": prompt, "stream": False,
+                "format": "json", "think": settings.OLLAMA_THINK,
+                "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0},
+            },
+            timeout=20.0,
+        )
+        parsed = json.loads(data.get("response") or "{}")
     except Exception:
         return "unsure"
     answer = str(parsed.get("answer") or "").strip().lower() if isinstance(parsed, dict) else ""
@@ -1196,17 +1216,16 @@ async def _fill_fields(key: tuple, subservice, payload: dict, fields: list[str],
         "Respond only with a JSON object of the filled details."
     )
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            resp = await client.post(
-                f"{settings.OLLAMA_BASE_URL}/api/generate",
-                json={
-                    "model": settings.OLLAMA_MODEL, "prompt": prompt, "stream": False,
-                    "format": "json", "think": settings.OLLAMA_THINK,
-                    "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0},
-                },
-            )
-            resp.raise_for_status()
-            extracted = json.loads(resp.json().get("response") or "{}")
+        data = await llm_backend.post(
+            "/api/generate",
+            {
+                "model": settings.OLLAMA_MODEL, "prompt": prompt, "stream": False,
+                "format": "json", "think": settings.OLLAMA_THINK,
+                "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0},
+            },
+            timeout=20.0,
+        )
+        extracted = json.loads(data.get("response") or "{}")
     except Exception:
         extracted = {}
     filled: dict = {}
@@ -1412,20 +1431,19 @@ async def _freeze_request_facts(messages: list[str]) -> tuple[str | None, str | 
         'Respond only with JSON: {"reason": "<text>" or null, "block_request": "<text>" or null}'
     )
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            resp = await client.post(
-                f"{settings.OLLAMA_BASE_URL}/api/generate",
-                json={
-                    "model": settings.OLLAMA_MODEL,
-                    "prompt": prompt,
-                    "stream": False,
-                    "format": "json",
-                    "think": settings.OLLAMA_THINK,
-                    "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0},
-                },
-            )
-            resp.raise_for_status()
-            parsed = json.loads(resp.json().get("response") or "{}")
+        data = await llm_backend.post(
+            "/api/generate",
+            {
+                "model": settings.OLLAMA_MODEL,
+                "prompt": prompt,
+                "stream": False,
+                "format": "json",
+                "think": settings.OLLAMA_THINK,
+                "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0},
+            },
+            timeout=20.0,
+        )
+        parsed = json.loads(data.get("response") or "{}")
     except Exception:
         return None, None
     if not isinstance(parsed, dict):
@@ -1464,15 +1482,14 @@ async def _ground_transfer_destination(result, message: str):
         'Reply only with JSON: {"destination": "<words>" or null}'
     )
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            resp = await client.post(
-                f"{settings.OLLAMA_BASE_URL}/api/generate",
-                json={"model": settings.OLLAMA_MODEL, "prompt": prompt, "stream": False, "format": "json",
-                      "think": settings.OLLAMA_THINK,
-                      "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0}},
-            )
-            resp.raise_for_status()
-            parsed = json.loads(resp.json().get("response") or "{}")
+        data = await llm_backend.post(
+            "/api/generate",
+            {"model": settings.OLLAMA_MODEL, "prompt": prompt, "stream": False, "format": "json",
+             "think": settings.OLLAMA_THINK,
+             "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0}},
+            timeout=20.0,
+        )
+        parsed = json.loads(data.get("response") or "{}")
     except Exception:
         return result  # can't check: keep the classifier's choice rather than block the customer
     said = _grounded(_quoted(parsed.get("destination") if isinstance(parsed, dict) else None), message)
@@ -1514,15 +1531,14 @@ async def _ground_requested_action(result, message: str):
         'Reply only with JSON: {"action": "<words>" or null, "object": "<words>" or null}'
     )
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            resp = await client.post(
-                f"{settings.OLLAMA_BASE_URL}/api/generate",
-                json={"model": settings.OLLAMA_MODEL, "prompt": prompt, "stream": False, "format": "json",
-                      "think": settings.OLLAMA_THINK,
-                      "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0}},
-            )
-            resp.raise_for_status()
-            parsed = json.loads(resp.json().get("response") or "{}")
+        data = await llm_backend.post(
+            "/api/generate",
+            {"model": settings.OLLAMA_MODEL, "prompt": prompt, "stream": False, "format": "json",
+             "think": settings.OLLAMA_THINK,
+             "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0}},
+            timeout=20.0,
+        )
+        parsed = json.loads(data.get("response") or "{}")
     except Exception:
         return result
     parsed = parsed if isinstance(parsed, dict) else {}
@@ -1548,15 +1564,14 @@ async def _undo_request(messages: list[str]) -> str | None:
         'Reply only with JSON: {"undo_request": "<words>" or null}'
     )
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            resp = await client.post(
-                f"{settings.OLLAMA_BASE_URL}/api/generate",
-                json={"model": settings.OLLAMA_MODEL, "prompt": prompt, "stream": False, "format": "json",
-                      "think": settings.OLLAMA_THINK,
-                      "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0}},
-            )
-            resp.raise_for_status()
-            parsed = json.loads(resp.json().get("response") or "{}")
+        data = await llm_backend.post(
+            "/api/generate",
+            {"model": settings.OLLAMA_MODEL, "prompt": prompt, "stream": False, "format": "json",
+             "think": settings.OLLAMA_THINK,
+             "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0}},
+            timeout=20.0,
+        )
+        parsed = json.loads(data.get("response") or "{}")
     except Exception:
         return None
     if not isinstance(parsed, dict):
@@ -1627,20 +1642,19 @@ async def _llm_pick_candidate(message: str, candidates: list[dict]) -> int | Non
         "more than one option, answer null. Respond only with JSON: {\"choice\": <number or null>}"
     )
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            resp = await client.post(
-                f"{settings.OLLAMA_BASE_URL}/api/generate",
-                json={
-                    "model": settings.OLLAMA_MODEL,
-                    "prompt": prompt,
-                    "stream": False,
-                    "format": "json",
-                    "think": settings.OLLAMA_THINK,
-                    "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0},
-                },
-            )
-            resp.raise_for_status()
-            choice = json.loads(resp.json().get("response") or "{}").get("choice")
+        data = await llm_backend.post(
+            "/api/generate",
+            {
+                "model": settings.OLLAMA_MODEL,
+                "prompt": prompt,
+                "stream": False,
+                "format": "json",
+                "think": settings.OLLAMA_THINK,
+                "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0},
+            },
+            timeout=20.0,
+        )
+        choice = json.loads(data.get("response") or "{}").get("choice")
     except Exception:
         return None
     if isinstance(choice, int) and not isinstance(choice, bool) and 1 <= choice <= len(candidates):
@@ -1980,8 +1994,12 @@ async def _synthesize_reply(message: str, service: str, subservice: str | None, 
     return _data_fallback(redacted)
 
 
-# End of a sentence: . ! ? or a newline, followed by whitespace ("90,000.00." mid-number never matches).
-_SENTENCE_END_RE = re.compile(r"[.!?\n](?=\s)")
+# Where streamed text may be released: the end of a sentence or clause (. ! ? , ; : or a
+# newline) followed by whitespace -- never inside a number ("90,000.00." has no space after
+# the comma or first dot). Clauses, not just sentences: a one-sentence list reply used to
+# appear only once fully written (12 s at gemma4's speed). Each released piece is still
+# number-checked before it goes out.
+_RELEASE_AT_RE = re.compile(r"[.!?,;:\n](?=\s)")
 
 
 async def _stream_reply(message: str, service: str, subservice: str | None, data: dict):
@@ -1995,38 +2013,32 @@ async def _stream_reply(message: str, service: str, subservice: str | None, data
     messages, data_json, redacted = _reply_prompt(message, service, subservice, data)
     full, sent = "", 0
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            async with client.stream(
-                "POST",
-                f"{settings.OLLAMA_BASE_URL}/api/chat",
-                json={
-                    "model": settings.OLLAMA_MODEL,
-                    "messages": messages,
-                    "stream": True,
-                    "think": settings.OLLAMA_THINK,
-                    "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0.2, "num_predict": 400},
-                },
-            ) as resp:
-                resp.raise_for_status()
-                async for line in resp.aiter_lines():
-                    if not line:
-                        continue
-                    chunk = json.loads(line)
-                    full += (chunk.get("message") or {}).get("content") or ""
-                    done = bool(chunk.get("done"))
-                    ends = [m.end() for m in _SENTENCE_END_RE.finditer(full)]
-                    cut = len(full) if done else (ends[-1] if ends else 0)
-                    safe = full[:cut]
-                    if any(sym in safe for sym in _FOREIGN_CURRENCY) or unsupported_numbers(safe, data_json):
-                        raise ValueError("unsupported number in streamed reply")
-                    piece = safe[sent:]
-                    if sent == 0:
-                        piece = piece.lstrip()
-                    if piece:
-                        yield piece
-                        sent = cut
-                    if done:
-                        break
+        async for chunk in llm_backend.stream(
+            "/api/chat",
+            {
+                "model": settings.OLLAMA_MODEL,
+                "messages": messages,
+                "stream": True,
+                "think": settings.OLLAMA_THINK,
+                "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0.2, "num_predict": 400},
+            },
+            timeout=30.0,
+        ):
+            full += (chunk.get("message") or {}).get("content") or ""
+            done = bool(chunk.get("done"))
+            ends = [m.end() for m in _RELEASE_AT_RE.finditer(full)]
+            cut = len(full) if done else (ends[-1] if ends else 0)
+            safe = full[:cut]
+            if any(sym in safe for sym in _FOREIGN_CURRENCY) or unsupported_numbers(safe, data_json):
+                raise ValueError("unsupported number in streamed reply")
+            piece = safe[sent:]
+            if sent == 0:
+                piece = piece.lstrip()
+            if piece:
+                yield piece
+                sent = cut
+            if done:
+                break
     except Exception:
         if sent == 0:
             yield await _synthesize_reply(message, service, subservice, data)
@@ -2716,7 +2728,15 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                          last_session_classification.get("service")) == ("fees", "fee_quote")
                     and last_session_classification.get("request") is not None):
                 classify_context = session_turns[-1:]
-            result = await classify(req.message, recent_turns=classify_context)
+            try:
+                result = await classify(req.message, recent_turns=classify_context)
+            except httpx.HTTPError as exc:
+                # Model server down, erroring or timed out: say so instead of breaking the stream.
+                detail = "Generation model failed or is unreachable"
+                logger.warning(json.dumps({"request_id": request_id, "stage": "classification",
+                                           "detail": detail, "error": type(exc).__name__}))
+                yield _sse("error", {"detail": detail})
+                return
             if isinstance(result, BankingService) and req.payload is not None:
                 result = BankingService(
                     category=result.category,
@@ -3345,6 +3365,85 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
         )
 
 
+async def _with_stats(events):
+    """Pass the turn's events through, adding a "stats" event just before "done"
+    (or at the end, if the stream ends without one)."""
+    stats = llm_backend.start_turn_stats()
+    started = time.monotonic()
+    sent = False
+
+    async def stats_event() -> str:
+        window = await llm_backend.context_window()
+        return _sse("stats", {
+            "server_ms": round((time.monotonic() - started) * 1000),
+            "llm_ms": round(stats.llm_seconds * 1000),
+            "llm_calls": stats.calls,
+            "prompt_tokens": stats.prompt_tokens,
+            "completion_tokens": stats.completion_tokens,
+            "context_tokens": stats.peak_prompt_tokens,
+            "context_window": window,
+            "model": settings.LLM_MODEL if settings.LLM_PROVIDER == "openai" else settings.OLLAMA_MODEL,
+        })
+
+    async for event in events:
+        if not sent and event.startswith("event: done\n"):
+            yield await stats_event()
+            sent = True
+        yield event
+    if not sent:
+        yield await stats_event()
+
+
+@router.get("/capabilities")
+async def chat_capabilities():
+    """Optional inputs this deployment accepts, so a frontend can show only what works."""
+    return {"image_input": settings.LLM_IMAGE_INPUT, "max_image_mb": settings.MAX_IMAGE_MB,
+            "audio_input": settings.LLM_AUDIO_INPUT, "max_audio_seconds": settings.MAX_AUDIO_SECONDS}
+
+
+async def _chat_with_media(req: ChatRequest, authorization: str | None):
+    """Turn a voice message into text first, then handle any image, then answer as text."""
+    if req.audio:
+        try:
+            spoken = await transcribe(req.audio)
+        except AudioInputError as exc:
+            yield _sse("error", {"detail": str(exc)})
+            return
+        except Exception:
+            logger.warning("audio input: model call failed", exc_info=True)
+            yield _sse("error", {"detail": "The voice message couldn't be heard right now."})
+            return
+        yield _sse("transcript", {"text": spoken})
+        message = f"{req.message}\n\n{spoken}" if req.message else spoken
+        req = req.model_copy(update={"message": message[:4000], "audio": None})
+    if req.image:
+        async for event in _chat_with_image(req, authorization):
+            yield event
+        return
+    async for event in _chat_stream(req, authorization):
+        yield event
+
+
+async def _chat_with_image(req: ChatRequest, authorization: str | None):
+    """Read the attached image into text, then answer the message with that text added."""
+    try:
+        image_text = await read_image(req.image, req.message)
+    except ImageInputError as exc:
+        yield _sse("error", {"detail": str(exc)})
+        return
+    except Exception:
+        logger.warning("image input: model call failed", exc_info=True)
+        yield _sse("error", {"detail": "The attached image couldn't be read right now."})
+        return
+    yield _sse("image", {"text": image_text})
+    message = with_image_text(req.message, image_text)[:4000]
+    async for event in _chat_stream(req.model_copy(update={"message": message, "image": None}), authorization):
+        yield event
+
+
 @router.post("")
 async def chat(req: ChatRequest, authorization: str | None = Header(default=None)):
-    return StreamingResponse(_chat_stream(req, authorization), media_type="text/event-stream")
+    events = _chat_with_media(req, authorization) if (req.image or req.audio) else _chat_stream(req, authorization)
+    if req.include_stats:
+        events = _with_stats(events)
+    return StreamingResponse(events, media_type="text/event-stream")
