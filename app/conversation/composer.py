@@ -36,6 +36,14 @@ def mask_digit_run(match: re.Match) -> str:
     return "•" * (len(digits) - 4) + digits[-4:]
 
 
+# Bangla replies may write digits as ০-৯; the checks below compare against the facts' 0-9.
+_ASCII_DIGITS = str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789")
+
+
+def ascii_digits(text: str) -> str:
+    return text.translate(_ASCII_DIGITS)
+
+
 def _plain_number(text: str) -> str:
     """A number without separators or a trailing ".00" ("5,000.00" == "5000")."""
     plain = text.replace(",", "").rstrip(".")
@@ -48,6 +56,7 @@ _AMOUNT_VALUE_RE = re.compile(r"^\s*(?:tk\.?|bdt)?\s*\d[\d,]*(?:\.\d+)?\s*$", re
 def unsupported_numbers(reply: str, source: str) -> list[str]:
     """Numbers (3+ digits) in a model-written reply that don't appear in the data it
     was given -- a wrong amount must never reach a customer."""
+    reply = ascii_digits(reply)
     haystack = source.replace(",", "")
     known = {_plain_number(n) for n in NUMBER_RE.findall(source)}
     return [
@@ -104,6 +113,7 @@ def check_reply(text: str, facts_json: str, must_include: Mapping[str, str]) -> 
     """None when `text` is safe to send; otherwise the reason (fed back on retry)."""
     if not text:
         return "the reply was empty"
+    text = ascii_digits(text)
     if len(text) > _MAX_LEN:
         return "the reply was too long"
     if any(symbol in text for symbol in _FOREIGN_CURRENCY):
@@ -178,6 +188,8 @@ def build_messages(kind: str, facts: Mapping, message: str,
         f"Facts (JSON): {json.dumps(facts, ensure_ascii=False, default=str)}\n\n"
         f"{retry}"
         f"Your task: {purpose}\n"
+        "Write the reply in the language of the customer's latest message above (rule 7), "
+        "whatever language earlier messages used; the example only shows the shape.\n"
         + ("Include, in your own words but with exact values:\n" + "\n".join(checklist) + "\n" if checklist else "")
         + "Reply:"
     )
@@ -235,12 +247,12 @@ async def compose(
     return facts_listing({**facts, **must_include})
 
 
-# Where streamed text may be released: the end of a sentence or clause (. ! ? , ; : or a
+# Where streamed text may be released: the end of a sentence or clause (. ! ? , ; : । or a
 # newline) followed by whitespace -- never inside a number ("90,000.00." has no space after
 # the comma or first dot). Clauses, not just sentences: a one-sentence list reply used to
 # appear only once fully written (12 s at gemma4's speed). Each released piece is still
 # number-checked before it goes out.
-_RELEASE_AT_RE = re.compile(r"[.!?,;:\n](?=\s)")
+_RELEASE_AT_RE = re.compile(r"[.!?,;:।\n](?=\s)")
 
 
 async def compose_stream(
@@ -293,7 +305,7 @@ async def compose_stream(
             yield await compose(kind, facts, message=message, history=history, must_include=must_include)
             return
     text = full[:sent]
-    missing = {label: value for label, value in must_include.items() if _find_value(value, text) is None}
+    missing = {label: value for label, value in must_include.items() if _find_value(value, ascii_digits(text)) is None}
     if sent == 0:
         yield await compose(kind, facts, message=message, history=history, must_include=must_include)
     elif missing:

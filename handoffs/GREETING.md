@@ -17,7 +17,7 @@ No status-doc rows and no bank API: greetings and thanks are handled in chat
 `payload` is `null` for `CLARIFICATION_REQUIRED`; for `KB_ANSWER` it is
 `{"grounded": false, "hitCount": 0, "sources": null}`.
 
-Replies are always in English (simple English when the customer writes Banglish).
+Replies follow the customer's language: English gets English; Bangla (Bengali script) gets Bangla; Banglish (Bangla typed in English letters) gets Bangla in Bengali script. The same applies to voice messages, which are turned into text first. Amounts, masked numbers and terms such as Tk and bKash keep their facts-exact form with digits 0-9. The app's chat font must support Bengali script.
 
 <!-- UI-TO-BUILD:START -->
 ## UI to build, use case by use case

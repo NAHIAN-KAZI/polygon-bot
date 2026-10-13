@@ -249,10 +249,7 @@ def test_fee_type_is_kept_when_no_taxonomy_is_loaded(monkeypatch):
     assert out.payload == {"transactionType": "bkash"}
 
 
-def test_foreign_script_and_repeated_quote_guards():
-    assert chat._foreign_script("কি বলছেন?", "taka kete nise")
-    assert not chat._foreign_script("কি বলছেন?", "টাকা কেটে নিসে")
-    assert not chat._foreign_script("What happened?", "taka kete nise")
+def test_repeated_quote_guard():
     assert chat._quoted("lost it! lost it!") == "lost it!"
 
 

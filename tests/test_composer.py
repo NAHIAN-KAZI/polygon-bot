@@ -510,3 +510,46 @@ def test_compose_stream_never_releases_inside_a_number(monkeypatch):
     _stream_replies(monkeypatch, ["You sent Tk 5,", "000.00 today, ", "all done."])
     out = _collect(compose_stream("done", {"amount": "Tk 5,000.00"}))
     assert out == ["You sent Tk 5,000.00 today,", " all done."]
+
+
+# --- reply language: English -> English, Bangla and Banglish -> Bangla --------------
+
+
+def test_persona_tells_the_model_to_follow_the_customers_language():
+    # The model decides the language (no word lists in code); the rule must name all three.
+    for needle in ("English", "Bangla", "Banglish", "Bengali script"):
+        assert needle in GLOBAL_PERSONA
+    assert "Write plain English" not in GLOBAL_PERSONA
+
+
+def test_every_built_prompt_repeats_the_language_rule_after_the_english_example():
+    for kind in KIND_PURPOSE:
+        user = build_messages(kind, {"x": "y"}, "amar balance koto", None, {})[1]["content"]
+        assert "language of the customer's latest message above (rule 7)" in user
+        assert user.index("language of the customer's latest message above (rule 7)") > user.index("Customer: amar balance koto")
+
+
+def test_check_reply_accepts_bangla_replies_with_bengali_digits_for_amounts_in_the_facts():
+    must = {"balance": "Tk 90,000.00"}
+    facts = json.dumps({"balance": "Tk 90,000.00"})
+    assert check_reply("আপনার ব্যালেন্স এখন ৯০,০০০.০০ টাকা।", facts, must) is None
+    assert check_reply("আপনার ব্যালেন্স এখন Tk 90,000.00।", facts, must) is None
+
+
+def test_check_reply_rejects_a_wrong_amount_even_when_written_in_bengali_digits():
+    must = {"balance": "Tk 90,000.00"}
+    facts = json.dumps({"balance": "Tk 90,000.00"})
+    assert check_reply("আপনার ব্যালেন্স ৮০,০০০ টাকা।", facts, must)
+    assert unsupported_numbers("৫০০০ টাকা", "balance 90,000") == ["5000"]
+
+
+def test_the_down_message_is_written_in_english_and_bangla():
+    assert "trouble" in LLM_DOWN_MESSAGE
+    assert any("\u0980" <= ch <= "\u09ff" for ch in LLM_DOWN_MESSAGE)
+
+
+def test_compose_stream_releases_bangla_text_at_the_danda(monkeypatch):
+    _stream_replies(monkeypatch, ["আপনার অ্যাকাউন্ট ", "সক্রিয় আছে। ", "ধন্যবাদ।"])
+    out = _collect(compose_stream("answer", {"status": "active"}))
+    assert out[0] == "আপনার অ্যাকাউন্ট সক্রিয় আছে।"
+    assert "".join(out).endswith("ধন্যবাদ।")

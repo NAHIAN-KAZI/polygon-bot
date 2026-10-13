@@ -1267,14 +1267,6 @@ def _candidate_number(candidate: dict) -> str:
     )
 
 
-_BENGALI_RE = re.compile(r"[\u0980-\u09FF]")
-
-
-def _foreign_script(reply: str, message: str) -> bool:
-    """Bengali script in a reply to a customer who wrote none (replies are English)."""
-    return bool(_BENGALI_RE.search(reply or "")) and not _BENGALI_RE.search(message or "")
-
-
 def _carry_forward_gathered(result, recent_turns: list[ChatTurn]):
     """The customer answered our missing-field question and the answer routes to the
     SAME service: keep what they told us before (nickname, account number, ...) and
@@ -2047,7 +2039,7 @@ async def _synthesize_reply(message: str, service: str, subservice: str | None, 
 # the comma or first dot). Clauses, not just sentences: a one-sentence list reply used to
 # appear only once fully written (12 s at gemma4's speed). Each released piece is still
 # number-checked before it goes out.
-_RELEASE_AT_RE = re.compile(r"[.!?,;:\n](?=\s)")
+_RELEASE_AT_RE = re.compile(r"[.!?,;:।\n](?=\s)")
 
 
 async def _stream_reply(message: str, service: str, subservice: str | None, data: dict):
@@ -2827,9 +2819,6 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
             )
         return
 
-    if isinstance(result, Clarification) and _foreign_script(result.question, req.message):
-        # Live: Banglish typed in Latin letters came back as garbled Bengali script.
-        result = Clarification(question=_CLARIFICATION_FALLBACK)
     if isinstance(result, Clarification):
         # Always worded by the composer for THIS message: the classifier's own question is only
         # a hint of what is unclear, and the options (the services it could have meant) let the

@@ -29,10 +29,16 @@ GLOBAL_PERSONA = (
     "most relevant ones. A value that is empty or not set: say it isn't set.\n"
     "6. Match the customer's tone: a casual message gets a casual reply, a worried "
     "customer gets one kind sentence first.\n"
-    "7. Begin directly with the answer. Write plain English text, usually one to three "
-    "sentences, with no list or sign-off unless several items need listing.\n"
-    "8. Codes and PINs are entered in the app's secure form.\n"
-    "9. Refer to accounts and cards by their masked form from the facts."
+    "7. Reply in the customer's language. English: reply in English. Bangla in Bengali "
+    "script: reply in Bangla. Banglish (Bangla typed in English letters): reply in Bangla in "
+    "Bengali script, never in Banglish. A message with no language of its own (a number, a "
+    "name, yes or no) takes the language of their earlier messages. Keep amounts, numbers, "
+    "masked endings, names and terms such as Tk, bKash, Polygon or OTP exactly as in the "
+    "facts, with digits 0-9.\n"
+    "8. Begin directly with the answer, usually one to three short sentences, with no list "
+    "or sign-off unless several items need listing.\n"
+    "9. Codes and PINs are entered in the app's secure form.\n"
+    "10. Refer to accounts and cards by their masked form from the facts."
 )
 
 # What each kind of message is for. The composer adds the facts; the persona does the
@@ -145,5 +151,9 @@ KIND_EXAMPLE = {
 }
 
 # The only fixed customer-facing text in the bot: when the language model itself can't
-# be reached, nothing can write a sentence (user decision 2026-10-05).
-LLM_DOWN_MESSAGE = "Sorry, I'm having trouble right now. Please try again in a moment."
+# be reached, nothing can write a sentence (user decision 2026-10-05). It cannot know the
+# customer's language, so it says the same thing in English and Bangla.
+LLM_DOWN_MESSAGE = (
+    "Sorry, I'm having trouble right now. Please try again in a moment.\n"
+    "দুঃখিত, এখন একটু সমস্যা হচ্ছে। অনুগ্রহ করে কিছুক্ষণ পরে আবার চেষ্টা করুন।"
+)
