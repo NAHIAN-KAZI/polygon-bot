@@ -2,8 +2,10 @@ services:
   backend:
     build: .
     ports:
-      # Local-only: the demo portal can be configured to hand out API_KEY (.env).
-      - "127.0.0.1:8000:8000"
+      # Reachable from the network: the app's chat endpoint is served here. Keep
+      # DEMO_PORTAL_AUTOFILL_API_KEY=false (.env) while it is; the portal hands out API_KEY
+      # to anyone who can reach it. Autofill is only safe with "127.0.0.1:8000:8000".
+      - "8000:8000"
     env_file:
       - .env
     extra_hosts:
