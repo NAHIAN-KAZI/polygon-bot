@@ -124,20 +124,24 @@ need a model that reads audio and images (Gemma4 on vLLM does; Ollama's `llama3.
 
 ---
 
-## 5. Not part of the mobile app: internet-banking gateway (Java)
+## 5. Internet-banking gateway (Java, `support` service)
 
-The mobile app talks to `POST /support/v1/ai/chat`, not to the chatbot. Voice and image do not work end to end until the
-`support` service passes the new fields on. These are backend changes for that team; the app work in section 6 does not
-include them.
+The mobile app talks to `POST /support/v1/ai/chat`, not to the chatbot, so the `support` service has to pass the new
+fields on. **Done on the internet-banking `Chatbot-ui` branch** (commits `1640f97f` and `65d7eee1`, 18 tests passing in a
+Java 25 Maven container):
 
-1. `AiChatRequest`: add `image`, `audio` and `audioMode`; allow an empty `message` when `audio` is present (it is
-   `@NotBlank` today, so a voice-only turn is rejected).
-2. `RagChatClient.streamChat`: add `image`, `audio` and `audio_mode` to the upstream body (it builds a fixed list of keys).
-3. Add `GET /support/v1/ai/capabilities` that proxies `GET /chat/capabilities` (with the API key).
-4. Raise the request-body limit in Spring and the ingress: about 1.3 MB for a 30 s voice message, about 6.7 MB for a 5 MB image.
+1. `AiChatRequest` takes `image`, `audio` and `audioMode`. `message` may be empty when `audio` is present. `image` and
+   `audio` must be inline data URLs (`data:image/(png|jpeg|webp|gif);base64,…`, `data:audio/wav;base64,…`); links and
+   `file:` URLs are rejected. `audioMode` must be `transcript`, `both` or `audio`.
+2. `RagChatClient.streamChat` forwards `image`, `audio` and `audio_mode` upstream, and leaves out an empty `message`.
+3. `GET /support/v1/ai/capabilities` (customer JWT) proxies `GET /chat/capabilities`. When the assistant is off or the
+   chatbot is unreachable it answers `{"image_input":false,"max_image_mb":5,"audio_input":false,"max_audio_seconds":30}`
+   instead of an error.
+4. The pre-login chat (`/support/v1/ai/public/chat`) refuses voice and picture messages with an SSE `error` frame:
+   `Voice and picture messages are available after you sign in.`
 5. `AiChatServiceImpl.relay` already forwards events by name, so `transcript`, `image` and `stats` need no change.
-
----
+6. Request size: the dev nginx allows 20 MB and the local one 10 MB, enough for a 5 MB picture (about 6.7 MB as base64) and a
+   30 s voice message (about 1.3 MB). Check any other ingress in front of `support` for a smaller body limit.
 
 ## 6. Mobile app work (`user_app/lib/features/polygon_ai`)
 
@@ -221,8 +225,9 @@ Image attached                      Recording
 
 ## Known gaps
 
-1. Voice and image exist only in the backend and the demo web page so far. They have not been run against the Flutter app,
-   and they need the gateway changes in section 5.
+1. Voice and image have been exercised only through the demo web page and unit tests. The Flutter side compiles, analyses
+   cleanly and its tests pass (Flutter 3.44.4), but nobody has recorded a voice message or attached a picture on a real
+   device, and the gateway has not been run against a live chatbot.
 2. Audio-only voice (the mobile app's mode) was not compared against the transcript mode for routing accuracy; check a few
    spoken banking requests in English and Bangla, including a yes/no answer to a confirmation.
 3. Reply language quality for Banglish and for mixed English–Bangla messages depends on the model (Gemma4); spot-check
