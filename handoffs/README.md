@@ -64,6 +64,10 @@ each file's "Live-verified" and "Known gaps" sections say what was and was not r
 
 [TEST_MESSAGES.md](TEST_MESSAGES.md) lists, for every use case, 5–10 messages of different types to type, and what to expect (result type, service, UI). Use it to test each box.
 
+## Voice, image and reply language
+
+[VOICE_IMAGE_LANGUAGE.md](VOICE_IMAGE_LANGUAGE.md) covers the replies that follow the customer's language (English, Bangla, Banglish), voice and image messages (`audio`, `image`, the `transcript` and `image` events), `GET /chat/capabilities`, the gateway changes, and the mobile app steps.
+
 ## UI to build
 
 `COMMON.md` §11 defines the UI building blocks (U1–U11) and lists what the backend does not provide yet. Every intent file has a table **"UI to build, use case by use case"**: for each use case, what the customer sees, the buttons, and what is prefilled into which screen. Build from those tables; drive every block from `result.type`, `category`, `service`, `routing` and `payload`, never from the bubble text.
