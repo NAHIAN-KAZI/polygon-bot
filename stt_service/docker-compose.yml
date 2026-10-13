@@ -1,0 +1,21 @@
+# Run on the GPU box: docker compose up -d --build
+# Host port: STT_PORT (default 8791; 8000-8002 are Triton/vLLM defaults on GPU boxes).
+services:
+  stt:
+    build: .
+    ports:
+      - "${STT_PORT:-8791}:8001"
+    environment:
+      STT_API_KEY: ${STT_API_KEY:-}
+      HF_TOKEN: ${HF_TOKEN:-}
+    volumes:
+      - ~/.cache/huggingface:/root/.cache/huggingface
+    ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped

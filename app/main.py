@@ -8,7 +8,7 @@ from app.banking.taxonomy import initialize_taxonomy
 from app.config import settings
 from app.llm import check_ollama
 from app.vectorstore import check_qdrant, ensure_collection
-from app.routes import documents, chat, demo_login
+from app.routes import documents, chat, demo_login, tts
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
@@ -41,6 +41,7 @@ app.include_router(documents.router)
 app.include_router(chat.router)
 app.include_router(demo_login.router)
 app.include_router(demo_login.config_router)
+app.include_router(tts.router)
 
 class _RevalidatingStaticFiles(StaticFiles):
     """The demo frontend is three files that change together; without a cache header a browser

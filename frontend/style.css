@@ -768,6 +768,9 @@ button:focus-visible,
 }
 .meta-chip.open::after { transform: rotate(-135deg); }
 .meta-chip .result-type { margin: 0; }
+/* Read aloud plays instead of expanding, so no chevron; cyan while loading or playing. */
+.meta-chip.read-aloud::after { content: none; }
+.meta-chip.read-aloud.playing, .meta-chip.read-aloud.playing .meta-chip-value { color: var(--cyan); }
 .reply-meta .reply-stats, .reply-meta .result-panel { margin-top: 0; width: 100%; max-width: none; }
 .reply-meta [hidden] { display: none; }
 .reply-stats {

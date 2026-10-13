@@ -45,7 +45,7 @@ from app.banking.taxonomy import get_taxonomy, is_valid_path
 from app import llm_backend
 from app.config import settings
 import app.banking.routing as routing_module
-from app.conversation.speech import AudioInputError, decode_audio, transcribe
+from app.conversation.speech import AudioInputError, decode_audio, transcribe, transcribe_nemo
 from app.conversation.vision import ImageInputError, read_image, with_image_text
 from app.conversation.composer import (
     _FOREIGN_CURRENCY, build_messages, check_reply, compose, compose_stream, facts_listing, generate_chat,
@@ -147,8 +147,9 @@ class ChatRequest(BaseModel):
     # "transcript": the text alone is routed. "both": the model also hears the audio while
     # routing (the transcript is still made, shown, and used by every check). "audio": no
     # transcript step; the model only hears the audio (checks that quote the customer's words
-    # have no text to work on).
-    audio_mode: Literal["transcript", "both", "audio"] = "transcript"
+    # have no text to work on). "nemo": like "transcript", but the transcript comes from the
+    # separate speech-to-text server (STT_URL) instead of the model.
+    audio_mode: Literal["transcript", "both", "audio", "nemo"] = "transcript"
 
     @field_validator("message")
     @classmethod
@@ -3491,9 +3492,15 @@ async def _with_stats(events):
 
 @router.get("/capabilities")
 async def chat_capabilities():
-    """Optional inputs this deployment accepts, so a frontend can show only what works."""
+    """Optional inputs this deployment accepts, so a frontend can show only what works.
+    audio_input: the model hears audio, i.e. audio_mode "audio" works -- the mobile app shows its
+    mic on this alone (handoffs/VOICE_IMAGE_LANGUAGE.md), so it must not turn on for "nemo".
+    voice_modes: every audio_mode this deployment accepts."""
+    voice_modes = (["both", "transcript", "audio"] if settings.LLM_AUDIO_INPUT else []) + (
+        ["nemo"] if settings.STT_URL else [])
     return {"image_input": settings.LLM_IMAGE_INPUT, "max_image_mb": settings.MAX_IMAGE_MB,
-            "audio_input": settings.LLM_AUDIO_INPUT, "max_audio_seconds": settings.MAX_AUDIO_SECONDS}
+            "audio_input": settings.LLM_AUDIO_INPUT, "voice_modes": voice_modes,
+            "max_audio_seconds": settings.MAX_AUDIO_SECONDS, "read_aloud": settings.TTS_ENABLED}
 
 
 _VOICE_PLACEHOLDER = "(voice message)"
@@ -3507,6 +3514,9 @@ async def _chat_with_media(req: ChatRequest, authorization: str | None):
             if req.audio_mode == "audio":
                 spoken = ""
                 heard_audio = decode_audio(req.audio)
+            elif req.audio_mode == "nemo":
+                spoken = await transcribe_nemo(req.audio)
+                heard_audio = None
             else:
                 spoken = await transcribe(req.audio)
                 heard_audio = decode_audio(req.audio) if req.audio_mode == "both" else None

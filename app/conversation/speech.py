@@ -1,11 +1,14 @@
 """Voice input: the model transcribes a recorded voice message, and the transcript is
 answered exactly like a typed message -- routing, grounding and confirmations all run on
-the text, so speaking can't skip any step. Only possible when the model hears audio
-(LLM_AUDIO_INPUT, gemma4 on vLLM)."""
+the text, so speaking can't skip any step. The transcript comes from the model when it
+hears audio (LLM_AUDIO_INPUT, gemma4 on vLLM), or from the separate speech-to-text server
+(STT_URL, stt_service/) in the "nemo" voice mode."""
 import base64
 import binascii
 import re
 import struct
+
+import httpx
 
 from app import llm_backend
 from app.config import settings
@@ -86,6 +89,23 @@ async def transcribe(data_url: str) -> str:
         timeout=60.0,
     )
     text = ((data.get("message") or {}).get("content") or "").strip().strip('"').strip()
+    if not text:
+        raise AudioInputError("I couldn't hear anything in that voice message. Please try again.")
+    return text
+
+
+async def transcribe_nemo(data_url: str) -> str:
+    """What the customer said, as text, from the speech-to-text server (STT_URL)."""
+    if not settings.STT_URL:
+        raise AudioInputError("The Titu speech model isn't enabled for this assistant.")
+    raw = base64.b64decode(decode_audio(data_url))
+    headers = {"Content-Type": "audio/wav"}
+    if settings.STT_API_KEY:
+        headers["X-API-Key"] = settings.STT_API_KEY
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(f"{settings.STT_URL}/transcribe", content=raw, headers=headers)
+        resp.raise_for_status()
+    text = (resp.json().get("text") or "").strip()
     if not text:
         raise AudioInputError("I couldn't hear anything in that voice message. Please try again.")
     return text

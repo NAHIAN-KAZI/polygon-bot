@@ -572,23 +572,81 @@ const VOICE_MODES = {
   both: "Voice: audio + transcript",
   transcript: "Voice: transcript only",
   audio: "Voice: audio only",
+  nemo: "Voice: Titu STT",
 };
+// The modes this backend offers (GET /chat/capabilities); older backends don't say, so
+// they get the three model modes.
+let voiceModes = ["both", "transcript", "audio"];
+let preferredVoiceMode = "transcript"; // the viewer's pick; used whenever it's offered
 let voiceMode = "transcript";
 try {
   const saved = localStorage.getItem("voiceMode");
-  if (saved in VOICE_MODES) voiceMode = saved;
+  if (saved in VOICE_MODES) preferredVoiceMode = saved;
 } catch (e) { /* private mode */ }
 function showVoiceMode() {
+  voiceMode = voiceModes.includes(preferredVoiceMode) ? preferredVoiceMode
+    : voiceModes.includes("transcript") ? "transcript" : voiceModes[0];
   voiceModeLabel.textContent = VOICE_MODES[voiceMode];
   voiceModeBtn.classList.toggle("on", voiceMode !== "transcript");
 }
 voiceModeBtn.addEventListener("click", () => {
-  const order = Object.keys(VOICE_MODES);
-  voiceMode = order[(order.indexOf(voiceMode) + 1) % order.length];
-  try { localStorage.setItem("voiceMode", voiceMode); } catch (e) { /* optional */ }
+  preferredVoiceMode = voiceModes[(voiceModes.indexOf(voiceMode) + 1) % voiceModes.length];
+  try { localStorage.setItem("voiceMode", preferredVoiceMode); } catch (e) { /* optional */ }
   showVoiceMode();
 });
 showVoiceMode();
+
+// --- read aloud: a reply spoken by the server (POST /tts) --------------------------------
+// Offered only when GET /chat/capabilities says read_aloud. One reply plays at a time.
+let readAloud = false;
+let playing = null; // { audio, chip, label } of the reply being read
+
+function stopReading() {
+  if (!playing) return;
+  playing.audio.pause();
+  playing.chip.classList.remove("playing");
+  playing.label.textContent = "Read aloud";
+  playing = null;
+}
+
+function addReadAloudChip(text) {
+  if (!readAloud || !text) return;
+  const chip = el("button", "meta-chip read-aloud");
+  const label = el("span", "meta-chip-value", "Read aloud");
+  chip.type = "button";
+  chip.append(el("span", "meta-chip-label", "🔊"), label);
+  let url = null; // fetched once, replayed from memory
+  chip.addEventListener("click", async () => {
+    if (playing && playing.chip === chip) { stopReading(); return; }
+    stopReading();
+    const audio = new Audio();
+    playing = { audio, chip, label };
+    chip.classList.add("playing");
+    label.textContent = "Loading…";
+    try {
+      if (!url) {
+        const res = await fetch("/tts", {
+          method: "POST",
+          headers: headers({ "Content-Type": "application/json" }),
+          body: JSON.stringify({ text }),
+        });
+        if (!res.ok) throw new Error(res.statusText);
+        url = URL.createObjectURL(await res.blob());
+      }
+      if (!playing || playing.audio !== audio) return; // stopped while loading
+      audio.src = url;
+      audio.addEventListener("ended", stopReading);
+      label.textContent = "Stop";
+      await audio.play();
+    } catch (err) {
+      if (playing && playing.audio === audio) {
+        stopReading();
+        label.textContent = "Couldn't read aloud";
+      }
+    }
+  });
+  metaRow().querySelector(".meta-chips").appendChild(chip);
+}
 
 // --- image input ------------------------------------------------------------------
 // Shown only when the backend says its model reads images (GET /chat/capabilities).
@@ -605,10 +663,17 @@ async function loadCapabilities() {
     const caps = await res.json();
     attachBtn.hidden = !caps.image_input;
     maxImageMb = caps.max_image_mb || maxImageMb;
+    // voice_modes lists every way this backend takes a voice message; audio_input only says
+    // whether the model itself hears audio (older backends send just that).
+    const offered = (caps.voice_modes || (caps.audio_input ? voiceModes : []))
+      .filter((m) => m in VOICE_MODES);
     // Recording needs a secure page (https or localhost) and a browser that can record.
-    micBtn.hidden = !(caps.audio_input && navigator.mediaDevices && window.MediaRecorder);
+    micBtn.hidden = !(offered.length && navigator.mediaDevices && window.MediaRecorder);
     voiceModeBtn.hidden = micBtn.hidden;
+    if (offered.length) voiceModes = offered;
+    showVoiceMode();
     maxAudioSeconds = caps.max_audio_seconds || maxAudioSeconds;
+    readAloud = Boolean(caps.read_aloud);
   } catch (e) {
     // optional
   }
@@ -923,6 +988,7 @@ chatForm.addEventListener("submit", async (e) => {
     if (result) {
       addResultPanel(result);
     }
+    if (!botDiv.classList.contains("error")) addReadAloudChip(botDiv.textContent.trim());
     addReplyStats({ totalMs: performance.now() - startedAt, firstTokenMs }, stats);
   } catch (err) {
     botDiv.className = "msg bot error";
