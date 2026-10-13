@@ -149,7 +149,7 @@ Do these in order; each is a small, separately testable step.
 | 2 | Send `image` and `audio` (and allow an empty `message` with `audio`) | `domain/repo/polygon_ai_repository.dart`, `domain/usecase/stream_polygon_ai_chat_use_case.dart`, `data/repo_impl/polygon_ai_http_impl.dart`, the public chat repo/use case, the `PolygonAiStreamCall` typedef |
 | 3 | Capabilities: `AiCapabilities` model, `getCapabilities()`, URL `polygonAiCapabilitiesUrl` (`/support/v1/ai/capabilities`) | `domain/entity/ai_capabilities.dart`, repo, `core/data/http/urls/polygon_ai_api_urls.dart` and its implementation |
 | 4 | Controller: capabilities, pending image, voice recording state, `sendVoice`, transcript and image events | `presentation/controller/polygon_ai_chat_controller_base.dart` |
-| 5 | Voice recorder (the `record` package, 16 kHz mono WAV, sent with `audio_mode: audio`) | `presentation/voice/ai_voice_recorder.dart`, `pubspec.yaml`, Android and iOS permissions |
+| 5 | Voice recorder (the `record` package, 16 kHz mono WAV, sent with `audio_mode: audio`) | `presentation/media/ai_voice_recorder.dart` and `presentation/media/ai_image_picker.dart`, `pubspec.yaml`, Android and iOS permissions |
 | 6 | Composer: attach button, image tray, mic button with recording state | `presentation/widgets/polygon_ai_composer.dart` |
 | 7 | Bubbles: voice placeholder, image caption | `presentation/widgets/polygon_ai_message_bubble.dart`, `domain/entity/ai_chat_message_item.dart` |
 | 8 | Tests | `test/features/polygon_ai/` |
