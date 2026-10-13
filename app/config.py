@@ -33,6 +33,10 @@ class Settings:
     # Gemma 4 hears at most 30 s per clip; vLLM silently drops the rest (a 67 s test clip lost
     # its last sentence, no error), so longer messages are refused instead of half-heard.
     MAX_AUDIO_SECONDS: int = int(os.environ.get("MAX_AUDIO_SECONDS", "30"))
+    # Separate speech-to-text server for the "nemo" voice mode (stt_service/, hishab's
+    # titu_stt_bn_fastconformer on NeMo), e.g. http://spark:8791. Empty = mode not offered.
+    STT_URL: str = os.environ.get("STT_URL", "").rstrip("/")
+    STT_API_KEY: str = os.environ.get("STT_API_KEY", "")
     EMBED_DIM: int = int(os.environ.get("EMBED_DIM", "384"))
 
     QDRANT_URL: str = os.environ.get("QDRANT_URL", "http://qdrant:6333")
