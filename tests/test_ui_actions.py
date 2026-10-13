@@ -48,7 +48,8 @@ def test_there_are_29_actions_with_unique_ids_matching_their_keys():
 @pytest.mark.parametrize("action_id", ALL)
 def test_every_action_is_well_formed(action_id):
     a = ui_actions.get(action_id)
-    assert a.domain in routing.DOMAINS
+    domains = a.domain if isinstance(a.domain, tuple) else (a.domain,)
+    assert domains and all(d in routing.DOMAINS for d in domains)
     assert a.kind in {"screen", "info", "unavailable"}
     assert a.name and a.description and a.needs and a.rows
     assert a.route is None or a.route.startswith("/")
@@ -109,7 +110,8 @@ def test_every_action_is_routable(action_id):
     description, prefill_fields = routing.SERVICE_DESCRIPTIONS[key]
     assert description == a.description
     assert prefill_fields == tuple(field for field, _ in a.prefill)
-    assert key in routing.DOMAINS[a.domain][1]
+    for domain in (a.domain if isinstance(a.domain, tuple) else (a.domain,)):
+        assert key in routing.DOMAINS[domain][1]
 
 
 def test_every_action_is_a_valid_taxonomy_path(monkeypatch):

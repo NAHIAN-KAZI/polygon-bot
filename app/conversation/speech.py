@@ -12,11 +12,21 @@ from app.config import settings
 
 _DATA_URL_RE = re.compile(r"^data:audio/(?:wav|x-wav|wave);base64,(.+)$", re.S)
 
+# Tuned on spoken Bangla, English and mixed test clips (experiments/dynamic_suite/voice_route.py):
+# - without the script rule gemma4 wrote Bangla phonetically in Devanagari ("अमरकार…");
+# - without being told speakers mix English words into Bangla, mixed speech became invented
+#   English sentences;
+# - saying the speaker "talks about banking" made it invent transfers and amounts that were
+#   never spoken ("how much is in my account" -> "transfer crores"), so the prompt forbids
+#   adding words or numbers instead.
 _TRANSCRIBE_PROMPT = (
-    "Transcribe this voice message from a bank customer exactly, word for word, in the "
-    "language they speak (English, Bangla or Banglish). Write amounts, account, card and "
-    "phone numbers as digits. Reply with only the transcript. If there is no speech, "
-    "reply with nothing."
+    "Transcribe this voice message word for word, exactly as spoken. The speaker is from "
+    "Bangladesh and speaks Bangla, English, or Bangla with some English words mixed in. Write "
+    "Bangla words in Bangla script (বাংলা) and English words in English letters; never use "
+    "Devanagari or any other script, and never translate. Write only words you actually hear: "
+    "if a word is unclear, write your best guess of how it sounds, and never add words, "
+    "amounts or numbers that were not spoken. Write spoken numbers as digits. Reply with only "
+    "the transcript. If there is no speech, reply with nothing."
 )
 
 

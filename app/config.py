@@ -19,6 +19,9 @@ class Settings:
     LLM_BASE_URL: str = os.environ.get("LLM_BASE_URL", "").rstrip("/")  # e.g. http://host:8000/v1
     LLM_MODEL: str = os.environ.get("LLM_MODEL", "")
     LLM_API_KEY: str = os.environ.get("LLM_API_KEY", "")
+    # How tool calls reach an OpenAI-compatible server: "emulated" (forced JSON, works on any
+    # server), "native_auto" or "native_required" (needs vLLM --enable-auto-tool-choice).
+    LLM_TOOL_MODE: str = os.environ.get("LLM_TOOL_MODE", "emulated")
     # Context size shown in usage stats; 0 = ask the server (max_model_len) or use OLLAMA_NUM_CTX.
     LLM_CONTEXT_WINDOW: int = int(os.environ.get("LLM_CONTEXT_WINDOW", "0"))
     # Whether the text-generation model reads images (chat requests may then attach one).
@@ -27,7 +30,9 @@ class Settings:
     # Whether the model hears audio (gemma4 on vLLM does; Ollama never). Voice messages are
     # then transcribed by the model and answered like typed text.
     LLM_AUDIO_INPUT: bool = os.environ.get("LLM_AUDIO_INPUT", "false").lower() == "true"
-    MAX_AUDIO_SECONDS: int = int(os.environ.get("MAX_AUDIO_SECONDS", "60"))
+    # Gemma 4 hears at most 30 s per clip; vLLM silently drops the rest (a 67 s test clip lost
+    # its last sentence, no error), so longer messages are refused instead of half-heard.
+    MAX_AUDIO_SECONDS: int = int(os.environ.get("MAX_AUDIO_SECONDS", "30"))
     EMBED_DIM: int = int(os.environ.get("EMBED_DIM", "384"))
 
     QDRANT_URL: str = os.environ.get("QDRANT_URL", "http://qdrant:6333")

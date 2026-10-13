@@ -1,0 +1,1451 @@
+{
+ "1.1": {
+  "intent": "ACCOUNT_INFO",
+  "name": "1.1 Get all accounts",
+  "expected": [
+   "account_info",
+   "accounts"
+  ],
+  "questions": {
+   "bangla_short": "সব অ্যাকাউন্ট দেখান",
+   "bangla_sentence": "আমার সবগুলো অ্যাকাউন্ট নাম্বার কি কি আছে একটু বলবেন?",
+   "banglish_short": "sob account dekhao",
+   "banglish_sentence": "Amar kache koyta account ache check kore din please.",
+   "mixed": "আমার সব accounts এর list টা দেন।"
+  }
+ },
+ "6.1": {
+  "intent": "CHECK_BALANCE",
+  "name": "6.1 Account balance",
+  "expected": [
+   "account_info",
+   "balance"
+  ],
+  "questions": {
+   "bangla_short": "ব্যালেন্স কত?",
+   "bangla_sentence": "আমার অ্যাকাউন্টে এখন কত টাকা আছে জানাবেন কি?",
+   "banglish_short": "balance koto?",
+   "banglish_sentence": "Amar account e koto taka ache check kore den.",
+   "mixed": "আমার account balance কত জানি কি?"
+  }
+ },
+ "12.1": {
+  "intent": "LOST_OR_STOLEN_CARD",
+  "name": "12.1 Report lost/stolen card",
+  "expected": [
+   "card_requests",
+   "report_lost_card"
+  ],
+  "questions": {
+   "bangla_short": "কার্ড হারিয়ে গেছে",
+   "bangla_sentence": "আমার ডেবিট কার্ডটা চুরি হয়েছে, আমি নতুন একটা চাই।",
+   "banglish_short": "card harie gese",
+   "banglish_sentence": "Amar card ta stolen hoye gese, new card apply korbo ki bhabe?",
+   "mixed": "আমার card টা lost হয়ে গেছে, নতুন একটা নিয়ে দিন।"
+  }
+ },
+ "1.2": {
+  "intent": "ACCOUNT_INFO",
+  "name": "1.2 Get account detail",
+  "expected": [
+   "account_info",
+   "accounts"
+  ],
+  "questions": {
+   "bangla_short": "অ্যাকাউন্ট লিস্ট",
+   "bangla_sentence": "আমার সবগুলো অ্যাকাউন্ট নম্বর দেখতে চাই।",
+   "banglish_short": "account list koren",
+   "banglish_sentence": "Amar kache koyta account ache list ta dekhun.",
+   "mixed": "আমার সব accounts এর detail দেন।"
+  }
+ },
+ "1.5": {
+  "intent": "ACCOUNT_INFO",
+  "name": "1.5 Star account",
+  "expected": [
+   "app_actions",
+   "quick_view_star"
+  ],
+  "questions": {
+   "bangla_short": "অ্যাকাউন্ট স্টার করুন",
+   "bangla_sentence": "আমি আমার সেভিংস অ্যাকাউন্টটা হোম স্ক্রিনে পিন করতে চাই।",
+   "banglish_short": "account ta star koren",
+   "banglish_sentence": "Amar card ta home screen e pin korar option ache ki?",
+   "mixed": "আমার account টা home screen এ favorite হিসেবে দেখাবেন।"
+  }
+ },
+ "1.6": {
+  "intent": "ACCOUNT_INFO",
+  "name": "1.6 My loans",
+  "expected": [
+   "loan_services",
+   "my_loans"
+  ],
+  "questions": {
+   "bangla_short": "আমার লোনগুলো",
+   "bangla_sentence": "আমার বর্তমানে কয়টি লোন আছে তা দেখতে চাই।",
+   "banglish_short": "loan list dekhau",
+   "banglish_sentence": "Amar loan status koto dekhaben please?",
+   "mixed": "আমার loan list টা একটু দেখান।"
+  }
+ },
+ "1.7": {
+  "intent": "ACCOUNT_INFO",
+  "name": "1.7 FD profit history",
+  "expected": [
+   "account_info",
+   "fd_profit_history"
+  ],
+  "questions": {
+   "bangla_short": "এফডি মুনাফা হিস্ট্রি",
+   "bangla_sentence": "আমার ফিক্সড ডিপোজিটের মুনাফার হিস্ট্রিটা দেখতে চাই।",
+   "banglish_short": "FD profit koto?",
+   "banglish_sentence": "Amar FD profit history ta ektu dekhaben?",
+   "mixed": "আমার FD profit history টা কি চেক করা যাবে?"
+  }
+ },
+ "1.8": {
+  "intent": "ACCOUNT_INFO",
+  "name": "1.8 DPS profit history",
+  "expected": [
+   "account_info",
+   "dps_profit_history"
+  ],
+  "questions": {
+   "bangla_short": "DPS মুনাফা ইতিহাস",
+   "bangla_sentence": "আমার ডিএসএস অ্যাকাউন্টে এ পর্যন্ত কত লাভ হয়েছে তা দেখতে চাই।",
+   "banglish_short": "dps profit history",
+   "banglish_sentence": "Amar DPS scheme er profit history ta dekhabo parben?",
+   "mixed": "আমার DPS scheme এর profit history দেখতে চাই।"
+  }
+ },
+ "— Cards list": {
+  "intent": "ACCOUNT_INFO",
+  "name": "— Cards list",
+  "expected": [
+   "account_info",
+   "cards"
+  ],
+  "questions": {
+   "bangla_short": "কার্ডের লিস্ট",
+   "bangla_sentence": "আমার কাছে কয়টি কার্ড আছে তা দেখান।",
+   "banglish_short": "card list dekhao",
+   "banglish_sentence": "Amar kache kon kon card ache list ta dekhaben?",
+   "mixed": "আমার সব cards এর list টা দেখান।"
+  }
+ },
+ "— Account transactions": {
+  "intent": "ACCOUNT_INFO",
+  "name": "— Account transactions",
+  "expected": [
+   "polygon_services",
+   "transaction_history"
+  ],
+  "questions": {
+   "bangla_short": "লেনদেনের হিসেব",
+   "bangla_sentence": "গত মাসের সব ট্রানজ্যাকশন একটু দেখতে চাই।",
+   "banglish_short": "transaction dekhao",
+   "banglish_sentence": "Amar account er recent transactions gulo koto ta dekhate parben?",
+   "mixed": "আমার account এর statement গত ৫ দিনের জন্য চাই।"
+  }
+ },
+ "2.1": {
+  "intent": "ATM_SUPPORT",
+  "name": "2.1 Cash by code",
+  "expected": [
+   "app_actions",
+   "cash_by_code"
+  ],
+  "questions": {
+   "bangla_short": "কোড দিয়ে টাকা",
+   "bangla_sentence": "আমি ৫০০০ টাকা ক্যাশ বাই কোড পাঠাতে চাই।",
+   "banglish_short": "cash by code koren",
+   "banglish_sentence": "Amar bhaier jonno 2000 taka cash pickup korte chai.",
+   "mixed": "আমি ৫০০০০ টাকা send করতে চাই cash by code এর মাধ্যমে।"
+  }
+ },
+ "2.2": {
+  "intent": "ATM_SUPPORT",
+  "name": "2.2 Raise dispute",
+  "expected": [
+   "service_requests",
+   "raise_dispute"
+  ],
+  "questions": {
+   "bangla_short": "টাকা কাটলো না",
+   "bangla_sentence": "আমার অ্যাকাউন্ট থেকে টাকা কেটে নিয়েছে কিন্তু অন্যজনের কাছে এখনো পৌঁছায়নি।",
+   "banglish_short": "transaction fail hoyeche",
+   "banglish_sentence": "Amar account theke 500 taka deduct hoyeche kintu transfer hoyni.",
+   "mixed": "আমার বিকাশ থেকে টাকা কেটে নিয়েছে কিন্তু transaction status pending দেখাচ্ছে।"
+  }
+ },
+ "2.3": {
+  "intent": "ATM_SUPPORT",
+  "name": "2.3 List disputes",
+  "expected": [
+   "service_requests",
+   "disputes"
+  ],
+  "questions": {
+   "bangla_short": "অভিযোগ দেখুন",
+   "bangla_sentence": "আমার আগের অভিযোগগুলোর স্ট্যাটাস কী?",
+   "banglish_short": "dispute check koren",
+   "banglish_sentence": "Amar boro transaction er dispute status ki?",
+   "mixed": "আমার transaction dispute গুলো দেখতে চাই।"
+  }
+ },
+ "3.1": {
+  "intent": "CARD_ISSUE",
+  "name": "3.1 Reset card PIN",
+  "expected": [
+   "app_actions",
+   "card_pin_reset"
+  ],
+  "questions": {
+   "bangla_short": "পিন পরিবর্তন করুন",
+   "bangla_sentence": "আমার কার্ডের পিন নম্বরটা রিসেট করে দিন।",
+   "banglish_short": "pin change koren",
+   "banglish_sentence": "Amar card er pin reset korte parbo kivabe?",
+   "mixed": "আমার card এর PIN টা reset করে দিন।"
+  }
+ },
+ "3.2": {
+  "intent": "CARD_ISSUE",
+  "name": "3.2 Unfreeze card",
+  "expected": [
+   "app_actions",
+   "card_unfreeze"
+  ],
+  "questions": {
+   "bangla_short": "কার্ড আনফ্রিজ করুন",
+   "bangla_sentence": "আমার ডেবিট কার্ডটি ব্লক করা আছে, দয়া করে এটি আবার চালু করে দিন।",
+   "banglish_short": "card unblock koren",
+   "banglish_sentence": "Amar card ta block hoye geche, please eta reactivate koren.",
+   "mixed": "আমার card টা block হয়ে গেছে, প্লিজ unfreeze করে দিন।"
+  }
+ },
+ "3.3": {
+  "intent": "CARD_ISSUE",
+  "name": "3.3 Raise dispute",
+  "expected": [
+   "service_requests",
+   "raise_dispute"
+  ],
+  "questions": {
+   "bangla_short": "টাকা কেটেছে না",
+   "bangla_sentence": "আমার বিকাশ থেকে টাকা কেটেছে কিন্তু অন্যজনের কাছে পৌঁছায়নি।",
+   "banglish_short": "transaction fail hoyeche",
+   "banglish_sentence": "Amar account theke 500 taka deduct hoyeche kintu pending dekhachhe.",
+   "mixed": "আমার ট্রানজেকশনটা failed হয়েছে, please check করুন।"
+  }
+ },
+ "3.4": {
+  "intent": "CARD_ISSUE",
+  "name": "3.4 List disputes",
+  "expected": [
+   "service_requests",
+   "disputes"
+  ],
+  "questions": {
+   "bangla_short": "অভিযোগ দেখুন",
+   "bangla_sentence": "আমার আগের ডিসপিউটগুলোর স্ট্যাটাস কি?",
+   "banglish_short": "dispute dekhaen",
+   "banglish_sentence": "Amar last transaction er dispute status ki?",
+   "mixed": "আমার গত সপ্তাহের transaction dispute status টা দেখান"
+  }
+ },
+ "3.5": {
+  "intent": "CARD_ISSUE",
+  "name": "3.5 Submit complaint",
+  "expected": [
+   "support",
+   "submit_complaint"
+  ],
+  "questions": {
+   "bangla_short": "অভিযোগ করতে চাই",
+   "bangla_sentence": "আপনার ব্রাঞ্চের স্টাফদের ব্যবহার খুবই খারাপ ছিল।",
+   "banglish_short": "complaint korte chai",
+   "banglish_sentence": "App ta bar bar hang korche, please check koren.",
+   "mixed": "আমার ATM card টা নিয়ে অনেক problem হচ্ছে।"
+  }
+ },
+ "3.6": {
+  "intent": "CARD_ISSUE",
+  "name": "3.6 My complaints",
+  "expected": [
+   "polygon_services",
+   "my_tickets"
+  ],
+  "questions": {
+   "bangla_short": "আমার অভিযোগ",
+   "bangla_sentence": "আমি আগে যে অভিযোগগুলো দিয়েছিলাম সেগুলোর স্ট্যাটাস দেখতে চাই।",
+   "banglish_short": "complaint dekha jacche?",
+   "banglish_sentence": "Amar purono complaint er status ki?",
+   "mixed": "আমার আগের complaint টা কি update হয়েছে?"
+  }
+ },
+ "4.1": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.1 Freeze card",
+  "expected": [
+   "card_services",
+   "frezz_unfrezz"
+  ],
+  "questions": {
+   "bangla_short": "কার্ড ব্লক করুন",
+   "bangla_sentence": "আমার কার্ডটা হারিয়ে গেছে, দয়া করে এটা এখনই ব্লক করে দিন।",
+   "banglish_short": "card block koren",
+   "banglish_sentence": "Amar card ta haraye gese, please ekhon block kore din.",
+   "mixed": "আমার card টা block করে দিন, আমি সেটা হারিয়ে ফেলেছি।"
+  }
+ },
+ "4.2": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.2 Unfreeze card",
+  "expected": [
+   "app_actions",
+   "card_unfreeze"
+  ],
+  "questions": {
+   "bangla_short": "কার্ড আনফ্রিজ করুন",
+   "bangla_sentence": "আমার ডেবিট কার্ডটি এখন ব্লক করা আছে, এটা কি আবার চালু করা যাবে?",
+   "banglish_short": "card block koren",
+   "banglish_sentence": "Amar card ta block hoye geche, please reactivate koren.",
+   "mixed": "আমার card টা unblock করে দিন।"
+  }
+ },
+ "4.3": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.3 Close card",
+  "expected": [
+   "app_actions",
+   "card_close"
+  ],
+  "questions": {
+   "bangla_short": "কার্ড বন্ধ করুন",
+   "bangla_sentence": "আমার এই কার্ডটি চিরতরে বন্ধ করে দিন।",
+   "banglish_short": "card bond korun",
+   "banglish_sentence": "Amar card ta permanent ly close kore din please.",
+   "mixed": "আমার এই card টা cancel করে দিন।"
+  }
+ },
+ "4.4": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.4 Contactless on/off",
+  "expected": [
+   "app_actions",
+   "card_contactless"
+  ],
+  "questions": {
+   "bangla_short": "কন্ট্যাক্টলেস অফ করুন",
+   "bangla_sentence": "আমার কার্ডের কন্ট্যাক্টলেস পেমেন্ট সুবিধাটা একটু বন্ধ করে দিন।",
+   "banglish_short": "contactless bond korun",
+   "banglish_sentence": "Amar card er contactless limit koto set kora jay?",
+   "mixed": "আমার card এর contactless payment অফ করে দিন।"
+  }
+ },
+ "4.5": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.5 International transaction on/off",
+  "expected": [
+   "app_actions",
+   "card_international"
+  ],
+  "questions": {
+   "bangla_short": "ইন্টারন্যাশনাল অফ করুন",
+   "bangla_sentence": "আমার কার্ডের আন্তর্জাতিক লেনদেন বন্ধ করে দিন।",
+   "banglish_short": "intl off koren",
+   "banglish_sentence": "Amar card er international transaction off kore din please.",
+   "mixed": "আমার card এর international transaction বন্ধ করতে চাই।"
+  }
+ },
+ "4.6": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.6 Reset card PIN",
+  "expected": [
+   "app_actions",
+   "card_pin_reset"
+  ],
+  "questions": {
+   "bangla_short": "পিন পরিবর্তন করুন",
+   "bangla_sentence": "আমার কার্ডের পিন নম্বরটা আমি ভুলে গেছি, এটা কীভাবে রিসেট করবো?",
+   "banglish_short": "card pin reset",
+   "banglish_sentence": "Amar card er PIN ta change korte chai help korben?",
+   "mixed": "আমার card এর PIN reset করতে চাই, please help করুন।"
+  }
+ },
+ "4.7": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.7 Limit change — submit",
+  "expected": [
+   "app_actions",
+   "card_limit_change"
+  ],
+  "questions": {
+   "bangla_short": "লিমিট বাড়ান",
+   "bangla_sentence": "আমার ক্রেডিট কার্ডের লিমিট বাড়িয়ে দিন প্লিজ।",
+   "banglish_short": "limit barhiye din",
+   "banglish_sentence": "Amar credit card er limit ektu bariye din please.",
+   "mixed": "আমার card এর limit বাড়িয়ে দিন ২০,০০০ টাকা করে।"
+  }
+ },
+ "4.8": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.8 Limit change — list",
+  "expected": [
+   "card_info",
+   "card_limit_requests"
+  ],
+  "questions": {
+   "bangla_short": "লিমিট রিকোয়েস্ট লিস্ট",
+   "bangla_sentence": "আমি আগে যে লিমিট পরিবর্তনের রিকোয়েস্টগুলো দিয়েছি সেগুলো দেখতে চাই।",
+   "banglish_short": "limit check koro",
+   "banglish_sentence": "Amar limit change request gulo kothay dekhbo?",
+   "mixed": "আমার limit change request এর status কি এখন?"
+  }
+ },
+ "4.9": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.9 Limit change — cancel",
+  "expected": [
+   "app_actions",
+   "card_limit_cancel"
+  ],
+  "questions": {
+   "bangla_short": "লিমিট পরিবর্তন বাতিল",
+   "bangla_sentence": "আমি যে কার্ডের লিমিট বাড়ানোর রিকোয়েস্ট দিয়েছিলাম সেটা বাতিল করে দিন।",
+   "banglish_short": "limit change cancel koren",
+   "banglish_sentence": "Amar card limit change request ta cancel kore din please.",
+   "mixed": "আমার card limit change request টি cancel করে দিন।"
+  }
+ },
+ "4.10": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.10 Card products list",
+  "expected": [
+   "card_info",
+   "card_products"
+  ],
+  "questions": {
+   "bangla_short": "কার্ডের লিস্ট কি?",
+   "bangla_sentence": "আপনার ব্যাংকে কি কি ধরনের কার্ড আছে জানাবেন?",
+   "banglish_short": "card list kicu?",
+   "banglish_sentence": "apnar bank e ki ki types er card ache?",
+   "mixed": "আপনার bank এ কি কি card products আছে?"
+  }
+ },
+ "4.11": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.11 Apply for debit card",
+  "expected": [
+   "app_actions",
+   "card_apply"
+  ],
+  "questions": {
+   "bangla_short": "ডেবিট কার্ড চাই",
+   "bangla_sentence": "আমি নতুন একটি ডেবিট কার্ডের জন্য আবেদন করতে চাই।",
+   "banglish_short": "card apply korte hobe",
+   "banglish_sentence": "Amar jonno ekta notun debit card apply kore din please.",
+   "mixed": "আমার অ্যাকাউন্টের জন্য একটা নতুন debit card apply করতে চাই।"
+  }
+ },
+ "4.12": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.12 Reveal debit card details",
+  "expected": [
+   "app_actions",
+   "card_details_reveal"
+  ],
+  "questions": {
+   "bangla_short": "কার্ড নাম্বার দেখান",
+   "bangla_sentence": "আমার ডেবিট কার্ডের কার্ড নম্বর আর সিভিভিটা একটু দেখান।",
+   "banglish_short": "card details dekhau",
+   "banglish_sentence": "Amar debit card er full number ar expiry date ta dekhaben?",
+   "mixed": "আমার debit card এর details গুলো show করেন।"
+  }
+ },
+ "4.13": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.13 Apply for prepaid card",
+  "expected": [
+   "app_actions",
+   "card_apply"
+  ],
+  "questions": {
+   "bangla_short": "প্রিপেইড কার্ড চাই",
+   "bangla_sentence": "আমি একটি নতুন প্রিপেইড কার্ডের জন্য আবেদন করতে চাই।",
+   "banglish_short": "prepaid card chai",
+   "banglish_sentence": "Amar jonno ekta prepaid card apply korte parben?",
+   "mixed": "আমি একটা নতুন prepaid card apply করতে চাই।"
+  }
+ },
+ "4.14": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.14 Reveal prepaid card details",
+  "expected": [
+   "app_actions",
+   "card_details_reveal"
+  ],
+  "questions": {
+   "bangla_short": "কার্ড নাম্বার দেখান",
+   "bangla_sentence": "আমার প্রি-পেইড কার্ডের ডিটেইলসগুলো একটু দেখাবেন কি?",
+   "banglish_short": "card details dekhao",
+   "banglish_sentence": "Amar prepaid card er full number ar CVV ta dekhate parben?",
+   "mixed": "আমার prepaid card এর details গুলো একটু show করবেন?"
+  }
+ },
+ "4.15": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.15 Virtual card — submit",
+  "expected": [
+   "app_actions",
+   "card_apply"
+  ],
+  "questions": {
+   "bangla_short": "ভার্চুয়াল কার্ড চাই",
+   "bangla_sentence": "আমি একটি নতুন ভার্চুয়াল কার্ডের জন্য আবেদন করতে চাই।",
+   "banglish_short": "virtual card lagbe",
+   "banglish_sentence": "Amar jonno ekta virtual card apply kore din please.",
+   "mixed": "আমার জন্য একটি নতুন virtual card request করতে চাই।"
+  }
+ },
+ "4.16": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.16 Virtual card — list",
+  "expected": [
+   "card_info",
+   "virtual_card_requests"
+  ],
+  "questions": {
+   "bangla_short": "ভার্চুয়াল কার্ড লিস্ট",
+   "bangla_sentence": "আমার আবেদন করা ভার্চুয়াল কার্ডগুলোর স্ট্যাটাস কি?",
+   "banglish_short": "virtual card list",
+   "banglish_sentence": "Amar virtual card request gulo kothay ache?",
+   "mixed": "আমার virtual card application এর status দেখুন।"
+  }
+ },
+ "4.17": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.17 Virtual card — cancel",
+  "expected": [
+   "app_actions",
+   "card_virtual_cancel"
+  ],
+  "questions": {
+   "bangla_short": "ভার্চুয়াল কার্ড বাতিল",
+   "bangla_sentence": "আমার ভার্চুয়াল কার্ডটি দয়া করে বন্ধ করে দিন।",
+   "banglish_short": "virtual card cancel koren",
+   "banglish_sentence": "Amar virtual card ta cancel kore den please.",
+   "mixed": "আমার virtual card টা cancel করে দিন।"
+  }
+ },
+ "4.18": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.18 Virtual card — reveal",
+  "expected": [
+   "app_actions",
+   "card_details_reveal"
+  ],
+  "questions": {
+   "bangla_short": "কার্ড দেখান",
+   "bangla_sentence": "আমার ভার্চুয়াল কার্ডের নম্বরটা একটু দেখাবেন কি?",
+   "banglish_short": "card reveal koren",
+   "banglish_sentence": "Amar virtual card er full details gulo dekhano jabe?",
+   "mixed": "আমার virtual card এর CVV এবং expiry date দেখান।"
+  }
+ },
+ "4.19": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.19 Star card",
+  "expected": [
+   "app_actions",
+   "quick_view_star"
+  ],
+  "questions": {
+   "bangla_short": "কার্ড স্টার করুন",
+   "bangla_sentence": "আমার এই কার্ডটি কি হোম স্ক্রিনে পিন করা যাবে?",
+   "banglish_short": "card ta star koro",
+   "banglish_sentence": "Amar favorite card ta home screen e pin korte parbo ki?",
+   "mixed": "আমার এই card টা quick view এ স্টার করুন"
+  }
+ },
+ "4.20": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.20 Credit card bill payment (card service)",
+  "expected": [
+   "app_actions",
+   "credit_card_pay"
+  ],
+  "questions": {
+   "bangla_short": "বিল পে করতে চাই",
+   "bangla_sentence": "আমার ক্রেডিট কার্ডের বকেয়া টাকা জমা দিতে চাই।",
+   "banglish_short": "card bill pay korbo",
+   "banglish_sentence": "Amar polygon card er statement payment korte chai.",
+   "mixed": "আমার credit card এর bill payment কিভাবে করবো?"
+  }
+ },
+ "4.21": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.21 Credit card bill payment (bill service)",
+  "expected": [
+   "app_actions",
+   "other_card_pay"
+  ],
+  "questions": {
+   "bangla_short": "কার্ড বিল পেমেন্ট",
+   "bangla_sentence": "আমি অন্য ব্যাংকের ক্রেডিট কার্ডের বিল জমা দিতে চাই।",
+   "banglish_short": "bill pay korte hobe",
+   "banglish_sentence": "Amar onno bank er credit card bill pay korte hobe, amount 5000 taka.",
+   "mixed": "আমার অন্য ব্যাংকের credit card bill pay করতে চাই, card number হলো 1234।"
+  }
+ },
+ "4.22": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.22 QR payment cards — list",
+  "expected": [
+   "app_actions",
+   "qr_payment_cards"
+  ],
+  "questions": {
+   "bangla_short": "কিউআর কার্ড লিস্ট",
+   "bangla_sentence": "আমার কিউআর পেমেন্টের জন্য কোন কার্ডগুলো চালু আছে দেখতে চাই।",
+   "banglish_short": "qr card list dekha",
+   "banglish_sentence": "Amar QR payment er jonno kon card gulo active ache list diben?",
+   "mixed": "আমার QR payment cards এর list টা একটু দেখান।"
+  }
+ },
+ "4.23": {
+  "intent": "CARD_MANAGEMENT",
+  "name": "4.23 QR payment card — enable/disable",
+  "expected": [
+   "app_actions",
+   "qr_payment_cards"
+  ],
+  "questions": {
+   "bangla_short": "QR কার্ড বন্ধ করুন",
+   "bangla_sentence": "আমার QR পেমেন্ট কার্ডের সেটিংস একটু দেখতে চাই।",
+   "banglish_short": "QR card off koren",
+   "banglish_sentence": "Amar QR payment card ta disable korte parbo ki?",
+   "mixed": "আমার QR payment card এর list টা দেখতে চাই।"
+  }
+ },
+ "5.1": {
+  "intent": "CARD_REPLACEMENT",
+  "name": "5.1 List replacement requests",
+  "expected": [
+   "card_info",
+   "replacement_requests"
+  ],
+  "questions": {
+   "bangla_short": "কার্ড রিপ্লেসমেন্ট স্ট্যাটাস",
+   "bangla_sentence": "আমি আগে যে কার্ড পরিবর্তনের রিকোয়েস্ট দিয়েছিলাম সেগুলোর অবস্থা কি?",
+   "banglish_short": "card replacement status",
+   "banglish_sentence": "Amar purono card replacement request er status ki?",
+   "mixed": "আমার card replacement request গুলো check করতে চাই।"
+  }
+ },
+ "5.2": {
+  "intent": "CARD_REPLACEMENT",
+  "name": "5.2 Cancel replacement request",
+  "expected": [
+   "app_actions",
+   "replacement_cancel"
+  ],
+  "questions": {
+   "bangla_short": "রিপ্লেসমেন্ট বাতিল করুন",
+   "bangla_sentence": "আমি কার্ড পরিবর্তনের জন্য যে রিকোয়েস্ট দিয়েছিলাম সেটা বাতিল করে দিন।",
+   "banglish_short": "replacement cancel koren",
+   "banglish_sentence": "Amar card replacement request ta cancel kore din please.",
+   "mixed": "আমার card replacement request টা cancel করে দিন।"
+  }
+ },
+ "5.3": {
+  "intent": "CARD_REPLACEMENT",
+  "name": "5.3 Reveal replacement card details",
+  "expected": [
+   "app_actions",
+   "card_details_reveal"
+  ],
+  "questions": {
+   "bangla_short": "কার্ড নম্বর দেখান",
+   "bangla_sentence": "আমার নতুন রিপ্লেসমেন্ট কার্ডের ডিটেইলস একটু দেখাবেন?",
+   "banglish_short": "card details dekhao",
+   "banglish_sentence": "Amar replacement card er full details ektu show korben?",
+   "mixed": "আমার নতুন card এর expiry date আর CVV টা দেখান।"
+  }
+ },
+ "6.2": {
+  "intent": "CHECK_BALANCE",
+  "name": "6.2 Credit card summary",
+  "expected": [
+   "card_info",
+   "credit_card_summary"
+  ],
+  "questions": {
+   "bangla_short": "কার্ডের স্টেটমেন্ট",
+   "bangla_sentence": "আমার ক্রেডিট কার্ডের লিমিট এবং বকেয়া কত তা দেখতে চাই।",
+   "banglish_short": "card balance koto",
+   "banglish_sentence": "Amar credit card er outstanding koto dekhaben?",
+   "mixed": "আমার credit card summary টা একটু দেখান।"
+  }
+ },
+ "7.1": {
+  "intent": "EDIT_PERSONAL_DETAILS",
+  "name": "7.1 Get profile",
+  "expected": [
+   "profile",
+   "profile"
+  ],
+  "questions": {
+   "bangla_short": "প্রোফাইল দেখুন",
+   "bangla_sentence": "আমার অ্যাকাউন্টের প্রোফাইল ডিটেইলসগুলো একটু দেখাবেন কি?",
+   "banglish_short": "profile dekhao",
+   "banglish_sentence": "Amar account er profile details gulo check korben?",
+   "mixed": "আমার profile details গুলো একটু চেক করে দিন।"
+  }
+ },
+ "7.2": {
+  "intent": "EDIT_PERSONAL_DETAILS",
+  "name": "7.2 Update nickname",
+  "expected": [
+   "profile_update",
+   "update_nickname"
+  ],
+  "questions": {
+   "bangla_short": "নাম পরিবর্তন করুন",
+   "bangla_sentence": "আমার অ্যাপের ডিসপ্লে নামটা একটু বদলে দিতে চান।",
+   "banglish_short": "nickname change koren",
+   "banglish_sentence": "Amar account er nickname change korar option kothay?",
+   "mixed": "আমার nickname টা change করে দিন প্লিজ।"
+  }
+ },
+ "7.3/7.4": {
+  "intent": "EDIT_PERSONAL_DETAILS",
+  "name": "7.3/7.4 Upload profile image",
+  "expected": [
+   "profile_update",
+   "update_profile_image"
+  ],
+  "questions": {
+   "bangla_short": "ছবি পরিবর্তন করুন",
+   "bangla_sentence": "আমি আমার প্রোফাইল পিকচারটা পরিবর্তন করতে চাই।",
+   "banglish_short": "photo change koren",
+   "banglish_sentence": "Amar profile image update korte parbo ki?",
+   "mixed": "আমার profile picture টা change করার অপশন কোথায়?"
+  }
+ },
+ "7.5": {
+  "intent": "EDIT_PERSONAL_DETAILS",
+  "name": "7.5 Update mobile number",
+  "expected": [
+   "profile_update",
+   "update_mobile"
+  ],
+  "questions": {
+   "bangla_short": "নম্বর পরিবর্তন",
+   "bangla_sentence": "আমি আমার অ্যাকাউন্টে নতুন মোবাইল নম্বর যোগ করতে চাই।",
+   "banglish_short": "number change koren",
+   "banglish_sentence": "Amar mobile number update korte hobe please.",
+   "mixed": "আমার registered mobile number change করার জন্য কী করতে হবে?"
+  }
+ },
+ "7.6": {
+  "intent": "EDIT_PERSONAL_DETAILS",
+  "name": "7.6 Update email address",
+  "expected": [
+   "profile_update",
+   "update_email"
+  ],
+  "questions": {
+   "bangla_short": "ইমেইল পরিবর্তন করুন",
+   "bangla_sentence": "আমার প্রোফাইলে থাকা ইমেইল অ্যাড্রেসটা পরিবর্তন করে দিন।",
+   "banglish_short": "email change koren",
+   "banglish_sentence": "Amar account er email address ta change korte chai.",
+   "mixed": "আমার প্রোফাইলে নতুন email address আপডেট করে দিন।"
+  }
+ },
+ "7.7": {
+  "intent": "EDIT_PERSONAL_DETAILS",
+  "name": "7.7 Get address",
+  "expected": [
+   "profile",
+   "address"
+  ],
+  "questions": {
+   "bangla_short": "ঠিকানা দেখুন",
+   "bangla_sentence": "আমার অ্যাকাউন্টে কোন ঠিকানা দেওয়া আছে সেটা একটু দেখুন তো।",
+   "banglish_short": "amar address ki",
+   "banglish_sentence": "amar KYC te kon address deya ache check korben?",
+   "mixed": "আমার registered address টা কি আপডেট করা আছে?"
+  }
+ },
+ "7.8": {
+  "intent": "EDIT_PERSONAL_DETAILS",
+  "name": "7.8 Update address",
+  "expected": [
+   "profile_update",
+   "update_address"
+  ],
+  "questions": {
+   "bangla_short": "ঠিকানা পরিবর্তন করুন",
+   "bangla_sentence": "আমার বর্তমান ঠিকানাটা পরিবর্তন করে দিতে পারবেন?",
+   "banglish_short": "address change koren",
+   "banglish_sentence": "Amar permanent address update korte hobe, ki process?",
+   "mixed": "আমার permanent address change করার জন্য process টা বলুন।"
+  }
+ },
+ "7.9": {
+  "intent": "EDIT_PERSONAL_DETAILS",
+  "name": "7.9 Submit KYC",
+  "expected": [
+   "app_actions",
+   "kyc_submit"
+  ],
+  "questions": {
+   "bangla_short": "KYC আপডেট চাই",
+   "bangla_sentence": "আমার এনআইডি কার্ড এবং ছবি জমা দিতে চাই।",
+   "banglish_short": "KYC update korbo",
+   "banglish_sentence": "Amar identity documents gulo submit korte chai.",
+   "mixed": "আমার KYC update করার জন্য NID photo জমা দিব।"
+  }
+ },
+ "7.10": {
+  "intent": "EDIT_PERSONAL_DETAILS",
+  "name": "7.10 My contacts",
+  "expected": [
+   "profile",
+   "contacts"
+  ],
+  "questions": {
+   "bangla_short": "আমার কন্টাক্টস",
+   "bangla_sentence": "আমার অ্যাকাউন্টে কোন কোন ফোন নাম্বার আর ইমেইল আছে তা দেখুন।",
+   "banglish_short": "contact list kothay",
+   "banglish_sentence": "Amar account e kon kon numbers register kora ache check korben",
+   "mixed": "আমার registered phone number এবং email address গুলো দেখান।"
+  }
+ },
+ "7.11": {
+  "intent": "EDIT_PERSONAL_DETAILS",
+  "name": "7.11 Profile change — submit",
+  "expected": [
+   "app_actions",
+   "profile_change_request"
+  ],
+  "questions": {
+   "bangla_short": "নাম পরিবর্তন করুন",
+   "bangla_sentence": "আমার এনআইডি নম্বরটি আপডেট করে দিন।",
+   "banglish_short": "phone number change",
+   "banglish_sentence": "Amar email id change korte chai please.",
+   "mixed": "আমার প্রোফাইলে mobile number change করতে চাই।"
+  }
+ },
+ "7.12": {
+  "intent": "EDIT_PERSONAL_DETAILS",
+  "name": "7.12 Profile change — list",
+  "expected": [
+   "profile",
+   "profile_change_requests"
+  ],
+  "questions": {
+   "bangla_short": "প্রোফাইল আপডেট লিস্ট",
+   "bangla_sentence": "আমার আগের প্রোফাইল পরিবর্তনের রিকোয়েস্টগুলোর স্ট্যাটাস দেখতে চাই।",
+   "banglish_short": "profile change list",
+   "banglish_sentence": "Amar profile change request gular status ki?",
+   "mixed": "আমার profile change request এর status দেখতে চাই।"
+  }
+ },
+ "7.13": {
+  "intent": "EDIT_PERSONAL_DETAILS",
+  "name": "7.13 Contact priority — submit",
+  "expected": [
+   "app_actions",
+   "contact_priority_change"
+  ],
+  "questions": {
+   "bangla_short": "নম্বর পরিবর্তন",
+   "bangla_sentence": "আমার প্রাইমারি ফোন নম্বরটা পরিবর্তন করে দিতে চাই।",
+   "banglish_short": "number change koren",
+   "banglish_sentence": "Amar primary contact number update korte parbo?",
+   "mixed": "আমার registered mobile number টা change করতে চাই।"
+  }
+ },
+ "7.14": {
+  "intent": "EDIT_PERSONAL_DETAILS",
+  "name": "7.14 Contact priority — list",
+  "expected": [
+   "profile",
+   "contact_priority_requests"
+  ],
+  "questions": {
+   "bangla_short": "রি क्वेস্ট স্ট্যাটাস",
+   "bangla_sentence": "আমার প্রাইমারি কন্টাক্ট পরিবর্তনের রিকোয়েস্টগুলো এখন কী অবস্থা?",
+   "banglish_short": "request status dekhan",
+   "banglish_sentence": "Amar primary contact change request er status ki?",
+   "mixed": "আমার contact change request এর status কি দেখাবেন?"
+  }
+ },
+ "8.1": {
+  "intent": "FAILED_TRANSFER",
+  "name": "8.1 Transaction history",
+  "expected": [
+   "polygon_services",
+   "transaction_history"
+  ],
+  "questions": {
+   "bangla_short": "লেনদেনের হিস্টরি",
+   "bangla_sentence": "গত মাসের সব ট্রানজ্যাকশন দেখতে চাই।",
+   "banglish_short": "statement dekhaite hobe",
+   "banglish_sentence": "Amar account er recent activity show korbe ki?",
+   "mixed": "আমার গত সপ্তাহের transactions গুলো দেখতে চাই।"
+  }
+ },
+ "8.2": {
+  "intent": "FAILED_TRANSFER",
+  "name": "8.2 Raise dispute",
+  "expected": [
+   "service_requests",
+   "raise_dispute"
+  ],
+  "questions": {
+   "bangla_short": "টাকা কেটেছে না",
+   "bangla_sentence": "আমি বিকাশ থেকে টাকা পাঠালাম কিন্তু এখনো টাকাটা পৌঁছায়নি।",
+   "banglish_short": "transaction fail hoyeche",
+   "banglish_sentence": "Amar account theke 500 taka deduct hoyeche kintu receive hoyni.",
+   "mixed": "আমার account থেকে টাকা কেটে গেছে কিন্তু transaction failed দেখাচ্ছে।"
+  }
+ },
+ "8.3": {
+  "intent": "FAILED_TRANSFER",
+  "name": "8.3 List disputes",
+  "expected": [
+   "service_requests",
+   "disputes"
+  ],
+  "questions": {
+   "bangla_short": "অভিযোগ দেখুন",
+   "bangla_sentence": "আমার আগের সব ট্রানজ্যাকশন ডিসপিউটগুলো দেখতে চাই।",
+   "banglish_short": "dispute list dekhao",
+   "banglish_sentence": "Amar purono transaction dispute gulo check korbo",
+   "mixed": "আমার গত সপ্তাহের transaction dispute এর status কি?"
+  }
+ },
+ "8.4": {
+  "intent": "FAILED_TRANSFER",
+  "name": "8.4 Submit complaint",
+  "expected": [
+   "support",
+   "submit_complaint"
+  ],
+  "questions": {
+   "bangla_short": "অভিযোগ করতে চাই",
+   "bangla_sentence": "আপনার ব্রাঞ্চের স্টাফদের ব্যবহার খুবই খারাপ ছিল।",
+   "banglish_short": "complaint korte chai",
+   "banglish_sentence": "App e login korchi na, please solve koren.",
+   "mixed": "আমার debit card টা কাজ করছে না, please check করুন।"
+  }
+ },
+ "8.5": {
+  "intent": "FAILED_TRANSFER",
+  "name": "8.5 My complaints",
+  "expected": [
+   "polygon_services",
+   "my_tickets"
+  ],
+  "questions": {
+   "bangla_short": "আমার অভিযোগগুলো",
+   "bangla_sentence": "আমি আগে যে অভিযোগগুলো দিয়েছিলাম সেগুলো দেখতে চাই।",
+   "banglish_short": "complaint status ki?",
+   "banglish_sentence": "Amar purono complaints gulo check korte parbo?",
+   "mixed": "আমার আগের complaints গুলো কি status আছে?"
+  }
+ },
+ "10.1": {
+  "intent": "FEES",
+  "name": "10.1 Transaction charge quote",
+  "expected": [
+   "fees",
+   "fee_quote"
+  ],
+  "questions": {
+   "bangla_short": "চার্জ কত?",
+   "bangla_sentence": "অন্য ব্যাংকে টাকা পাঠালে কত চার্জ কাটবে?",
+   "banglish_short": "charge koto?",
+   "banglish_sentence": "Bkash e taka pathale koto charge lagbe?",
+   "mixed": "অন্য bank e transfer korle charge koto?"
+  }
+ },
+ "12.2": {
+  "intent": "LOST_OR_STOLEN_CARD",
+  "name": "12.2 Freeze card immediately",
+  "expected": [
+   "card_services",
+   "frezz_unfrezz"
+  ],
+  "questions": {
+   "bangla_short": "কার্ড ব্লক করুন",
+   "bangla_sentence": "আমার কার্ডটা হারিয়ে গেছে, দয়া করে এটা এখনই বন্ধ করে দিন।",
+   "banglish_short": "card block koren",
+   "banglish_sentence": "Amar card hoye geche, please ekhonoi block korun.",
+   "mixed": "আমার card টা block করেন, হারিয়ে গেছে।"
+  }
+ },
+ "13.1": {
+  "intent": "MINI_STATEMENT",
+  "name": "13.1 Transaction list",
+  "expected": [
+   "polygon_services",
+   "transaction_history"
+  ],
+  "questions": {
+   "bangla_short": "ট্রানজাকশন লিস্ট",
+   "bangla_sentence": "আমার গত মাসের সব লেনদেনের স্টেটমেন্টটা দেখতে চাই।",
+   "banglish_short": "transaction list dekhaon",
+   "banglish_sentence": "Amar account er recent activity list ta ki diben?",
+   "mixed": "আমার গত সপ্তাহের সব transactions দেখতে চাই।"
+  }
+ },
+ "13.2": {
+  "intent": "MINI_STATEMENT",
+  "name": "13.2 Account transactions",
+  "expected": [
+   "polygon_services",
+   "transaction_history"
+  ],
+  "questions": {
+   "bangla_short": "লেনদেন দেখুন",
+   "bangla_sentence": "গত মাসের সব ট্রানজেকশন লিস্টটা দেখতে চাই।",
+   "banglish_short": "transaction dekhao",
+   "banglish_sentence": "Amar account er recent activity dekha jabe?",
+   "mixed": "আমার account এর গত সপ্তাহের সব transaction history দিন।"
+  }
+ },
+ "13.3": {
+  "intent": "MINI_STATEMENT",
+  "name": "13.3 Credit card statement",
+  "expected": [
+   "card_info",
+   "credit_card_statement"
+  ],
+  "questions": {
+   "bangla_short": "কার্ড স্টেটমেন্ট চাই",
+   "bangla_sentence": "আমার গত মাসের ক্রেডিট কার্ডের স্টেটমেন্টটা দেখতে চাই।",
+   "banglish_short": "card statement dekhau",
+   "banglish_sentence": "amar last month er credit card statement ta ki pabo?",
+   "mixed": "আমার credit card statement টা দেখতে চাই জানুয়ারি মাসের।"
+  }
+ },
+ "14.1": {
+  "intent": "TRANSFER",
+  "name": "14.1 Own account transfer",
+  "expected": [
+   "transfer",
+   "bank_transfer",
+   "own_account"
+  ],
+  "questions": {
+   "bangla_short": "টাকা ট্রান্সফার করুন",
+   "bangla_sentence": "আমার অন্য একাউন্টে ৫০০ টাকা পাঠিয়ে দিন।",
+   "banglish_short": "transfer koren 2000",
+   "banglish_sentence": "Amar own account e 5000 taka transfer korte chai.",
+   "mixed": "আমার অন্য account এ 1000 টাকা transfer করে দিন।"
+  }
+ },
+ "14.2": {
+  "intent": "TRANSFER",
+  "name": "14.2 City Bank transfer",
+  "expected": [
+   "transfer",
+   "bank_transfer",
+   "city_account"
+  ],
+  "questions": {
+   "bangla_short": "সিটি ব্যাংক ট্রান্সফার",
+   "bangla_sentence": "আমার নিজের অন্য একাউন্টে ৫০০০ টাকা পাঠিয়ে দিন।",
+   "banglish_short": "city bank transfer koren",
+   "banglish_sentence": "Polygon Bank e 2000 taka transfer korte hobe.",
+   "mixed": "আমার অন্য account এ 1000 taka transfer করেন।"
+  }
+ },
+ "14.3": {
+  "intent": "TRANSFER",
+  "name": "14.3 Other bank transfer",
+  "expected": [
+   "transfer",
+   "bank_transfer",
+   "other_bank"
+  ],
+  "questions": {
+   "bangla_short": "অন্য ব্যাংকে পাঠাব",
+   "bangla_sentence": "আমি আমার বন্ধুকে ডাচ-বাংলা ব্যাংকে ৫০০০ টাকা পাঠাতে চাই।",
+   "banglish_short": "duit pathate hobe",
+   "banglish_sentence": "Amar ekta friend ke baki taka transfer korte hobe, account number janan.",
+   "mixed": "আমার brother এর account এ ২,০০০ টাকা transfer করে দিন।"
+  }
+ },
+ "14.4": {
+  "intent": "TRANSFER",
+  "name": "14.4 Other banks list",
+  "expected": [
+   "app_actions",
+   "other_banks_list"
+  ],
+  "questions": {
+   "bangla_short": "অন্য ব্যাংক লিস্ট",
+   "bangla_sentence": "আমি অন্য কোন কোন ব্যাংকে টাকা পাঠাতে পারি তা দেখতে চাই।",
+   "banglish_short": "onno bank list",
+   "banglish_sentence": "Amar onno bank e transfer korar list ta dekha jabe?",
+   "mixed": "আমি অন্য banks এর list দেখতে চাই।"
+  }
+ },
+ "14.5": {
+  "intent": "TRANSFER",
+  "name": "14.5 Gift transfer",
+  "expected": [
+   "app_actions",
+   "gift_transfer"
+  ],
+  "questions": {
+   "bangla_short": "গিফট পাঠাবো",
+   "bangla_sentence": "আমার বন্ধুর জন্য একটা উইশ মেসেজসহ গিফট পাঠাতে চাই।",
+   "banglish_short": "gift pathate hobe?",
+   "banglish_sentence": "Amar bondhuke 500 taka gift pathate hobe wish message shoho.",
+   "mixed": "আমি আমার sister কে একটা gift transfer করতে চাই 1000 টাকা দিয়ে।"
+  }
+ },
+ "14.6": {
+  "intent": "TRANSFER",
+  "name": "14.6 Gifts received",
+  "expected": [
+   "transfer_info",
+   "gifts_received"
+  ],
+  "questions": {
+   "bangla_short": "উপহারগুলো দেখান",
+   "bangla_sentence": "আমার অ্যাকাউন্টে এখন পর্যন্ত কী কী গিফট এসেছে তা দেখতে চাই।",
+   "banglish_short": "gift gulo dekhau",
+   "banglish_sentence": "Amar account e koto gulo gift peli check koren please.",
+   "mixed": "আমার সব gifts গুলো দেখতে চাই, please help করেন।"
+  }
+ },
+ "14.7": {
+  "intent": "TRANSFER",
+  "name": "14.7 Generic transaction",
+  "expected": "NOT_IN_CHAT",
+  "questions": {
+   "bangla_short": "টাকা পাঠান",
+   "bangla_sentence": "আমার একাউন্টে ৫০০ টাকা পাঠিয়ে দিন।",
+   "banglish_short": "taka pathan",
+   "banglish_sentence": "Amar account e 500 taka transfer koren please.",
+   "mixed": "আমার account এ ৫০০ টাকা transfer করে দিন।"
+  }
+ },
+ "14.9": {
+  "intent": "TRANSFER",
+  "name": "14.9 Email transfer — create",
+  "expected": [
+   "app_actions",
+   "email_transfer_create"
+  ],
+  "questions": {
+   "bangla_short": "ইমেইল দিয়ে পাঠান",
+   "bangla_sentence": "আমি আমার বন্ধুকে ইমেইল দিয়ে টাকা পাঠাতে চাই।",
+   "banglish_short": "email diye pathan",
+   "banglish_sentence": "Amar bondhuke email diye 500 taka transfer korte hobe.",
+   "mixed": "আমি ইমেইল দিয়ে ১০০ টাকা transfer করবো।"
+  }
+ },
+ "14.10": {
+  "intent": "TRANSFER",
+  "name": "14.10 Email transfer — list",
+  "expected": [
+   "transfer_info",
+   "email_transfers"
+  ],
+  "questions": {
+   "bangla_short": "ইমেইল ট্রান্সফার লিস্ট",
+   "bangla_sentence": "আমি আমার আগের ইমেইল ট্রান্সফারগুলোর লিস্ট দেখতে চাই।",
+   "banglish_short": "email transfer list dekha",
+   "banglish_sentence": "Amar kora email transfers gulo dekha jabe ki?",
+   "mixed": "আমার গত মাসের email transfer list টা দেখান।"
+  }
+ },
+ "14.11": {
+  "intent": "TRANSFER",
+  "name": "14.11 Email transfer — details",
+  "expected": [
+   "transfer_info",
+   "email_transfers"
+  ],
+  "questions": {
+   "bangla_short": "ইমেইল ট্রান্সফার দেখুন",
+   "bangla_sentence": "আমি গত সপ্তাহে যে ইমেইল ট্রান্সফারগুলো করেছি সেগুলোর ডিটেইলস দেখতে চাই।",
+   "banglish_short": "email transfer dekhao",
+   "banglish_sentence": "Amar kachhe koto gulo email transfer hoyeche details janan please.",
+   "mixed": "আমার গত মাসের email transfers এর status দেখতে চাই।"
+  }
+ },
+ "14.12": {
+  "intent": "TRANSFER",
+  "name": "14.12 Email transfer — cancel",
+  "expected": [
+   "app_actions",
+   "email_transfer_manage"
+  ],
+  "questions": {
+   "bangla_short": "ট্রান্সফার বাতিল করুন",
+   "bangla_sentence": "আমার ইমেইল ট্রান্সফারটা কি বাতিল করা যাবে?",
+   "banglish_short": "transfer cancel koren",
+   "banglish_sentence": "Amar email transfer ta cancel kore din please",
+   "mixed": "আমার ৫০০০ টাকার email transfer টা cancel করে দিন"
+  }
+ },
+ "14.13": {
+  "intent": "TRANSFER",
+  "name": "14.13 Email transfer — resend",
+  "expected": [
+   "app_actions",
+   "email_transfer_manage"
+  ],
+  "questions": {
+   "bangla_short": "ইমেইল আবার পাঠান",
+   "bangla_sentence": "আমার ট্র্যান্সফার কনফার্মেশন ইমেইলটা আবার পাঠাবেন কি?",
+   "banglish_short": "email abar pathan",
+   "banglish_sentence": "Amar transfer notification mail ta abar pathan please.",
+   "mixed": "আমার transfer confirmation mail টা আবার পাঠান।"
+  }
+ },
+ "14.14": {
+  "intent": "TRANSFER",
+  "name": "14.14 Wallet/MFS transfer",
+  "expected": [
+   "transfer",
+   "wallet_transfer"
+  ],
+  "questions": {
+   "bangla_short": "বিকাশ পাঠাতে চাই",
+   "bangla_sentence": "আমার বিকাশ অ্যাকাউন্টে ৫০০ টাকা পাঠিয়ে দিন।",
+   "banglish_short": "bkash transfer koren",
+   "banglish_sentence": "Amar bkash e 1000 taka send koren please.",
+   "mixed": "আমার Nagad এ ৫০০ টাকা transfer করে দিন।"
+  }
+ },
+ "14.16": {
+  "intent": "TRANSFER",
+  "name": "14.16 QR pay",
+  "expected": [
+   "app_actions",
+   "qr_payment"
+  ],
+  "questions": {
+   "bangla_short": "কিভাবে QR পে করবেন?",
+   "bangla_sentence": "আমি কি কিউআর কোড স্ক্যান করে পেমেন্ট করতে পারি?",
+   "banglish_short": "qr pay kivabe?",
+   "banglish_sentence": "ami QR scan kore pay korte chai",
+   "mixed": "আমি QR code scan করে payment কিভাবে করবো?"
+  }
+ },
+ "14.17": {
+  "intent": "TRANSFER",
+  "name": "14.17 QR parse",
+  "expected": [
+   "app_actions",
+   "qr_payment"
+  ],
+  "questions": {
+   "bangla_short": "কিউআর পেমেন্ট",
+   "bangla_sentence": "আমি কি কিউআর কোড স্ক্যান করে টাকা পাঠাতে পারি?",
+   "banglish_short": "qr scan korbo",
+   "banglish_sentence": "ei qr code scan kore payment kivabe korbo?",
+   "mixed": "আমি কি QR code scan করে payment করতে পারবো?"
+  }
+ },
+ "14.18": {
+  "intent": "TRANSFER",
+  "name": "14.18 QR payment history",
+  "expected": [
+   "transfer_info",
+   "qr_payment_history"
+  ],
+  "questions": {
+   "bangla_short": "QR হিস্ট্রি দেখুন",
+   "bangla_sentence": "আমি গত সপ্তাহে কতগুলো QR পেমেন্ট করেছি তা দেখতে চাই।",
+   "banglish_short": "QR payment history",
+   "banglish_sentence": "Amar QR payment history check korte parbo ki?",
+   "mixed": "আমার গত মাসের QR payment history টা দেখতে চাই।"
+  }
+ },
+ "14.19": {
+  "intent": "TRANSFER",
+  "name": "14.19 Beneficiary — list",
+  "expected": [
+   "polygon_services",
+   "beneficiary"
+  ],
+  "questions": {
+   "bangla_short": "বেনিফিশিয়ারি লিস্ট",
+   "bangla_sentence": "আমার সেভ করা বেনিফিশিয়ারিদের তালিকাটা একটু দেখান।",
+   "banglish_short": "beneficiary list dekhao",
+   "banglish_sentence": "Amar saved beneficiary list ta kothay pabo?",
+   "mixed": "আমার saved beneficiary list টা একটু দেখাবেন?"
+  }
+ },
+ "14.20": {
+  "intent": "TRANSFER",
+  "name": "14.20 Beneficiary — add",
+  "expected": [
+   "beneficiary_management",
+   "beneficiary_add"
+  ],
+  "questions": {
+   "bangla_short": "বেনিফিশিয়ারি যোগ করুন",
+   "bangla_sentence": "আমি নতুন একজন বেনিফিশিয়ারি সেভ করতে চাই।",
+   "banglish_short": "beneficiary add korte hobe",
+   "banglish_sentence": "Amar ekta notun beneficiary register korte hobe please.",
+   "mixed": "আমি নতুন beneficiary add করার process টা বলতে পারেন?"
+  }
+ },
+ "14.21": {
+  "intent": "TRANSFER",
+  "name": "14.21 Beneficiary — edit",
+  "expected": [
+   "app_actions",
+   "beneficiary_edit"
+  ],
+  "questions": {
+   "bangla_short": "বেনেফিশিয়ারি পরিবর্তন",
+   "bangla_sentence": "আমি আমার সেভ করা বেনিফিশিয়ারির নামটা একটু এডিট করতে চাই।",
+   "banglish_short": "beneficiary edit koren",
+   "banglish_sentence": "amar save kora beneficiary er nickname change korte parbo?",
+   "mixed": "আমার saved beneficiary এর নামটা edit করতে চাই।"
+  }
+ },
+ "14.22": {
+  "intent": "TRANSFER",
+  "name": "14.22 Beneficiary — delete",
+  "expected": [
+   "app_actions",
+   "beneficiary_delete"
+  ],
+  "questions": {
+   "bangla_short": "বেনেফিশিয়ারি ডিলিট করুন",
+   "bangla_sentence": "আমার সেভ করা বেনিফিশিয়ারি লিস্ট থেকে নামটা বাদ দিন।",
+   "banglish_short": "beneficiary delete koren",
+   "banglish_sentence": "Amar saved beneficiary list theke remove kore din please.",
+   "mixed": "আমার beneficiary list থেকে বিকাশ নাম্বারটা delete করে দিন।"
+  }
+ },
+ "14.23": {
+  "intent": "TRANSFER",
+  "name": "14.23 Beneficiary — upload/change photo",
+  "expected": [
+   "app_actions",
+   "beneficiary_photo"
+  ],
+  "questions": {
+   "bangla_short": "ছবি পরিবর্তন করুন",
+   "bangla_sentence": "আমি আমার সেভ করা বেনিফিশিয়ারি এর ছবিটা পাল্টাতে চাই।",
+   "banglish_short": "photo change koren",
+   "banglish_sentence": "Amar saved beneficiary er photo update korte parbo ki?",
+   "mixed": "আমি beneficiary এর photo টা change করতে চাই।"
+  }
+ },
+ "14.24": {
+  "intent": "TRANSFER",
+  "name": "14.24 Beneficiary — remove photo",
+  "expected": [
+   "app_actions",
+   "beneficiary_photo"
+  ],
+  "questions": {
+   "bangla_short": "ছবিটি মুছে দিন",
+   "bangla_sentence": "আমার সেভ করা বেিনিফিচারি থেকে ছবিটা সরিয়ে দিন।",
+   "banglish_short": "photo remove koren",
+   "banglish_sentence": "amar beneficiary list theke photo ta delete kore den",
+   "mixed": "বেিনিফিচারি থেকে photo টা remove করে দিন।"
+  }
+ },
+ "14.25": {
+  "intent": "TRANSFER",
+  "name": "14.25 Beneficiary — pin/unpin",
+  "expected": [
+   "app_actions",
+   "beneficiary_pin"
+  ],
+  "questions": {
+   "bangla_short": "বেনিফিশিয়ারি পিন করুন",
+   "bangla_sentence": "আমি আমার পছন্দের ব্যক্তিকে লিস্টের উপরে পিন করতে চাই।",
+   "banglish_short": "beneficiary pin korbo",
+   "banglish_sentence": "Amar regular beneficiary take pin korle ki list er upore thakbe?",
+   "mixed": "আমার favorite beneficiary টা pin করার অপশন কোথায়?"
+  }
+ },
+ "14.27": {
+  "intent": "TRANSFER",
+  "name": "14.27 My transfer limit — get",
+  "expected": [
+   "transfer_info",
+   "transfer_limit"
+  ],
+  "questions": {
+   "bangla_short": "ট্রান্সফার লিমিট কত?",
+   "bangla_sentence": "আমার ট্রান্সফার লিমিট কতটুকু তা একটু জানান।",
+   "banglish_short": "transfer limit koto?",
+   "banglish_sentence": "Amar current transfer limit koto check korben?",
+   "mixed": "আমার transfer limit কত সেটা একটু check করেন।"
+  }
+ },
+ "14.28": {
+  "intent": "TRANSFER",
+  "name": "14.28 My transfer limit — request change",
+  "expected": [
+   "app_actions",
+   "transfer_limit_change"
+  ],
+  "questions": {
+   "bangla_short": "লিমিট বাড়িয়ে দিন",
+   "bangla_sentence": "আমার ট্রান্সফার লিমিটটা একটু বাড়িয়ে দেওয়ার ব্যবস্থা করবেন কি?",
+   "banglish_short": "limit bariye din",
+   "banglish_sentence": "Amar transfer limit ta baraye din please, boro amount pathate chai.",
+   "mixed": "আমার transfer limit টা একটু increase করবেন?"
+  }
+ },
+ "14.29": {
+  "intent": "TRANSFER",
+  "name": "14.29 My transfer limit — cancel pending change",
+  "expected": [
+   "app_actions",
+   "transfer_limit_change"
+  ],
+  "questions": {
+   "bangla_short": "লিমিট পরিবর্তন বাতিল",
+   "bangla_sentence": "আমি যে লিমিট পরিবর্তনের রিকোয়েস্ট দিয়েছিলাম সেটা বাতিল করে দিন।",
+   "banglish_short": "limit change cancel",
+   "banglish_sentence": "Amar transfer limit change request ta cancel kore din please.",
+   "mixed": "আমার transfer limit change request টা cancel করে দিন।"
+  }
+ },
+ "Greeting and small talk": {
+  "intent": "GREETING",
+  "name": "Greeting and small talk",
+  "expected": "KB",
+  "questions": {
+   "bangla_short": "আসসালামু আলাইকুম",
+   "bangla_sentence": "আপনার সাথে কথা বলে খুব ভালো লাগলো, ধন্যবাদ।",
+   "banglish_short": "thanks re",
+   "banglish_sentence": "Hello, help korben please.",
+   "mixed": "আমার account check করার জন্য thanks."
+  }
+ },
+ "General bank knowledge and off-topic": {
+  "intent": "FALLBACK",
+  "name": "General bank knowledge and off-topic",
+  "expected": "KB",
+  "questions": {
+   "bangla_short": "কি খবর?",
+   "bangla_sentence": "আপনার এখানে কি কোনো লোন পাওয়া যাবে?",
+   "banglish_short": "khobor ki?",
+   "banglish_sentence": "Amar account e ki kono loan pabo?",
+   "mixed": "আপনার এখানে কি কোনো personal loan পাওয়া যাবে?"
+  }
+ }
+}

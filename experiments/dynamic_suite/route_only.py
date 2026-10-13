@@ -3,6 +3,7 @@ saved service-list snapshot. No bank, no backend, no reply writing -- it measure
 whether the right service is picked, so prompts can be tuned while the bank is down.
 
   python -m experiments.dynamic_suite.route_only [--only 1.6,4.8] [--styles one_word,casual]
+      [--questions experiments/dynamic_suite/questions_multilingual.json]
 
 Report: experiments/results/dynamic/route_<time>.jsonl and a summary on stdout.
 """
@@ -43,7 +44,8 @@ async def main():
         cached['categories'].append(ui_actions.catalog_category())
     taxonomy_module._cache = cached
     taxonomy_module._index = taxonomy_module._build_index(cached["categories"])
-    rows = json.loads(QUESTIONS.read_text())
+    questions_file = Path(sys.argv[sys.argv.index("--questions") + 1]) if "--questions" in sys.argv else QUESTIONS
+    rows = json.loads(questions_file.read_text())
     stamp = time.strftime("%Y%m%d_%H%M%S")
     records = []
     with open(OUT / f"route_{stamp}.jsonl", "w") as log:
@@ -54,19 +56,22 @@ async def main():
             for style, question in row["questions"].items():
                 if styles and style not in styles:
                     continue
+                started = time.monotonic()
                 result = as_result(await classify(question, []))
+                ms = round((time.monotonic() - started) * 1000)
                 # a transfer routed without its subservice is asked about by the chat, so it still counts
                 status, why = judge(expected, "", result)
                 rec = {"row": key, "name": row["name"], "style": style, "question": question,
                        "got": f'{result.get("type")} {result.get("category")}/{result.get("service")}/{result.get("subservice")}',
-                       "status": status, "why": why}
+                       "status": status, "why": why, "ms": ms}
                 records.append(rec)
                 log.write(json.dumps(rec, ensure_ascii=False) + "\n")
                 log.flush()
                 if status != "PASS":
                     print(f"{status:8} {key:8} {style:9} {question[:60]!r} -> {rec['got']}", flush=True)
     total = Counter(r["status"] for r in records)
-    print(f"\n{len(records)} questions: {dict(total)}")
+    ms = sorted(r["ms"] for r in records) or [0]
+    print(f"\n{len(records)} questions: {dict(total)}  (classify median {ms[len(ms) // 2]} ms, p90 {ms[int(len(ms) * 0.9)]} ms)")
     by_style = {}
     for r in records:
         by_style.setdefault(r["style"], Counter())[r["status"]] += 1

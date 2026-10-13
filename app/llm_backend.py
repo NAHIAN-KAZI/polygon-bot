@@ -9,8 +9,9 @@ unchanged. With LLM_PROVIDER=openai it is translated for an OpenAI-compatible se
   (Gemma's chat template takes a single system turn and strict user/assistant alternation).
 - format "json" becomes JSON mode; a format schema becomes a json_schema response format.
 - tools are emulated with a json_schema response format (one {"name", "arguments"} object per
-  tool), since the server may run without a tool-call parser; the reply comes back as
-  message.tool_calls exactly as Ollama would give it.
+  tool), since the server may run without a tool-call parser -- or, with LLM_TOOL_MODE
+  native_auto / native_required, sent as the server's own tool calls. Either way the reply comes
+  back as message.tool_calls exactly as Ollama would give it.
 - options.temperature / options.num_predict map to temperature / max_tokens; num_ctx and
   think have no OpenAI equivalent and are dropped.
 - a message's "images" (raw base64, Ollama's format) become image_url content parts, and
@@ -118,7 +119,10 @@ async def post(path: str, payload: dict, *, timeout: float | None) -> dict:
     if path == "/api/generate":
         return {"response": content, "done": True}
     reply = {"role": "assistant", "content": content}
-    if payload.get("tools"):
+    native_calls = _native_tool_calls(message.get("tool_calls"), payload.get("tools") or [])
+    if native_calls:
+        reply = {"role": "assistant", "content": "", "tool_calls": native_calls}
+    elif payload.get("tools"):
         calls = _tool_calls_from_json(content, payload["tools"])
         if calls:
             reply = {"role": "assistant", "content": "", "tool_calls": calls}
@@ -192,7 +196,8 @@ def _to_openai(path: str, payload: dict) -> dict:
     else:
         messages = [_plain_message(m) for m in payload.get("messages") or []]
     tools = payload.get("tools")
-    if tools:
+    native = bool(tools) and settings.LLM_TOOL_MODE != "emulated"
+    if tools and not native:
         # After the caller's instructions, not before: with the tool list first, gemma4
         # answered "what are your branch hours?" with ask_clarification instead of the KB.
         messages.append({"role": "system", "content": _tools_instruction(tools)})
@@ -207,7 +212,12 @@ def _to_openai(path: str, payload: dict) -> dict:
     if "num_predict" in options:
         body["max_tokens"] = options["num_predict"]
     fmt = payload.get("format")
-    if tools:
+    if native:
+        # The server's own tool calling (vLLM --enable-auto-tool-choice): "auto" lets the model
+        # call in its trained format, "required" forces a call through structured output.
+        body["tools"] = tools
+        body["tool_choice"] = "required" if settings.LLM_TOOL_MODE == "native_required" else "auto"
+    elif tools:
         body["response_format"] = _json_schema("tool_call", _tools_schema(tools))
     elif fmt == "json":
         body["response_format"] = {"type": "json_object"}
@@ -302,6 +312,23 @@ def _tools_schema(tools: list[dict]) -> dict:
 
 def _json_schema(name: str, schema: dict) -> dict:
     return {"type": "json_schema", "json_schema": {"name": name, "schema": schema}}
+
+
+def _native_tool_calls(calls, tools: list[dict]) -> list[dict]:
+    """OpenAI tool_calls (arguments as a JSON string) in Ollama's shape (arguments as a dict),
+    keeping only calls to the offered tools."""
+    names = {(tool.get("function") or {}).get("name") for tool in tools}
+    out = []
+    for call in calls or []:
+        fn = call.get("function") or {}
+        if fn.get("name") not in names:
+            continue
+        try:
+            arguments = json.loads(fn.get("arguments") or "{}")
+        except ValueError:
+            arguments = {}
+        out.append({"function": {"name": fn["name"], "arguments": arguments if isinstance(arguments, dict) else {}}})
+    return out
 
 
 def _tool_calls_from_json(content: str, tools: list[dict]) -> list[dict]:

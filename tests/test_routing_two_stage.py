@@ -29,9 +29,12 @@ _TAXONOMY = {
 }
 
 
-def test_every_described_service_belongs_to_exactly_one_domain():
+def test_every_described_service_belongs_to_one_domain_or_its_declared_ones():
+    # Exactly one, except app actions that declare several areas (starring an account OR a card).
     counts = Counter(key for _, (_, keys) in DOMAINS.items() for key in keys)
-    assert all(counts[key] == 1 for key in SERVICE_DESCRIPTIONS)
+    declared = {(routing.ui_actions.CATEGORY, a.id): len(a.domain) for a in routing.ui_actions.UI_ACTIONS.values()
+                if isinstance(a.domain, tuple)}
+    assert all(counts[key] == declared.get(key, 1) for key in SERVICE_DESCRIPTIONS)
     assert set(counts) <= set(SERVICE_DESCRIPTIONS)
 
 
@@ -187,12 +190,15 @@ def test_wants_do_falls_back_to_the_whole_domain_when_it_has_no_do_service(monke
     assert allowed == lookups
 
 
-def test_wants_see_removes_the_app_actions_but_keeps_the_lookups(monkeypatch):
+def test_wants_see_removes_the_app_actions_but_keeps_lookups_and_info_actions(monkeypatch):
     full = DOMAINS["cards"][1]
-    assert full & routing.ui_actions.keys()  # the domain does have app actions
+    doing = routing.ui_actions.keys() - routing.ui_actions.info_keys()
+    assert full & doing and full & routing.ui_actions.info_keys()  # the domain has both kinds
     allowed, _ = _scope(monkeypatch, "cards", "see")
-    assert allowed == full - routing.ui_actions.keys()
-    assert allowed and not (allowed & routing.ui_actions.keys())
+    assert allowed == full - doing
+    # "show my full card number" must stay reachable when the customer wants to see something
+    assert (routing.ui_actions.CATEGORY, "card_details_reveal") in allowed
+    assert not (allowed & doing)
 
 
 @pytest.mark.parametrize("wants", [None, "maybe", "", 7])

@@ -431,8 +431,12 @@ def build_system_prompt(
         "- payload holds only fields listed for that service and only values the customer "
         f"wrote (amount: {AMOUNT_GUIDANCE}; account and wallet numbers as digit strings). "
         "Leave unknown fields out; PINs, passwords, OTPs and CVVs stay out.\n"
-        "- Missing details are collected later, so route first. Your ask_clarification "
-        "question is your own short question about exactly what is unclear.\n"
+        "- Decide WHICH service; never ask for the details it needs. Which card or account, "
+        "the amount, a number, a recipient or a new value are asked for by the service itself "
+        "after you route, so a message that says what the customer wants done -- in any "
+        "language, however short -- is routed even when every detail is missing. "
+        "ask_clarification is only for not knowing which service they want; its question is "
+        "your own short question about exactly that.\n"
         "- Viewing existing disputes -> service_requests/disputes; existing complaints or "
         "tickets -> polygon_services/my_tickets; raising a dispute or describing a problem "
         "with a past transaction -> service_requests/raise_dispute; what the bank offers "
@@ -464,7 +468,8 @@ def build_tools() -> list[dict]:
                 "name": "route_banking_service",
                 "description": (
                     "Route the message to the banking service whose description matches what "
-                    "the customer means, using ids from the provided taxonomy list."
+                    "the customer means, using ids from the provided taxonomy list -- as soon "
+                    "as you know the service, even when details are still missing."
                 ),
                 "parameters": {
                     "type": "object",
@@ -499,7 +504,9 @@ def build_tools() -> list[dict]:
                 "name": "ask_clarification",
                 "description": (
                     "Ask the customer a short clarifying question, written for this message, "
-                    "when no single service clearly fits. Never guess a service."
+                    "when you cannot tell which service they want. Never guess a service, and "
+                    "never use this to ask for a detail (which card or account, an amount, a "
+                    "number, a recipient): the service collects those after routing."
                 ),
                 "parameters": {
                     "type": "object",
@@ -673,7 +680,9 @@ async def _domain_scope(
         # (Kept only when the domain has such services, so a misjudgement can't empty the menu.)
         allowed = (allowed & _DO_KEYS) or allowed
     elif wants == "see":
-        allowed -= ui_actions.keys()
+        # Requests the app carries out are not what "see" means -- but the app actions that
+        # only show information ("show my full card number") are exactly that.
+        allowed -= ui_actions.keys() - ui_actions.info_keys()
     # Fees and transfers are always offered together: "how much does it cost to send
     # 5000 to nagad?" reads like a transfer, and with the fee service missing from
     # stage 2 the model could only pick a transfer or ask.

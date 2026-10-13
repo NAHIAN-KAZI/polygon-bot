@@ -611,7 +611,7 @@ chatInput.addEventListener("paste", (e) => {
 // Click the mic to record, click again (or wait for the limit) to send. The recording is
 // converted to 16 kHz mono WAV in the browser -- what the model expects -- and the backend
 // answers its transcript like typed text.
-let maxAudioSeconds = 60;
+let maxAudioSeconds = 30;
 let recorder = null;
 let recordStartedAt = 0;
 let recordTick = null;

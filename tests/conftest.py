@@ -27,6 +27,7 @@ def _ollama_provider(monkeypatch):
     (e.g. a loaded .env) selects an OpenAI-compatible server."""
     from app.config import settings
     monkeypatch.setattr(settings, "LLM_PROVIDER", "ollama")
+    monkeypatch.setattr(settings, "LLM_TOOL_MODE", "emulated")
 
 
 @pytest.fixture(autouse=True)

@@ -357,3 +357,42 @@ def test_context_window_override_and_ollama_default(monkeypatch):
     monkeypatch.setattr(settings, "LLM_CONTEXT_WINDOW", 0)
     monkeypatch.setattr(settings, "LLM_PROVIDER", "ollama")
     assert _run(llm_backend.context_window()) == settings.OLLAMA_NUM_CTX
+
+
+# --- native tool calling (LLM_TOOL_MODE) ------------------------------------------------
+
+_NATIVE_TOOLS = [{"type": "function", "function": {"name": "route", "description": "route it",
+                                                   "parameters": {"type": "object", "properties": {"service": {"type": "string"}}}}}]
+
+
+@pytest.mark.parametrize("mode, choice", [("native_auto", "auto"), ("native_required", "required")])
+def test_native_mode_sends_server_tools_and_reads_tool_calls(openai, monkeypatch, mode, choice):
+    monkeypatch.setattr(settings, "LLM_TOOL_MODE", mode)
+    body = {"choices": [{"message": {"role": "assistant", "content": None, "tool_calls": [
+        {"id": "c1", "type": "function", "function": {"name": "route", "arguments": '{"service": "balance"}'}},
+        {"id": "c2", "type": "function", "function": {"name": "not_offered", "arguments": "{}"}},
+    ]}}]}
+    seen = _capture_post(monkeypatch, body)
+    out = _run(llm_backend.post("/api/chat", {"messages": [{"role": "system", "content": "S"},
+                                                          {"role": "user", "content": "bal"}],
+                                              "tools": _NATIVE_TOOLS}, timeout=5))
+    sent = seen["json"]
+    assert sent["tools"] == _NATIVE_TOOLS and sent["tool_choice"] == choice
+    assert "response_format" not in sent
+    assert all("You have these tools" not in str(m["content"]) for m in sent["messages"])
+    assert out["message"]["tool_calls"] == [{"function": {"name": "route", "arguments": {"service": "balance"}}}]
+
+
+def test_native_mode_falls_back_to_json_text_and_bad_arguments(openai, monkeypatch):
+    monkeypatch.setattr(settings, "LLM_TOOL_MODE", "native_auto")
+    _capture_post(monkeypatch, {"choices": [{"message": {"content": '{"name": "route", "arguments": {"service": "x"}}'}}]})
+    out = _run(llm_backend.post("/api/chat", {"messages": [{"role": "user", "content": "x"}], "tools": _NATIVE_TOOLS}, timeout=5))
+    assert out["message"]["tool_calls"] == [{"function": {"name": "route", "arguments": {"service": "x"}}}]
+    assert llm_backend._native_tool_calls(
+        [{"function": {"name": "route", "arguments": "not json"}}], _NATIVE_TOOLS) == [{"function": {"name": "route", "arguments": {}}}]
+
+
+def test_emulated_is_the_default(openai):
+    assert settings.LLM_TOOL_MODE == "emulated"
+    body = llm_backend._to_openai("/api/chat", {"messages": [{"role": "user", "content": "x"}], "tools": _NATIVE_TOOLS})
+    assert "tools" not in body and body["response_format"]["type"] == "json_schema"

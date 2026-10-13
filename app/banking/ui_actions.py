@@ -23,7 +23,8 @@ CATEGORY_NAME = "App Actions"
 class UiAction:
     id: str
     name: str                 # plain name, for the catalog and for facts
-    domain: str               # a DOMAINS key in routing.py (stage-1 grouping)
+    domain: str | tuple[str, ...]  # DOMAINS key(s) in routing.py (stage-1 grouping); a tuple when
+                                   # the request belongs to more than one area
     kind: str                 # screen | form | info | unavailable
     description: str          # what the customer is asking for (routing prompt)
     needs: str                # what they need to have or do on the screen (facts for the reply)
@@ -101,7 +102,7 @@ _LIST = [
        "open the pending replacement request and confirm the cancellation",
        ["5.2"], "CardReplacementScreen", "/request_card_replacement"),
     # ---- accounts / quick view ----------------------------------------------------------------
-    _a("quick_view_star", "Star account or card", "accounts", "screen",
+    _a("quick_view_star", "Star account or card", ("accounts", "cards"), "screen",
        "star, favourite or pin an account or a card so it shows on the home quick view",
        "choose which account or card to show on the home screen and switch its star on or off",
        ["1.5", "4.19"], "CustomizeQuickViewScreen", "/customize_quick_view"),
@@ -200,4 +201,10 @@ def keys() -> frozenset[tuple[str, str]]:
 
 
 def keys_for_domain(domain: str) -> frozenset[tuple[str, str]]:
-    return frozenset((CATEGORY, a.id) for a in _LIST if a.domain == domain)
+    return frozenset((CATEGORY, a.id) for a in _LIST
+                     if domain == a.domain or (isinstance(a.domain, tuple) and domain in a.domain))
+
+
+def info_keys() -> frozenset[tuple[str, str]]:
+    """App actions that only show the customer information (kind "info")."""
+    return frozenset((CATEGORY, a.id) for a in _LIST if a.kind == "info")

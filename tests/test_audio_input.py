@@ -193,3 +193,9 @@ def test_message_still_required_without_audio(client):
 def test_capabilities_report_audio(client, audio_on):
     body = client.get("/chat/capabilities", headers=AUTH_HEADERS).json()
     assert body["audio_input"] is True and body["max_audio_seconds"] == 60
+
+
+def test_default_voice_limit_fits_what_gemma_hears():
+    # Gemma 4 hears at most 30 s per clip and the server drops the rest without an error.
+    from app.config import Settings
+    assert Settings().MAX_AUDIO_SECONDS <= 30
