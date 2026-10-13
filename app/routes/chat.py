@@ -1500,9 +1500,17 @@ async def _ground_transfer_destination(result, message: str):
 
 # Requests that DO something to an account, card or profile. A transfer's destination is checked
 # separately (_ground_transfer_destination); a complaint or dispute may be just the word.
+# Freeze and lost/stolen reports are grounded by _ground_freeze_request (the customer's own words
+# for what happened or the block request). They are not checked again here: "my card was stolen"
+# names no action verb, so this check sent every stolen-card report back with a question (live,
+# 2026-10-13: a customer said their card was stolen five times and it was never blocked).
 _ACT_KEYS = frozenset(k for k in routing_do_keys_set if k not in (
     ("transfer", "bank_transfer"), ("transfer", "wallet_transfer"), ("polygon_services", "beneficiary"),
-    ("support", "submit_complaint"), ("service_requests", "raise_dispute")))
+    ("support", "submit_complaint"), ("service_requests", "raise_dispute"),
+    _FREEZE_KEY, ("card_requests", "report_lost_card")))
+# What the bot offers when it asks what the customer wants done: every action, including the two
+# grounded elsewhere.
+_OFFERABLE_KEYS = _ACT_KEYS | {_FREEZE_KEY, ("card_requests", "report_lost_card")}
 
 
 def _domain_of(key: tuple[str, str]) -> str | None:
@@ -1545,7 +1553,7 @@ async def _ground_requested_action(result, message: str):
     if _grounded(_quoted(parsed.get("action")), message) and _grounded(_quoted(parsed.get("object")), message):
         return result
     domain = _domain_of((result.category, result.service))
-    options = routing_option_names(DOMAINS[domain][1] & _ACT_KEYS) if domain else ()
+    options = routing_option_names(DOMAINS[domain][1] & _OFFERABLE_KEYS) if domain else ()
     return Clarification("what they want to do (the message does not say both what to do and what it is for)", options)
 
 

@@ -85,17 +85,28 @@ function headers(extra = {}) {
   return key ? { "X-API-Key": key, ...extra } : extra;
 }
 
-function openDrawer() {
-  drawer.classList.add("open");
+// Two right-hand drawers share one overlay: the knowledge base and the banking-service test fields.
+const testBtn = document.getElementById("testBtn");
+const testDrawer = document.getElementById("testDrawer");
+const testDrawerClose = document.getElementById("testDrawerClose");
+
+function openPanel(panel) {
+  closeDrawer();
+  panel.classList.add("open");
   drawerOverlay.classList.add("open");
 }
+function openDrawer() { openPanel(drawer); }
 function closeDrawer() {
   drawer.classList.remove("open");
+  testDrawer.classList.remove("open");
   drawerOverlay.classList.remove("open");
 }
 drawerBtn.addEventListener("click", openDrawer);
+testBtn.addEventListener("click", () => openPanel(testDrawer));
 drawerClose.addEventListener("click", closeDrawer);
+testDrawerClose.addEventListener("click", closeDrawer);
 drawerOverlay.addEventListener("click", closeDrawer);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
 
 async function checkHealth() {
   try {

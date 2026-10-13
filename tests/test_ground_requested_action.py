@@ -22,10 +22,12 @@ from tests.conftest import AUTH_HEADERS
 
 # Captured at import, before conftest's autouse fixture swaps in a pass-through.
 _REAL = chat_module._ground_requested_action
+_REAL_FREEZE_GROUNDING = chat_module._ground_freeze_request
 
 PHONE = "01712345678"
 JWT_HEADERS = {**AUTH_HEADERS, "Authorization": "Bearer sometoken"}
 FREEZE = ("card_services", "frezz_unfrezz")
+CLOSE = (ui_actions.CATEGORY, "card_close")  # a card action this check grounds
 
 TAXONOMY = {"categories": [
     {"id": "card_services", "services": [{"id": "frezz_unfrezz", "name": "Freeze Card"}]},
@@ -75,13 +77,17 @@ def _freeze(payload=None):
     return BankingService(*FREEZE, None, payload)
 
 
+def _close(payload=None):
+    return BankingService(*CLOSE, None, payload)
+
+
 # --- unit -------------------------------------------------------------------------------------
 
 
 def test_both_quotes_in_the_message_keep_the_result(monkeypatch):
-    prompts = _model(monkeypatch, "freeze", "my card")
-    result = _freeze()
-    assert _ground(result, "please freeze my card") is result
+    prompts = _model(monkeypatch, "close", "my card")
+    result = _close()
+    assert _ground(result, "please close my card") is result
     assert len(prompts) == 1
 
 
@@ -97,17 +103,17 @@ def test_both_quotes_in_the_message_keep_the_result(monkeypatch):
 ])
 def test_a_missing_or_ungrounded_part_asks_what_they_want(monkeypatch, taxonomy, action, obj):
     _model(monkeypatch, action, obj)
-    out = _ground(_freeze(), "Card")
+    out = _ground(_close(), "Card")
     assert isinstance(out, Clarification)
     assert "what they want to do" in out.question
 
 
 def test_the_clarification_offers_what_can_be_done_for_that_kind_of_request(monkeypatch, taxonomy):
     _model(monkeypatch, None, None)
-    out = _ground(_freeze(), "Card")
-    expected = routing_module._option_names(DOMAINS["cards"][1] & chat_module._ACT_KEYS)
+    out = _ground(_close(), "Card")
+    expected = routing_module._option_names(DOMAINS["cards"][1] & chat_module._OFFERABLE_KEYS)
     assert out.options == expected and out.options
-    # card actions (from the app-action catalog and the card services), not lookups
+    # card actions (from the app-action catalog and the card services, freeze included), not lookups
     assert "Unfreeze card" in out.options and "Freeze Card" in out.options
     assert "Cards" not in out.options and "Balance" not in out.options
 
@@ -123,14 +129,14 @@ def test_a_key_with_no_domain_gets_no_options(monkeypatch, taxonomy):
 def test_specifics_already_in_the_payload_skip_the_model(monkeypatch, payload):
     prompts = _model(monkeypatch, None, None)
     result = BankingService("profile_update", "update_nickname", None, payload) if "nickName" in payload \
-        else _freeze(payload)
+        else _close(payload)
     assert _ground(result, "Card") is result
     assert prompts == []
 
 
 def test_a_model_exception_keeps_the_classifiers_choice(monkeypatch):
     _model(monkeypatch, error=httpx.ConnectError("down"))
-    result = _freeze()
+    result = _close()
     assert _ground(result, "Card") is result
     _model(monkeypatch, error=httpx.ReadTimeout("slow"))
     assert _ground(result, "Card") is result
@@ -141,10 +147,10 @@ def test_unparseable_or_non_dict_output_is_nothing_written(monkeypatch, taxonomy
     _model(monkeypatch, raw=raw)
     if raw == "not json at all":
         # a JSON syntax error is a failed check (like an exception): the choice stands
-        result = _freeze()
+        result = _close()
         assert _ground(result, "Card") is result
     else:
-        assert isinstance(_ground(_freeze(), "Card"), Clarification)
+        assert isinstance(_ground(_close(), "Card"), Clarification)
 
 
 @pytest.mark.parametrize("result", [
@@ -171,11 +177,25 @@ def test_the_act_keys_exclude_the_flows_with_their_own_gathering():
                      ("polygon_services", "beneficiary"), ("support", "submit_complaint"),
                      ("service_requests", "raise_dispute")]:
         assert excluded not in keys
-    assert FREEZE in keys and ("card_requests", "report_lost_card") in keys
+    # Freeze and lost/stolen reports are grounded by _ground_freeze_request (the customer's own words
+    # for what happened): "my card was stolen" names no action verb and must not be asked about.
+    assert FREEZE not in keys and ("card_requests", "report_lost_card") not in keys
     assert ("profile_update", "update_nickname") in keys and ui_actions.keys() <= keys
     assert keys == routing_module._DO_KEYS - {
         ("transfer", "bank_transfer"), ("transfer", "wallet_transfer"), ("polygon_services", "beneficiary"),
-        ("support", "submit_complaint"), ("service_requests", "raise_dispute")}
+        ("support", "submit_complaint"), ("service_requests", "raise_dispute"),
+        FREEZE, ("card_requests", "report_lost_card")}
+    # ... but they are still offered when the bot asks what the customer wants done
+    assert {FREEZE, ("card_requests", "report_lost_card")} <= chat_module._OFFERABLE_KEYS
+
+
+def test_a_stolen_card_report_is_not_sent_back_for_an_action_word(monkeypatch):
+    """Live 2026-10-13: "amar card churi hoiya gese" and "my card was stolen" were both turned
+    into a question here (no action verb), so the stolen card was never blocked."""
+    prompts = _model(monkeypatch, None, "my card")
+    for result in (BankingService("card_requests", "report_lost_card", None, {"reasonCode": "STOLEN"}), _freeze()):
+        assert _ground(result, "my card was stolen") is result
+    assert prompts == []
 
 
 def test_app_actions_need_both_words_too(monkeypatch, taxonomy):
@@ -194,7 +214,7 @@ def test_prompt_shows_the_real_message_so_the_models_quote_can_be_matched(monkey
     """A masked message made the model quote "card ••••0251", which can never match what the
     customer wrote, so every action with a card number was turned into a question."""
     prompts = _model(monkeypatch, "close", "card 4001230000000251")
-    result = _ground(_freeze(), "close card 4001230000000251")
+    result = _ground(_close(), "close card 4001230000000251")
     assert "4001230000000251" in prompts[0] and "••" not in prompts[0]
     assert isinstance(result, BankingService)  # the quote with the number is grounded
 
@@ -247,6 +267,8 @@ def env(monkeypatch, taxonomy):
     monkeypatch.setattr(chat_module, "compose", compose)
     monkeypatch.setattr(chat_module, "compose_stream", compose_stream)
     monkeypatch.setattr(chat_module, "_ground_requested_action", _REAL)
+    # A freeze is grounded by the customer's own words for what happened or the block request.
+    monkeypatch.setattr(chat_module, "_ground_freeze_request", _REAL_FREEZE_GROUNDING)
     return state
 
 
@@ -270,14 +292,14 @@ def _result(events):
 
 
 def test_a_bare_card_asks_what_they_want_instead_of_starting_a_freeze(client, env, monkeypatch):
-    _model(monkeypatch, None, "Card")
+    _model(monkeypatch, raw=json.dumps({"reason": None, "block_request": None}))
     env["route"] = _freeze()
     events = _post(client, "Card")
     assert _result(events)["type"] == "CLARIFICATION_REQUIRED"
     composed = env["composed"]
     assert [c["kind"] for c in composed] == ["clarify"]
     assert composed[0]["facts"]["could mean"]
-    assert "Freeze Card" in composed[0]["facts"]["could mean"] and "Unfreeze card" in composed[0]["facts"]["could mean"]
+    assert set(chat_module._CARD_PROBLEM_OPTIONS) <= set(composed[0]["facts"]["could mean"])
     assert env["fulfills"] == [] and env["sends"] == []  # no card lookup, no code
     assert "CONFIRMATION_REQUIRED" not in json.dumps(events) and "OTP_REQUIRED" not in json.dumps(events)
     stored = session_module.get_session(PHONE)[-1].classification
@@ -285,7 +307,7 @@ def test_a_bare_card_asks_what_they_want_instead_of_starting_a_freeze(client, en
 
 
 def test_a_grounded_freeze_request_still_proceeds(client, env, monkeypatch):
-    prompts = _model(monkeypatch, "freeze", "my card")
+    prompts = _model(monkeypatch, raw=json.dumps({"reason": "it was stolen", "block_request": "freeze my card"}))
     env["route"] = _freeze()
     events = _post(client, "freeze my card, it was stolen")
     assert len(prompts) == 1
@@ -298,6 +320,11 @@ def test_a_grounded_freeze_request_still_proceeds(client, env, monkeypatch):
 
 def test_a_freeze_with_the_card_and_reason_already_known_does_not_call_the_model(client, env, monkeypatch):
     prompts = _model(monkeypatch, None, None)
+
+    async def already_grounded(result, message, recent_turns):
+        return result  # this test is about the generic action check only
+
+    monkeypatch.setattr(chat_module, "_ground_freeze_request", already_grounded)
     env["route"] = _freeze({"cardId": "41", "cardLast4": "0251", "reason": "stolen"})
     events = _post(client, "my card was stolen")
     assert prompts == []

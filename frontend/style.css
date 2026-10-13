@@ -310,28 +310,23 @@ body {
 
 /* ---------- Routing extras (optional banking-service test fields) ---------- */
 
-.routing-extras {
-  flex-shrink: 0;
-  margin-bottom: 0.6rem;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 0.15rem 0.9rem;
-}
-
-.routing-extras summary {
-  cursor: pointer;
+.drawer-wide { width: min(420px, 94vw); overflow-y: auto; }
+.drawer-wide > * { flex-shrink: 0; min-width: 0; }
+.drawer-wide .routing-extras-grid { width: 100%; padding: 0; }
+.drawer-wide .routing-extras-grid input,
+.drawer-wide .routing-extras-grid textarea { width: 100%; min-width: 0; }
+.drawer-wide .login-row { flex-wrap: wrap; }
+.drawer-wide .login-row input { flex: 1 1 120px; min-width: 0; }
+.drawer-note {
+  margin: -0.5rem 0 1rem;
   font-size: 0.78rem;
+  line-height: 1.5;
   color: var(--text-dim);
-  padding: 0.6rem 0;
-  user-select: none;
 }
-.routing-extras summary:hover { color: var(--text); }
-.routing-extras[open] summary { color: var(--text); }
 
 .routing-extras-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 0.6rem;
   padding: 0.2rem 0 0.85rem;
 }

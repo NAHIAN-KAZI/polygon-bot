@@ -36,3 +36,11 @@ def test_health_reports_degraded_when_a_dependency_is_down(client, monkeypatch):
     body = resp.json()
     assert body["status"] == "degraded"
     assert body["ollama"] is False
+
+
+def test_frontend_files_are_always_revalidated(client):
+    # A stale app.js against a new index.html broke the portal after an update.
+    for path in ("/", "/app.js", "/style.css"):
+        resp = client.get(path)
+        assert resp.status_code == 200
+        assert resp.headers["cache-control"] == "no-cache"

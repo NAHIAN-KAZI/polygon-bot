@@ -42,4 +42,14 @@ app.include_router(chat.router)
 app.include_router(demo_login.router)
 app.include_router(demo_login.config_router)
 
-app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")
+class _RevalidatingStaticFiles(StaticFiles):
+    """The demo frontend is three files that change together; without a cache header a browser
+    kept an old app.js against a new index.html. no-cache = always revalidate (cheap 304s)."""
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+app.mount("/", _RevalidatingStaticFiles(directory="frontend", html=True), name="frontend")

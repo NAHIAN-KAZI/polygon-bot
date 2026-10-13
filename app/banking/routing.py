@@ -821,10 +821,13 @@ async def _classify_scoped(
                 "identified, never a different one — and, if the message named the account's "
                 'type, include it as payload={"accountType": "<type named>"} (omit payload '
                 "entirely if only a number was named).\n"
-                "If the new message does NOT clearly name one of the listed accounts, it is a "
-                "fresh, unrelated message — classify it independently using ONLY the general "
-                "decision rules above, exactly as if this pending selection had never "
-                "happened. Never guess which account was meant."
+                "If the new message does NOT clearly name one of the listed accounts, it is not "
+                "a selection: classify it with the general decision rules above, as its own "
+                "request -- but read it together with the customer's previous message "
+                f'"{last_turn.message}": words like it, that or this refer to what that '
+                "message was about, so a follow-up that asks for something else to be done "
+                "about the same thing is routed to that service. Never guess which account "
+                "was meant."
             )
             worked_example = (
                 "\n- A message about the customer's accounts in general (how many, which ones) "
@@ -832,7 +835,10 @@ async def _classify_scoped(
                 "- A message naming one listed account's type or last digits answers the "
                 "selection.\n"
                 "- A different subject altogether: classify it on its own, never as an "
-                "account-selection answer."
+                "account-selection answer.\n"
+                "- A follow-up about the same thing that names no account (another action on "
+                "it, \"it\"/\"that\"): route that action, reading \"it\" as what the previous "
+                "message was about."
             )
         else:
             # T-53: broaden what counts as "answering" a pending clarification beyond bare
@@ -898,6 +904,12 @@ async def _classify_scoped(
                 "role": "system",
                 "content": general_reasoning + worked_example,
             })
+    if recent_turns and (recent_turns[-1].classification or {}).get("question") and recent_turns[-1].message:
+        # The exchange the new message replies to, as real turns rather than only described
+        # above: with it, "freeze it" after "which card was stolen?" resolves "it" to the card
+        # (8/8 follow-ups vs 6/8 described-only; live 2026-10-13 a stolen card was never blocked).
+        messages += [{"role": "user", "content": recent_turns[-1].message},
+                     {"role": "assistant", "content": recent_turns[-1].classification["question"]}]
     messages.append({"role": "user", "content": message})
 
     tool_calls = await _post_classification(messages)

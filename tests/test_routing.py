@@ -281,9 +281,13 @@ def test_classify_includes_last_recent_turn_as_labeled_system_context(monkeypatc
 
     assert len(captured_calls) == 1
     sent_messages = captured_calls[0]["kwargs"]["json"]["messages"]
-    # the prior turn is never injected as a literal user message
-    user_texts = [m["content"] for m in sent_messages if m["role"] == "user"]
-    assert user_texts == ["thanks, one more question"]
+    # Only the ONE exchange being replied to is shown as real turns (so "freeze it" can resolve
+    # "it"), and the new message is always last. T-44's contamination came from dumping every
+    # prior turn with no instructions; the labeled note below still tells the model to ignore
+    # the exchange on a subject change (checked live: off-topic after a pending question -> KB).
+    turns = [(m["role"], m["content"]) for m in sent_messages if m["role"] != "system"]
+    assert turns == [("user", "I want to transfer money"), ("assistant", "Which transfer type?"),
+                     ("user", "thanks, one more question")]
     # it appears instead as a labeled, disregardable system-level context note
     system_texts = [m["content"] for m in sent_messages if m["role"] == "system"]
     assert any("I want to transfer money" in text and "Which transfer type?" in text for text in system_texts)
