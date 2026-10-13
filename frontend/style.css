@@ -424,7 +424,7 @@ body {
   color: var(--text-dim);
 }
 
-.result-panel .result-type {
+.result-type {
   display: inline-block;
   font-family: var(--font-display);
   font-weight: 600;
@@ -435,10 +435,9 @@ body {
   background: var(--gradient);
   border-radius: 999px;
   padding: 0.15rem 0.6rem;
-  margin-bottom: 0.5rem;
 }
 
-.result-panel .result-type.warn { background: var(--bad); color: var(--text); }
+.result-type.warn { background: var(--bad); color: var(--text); }
 
 .result-panel dl {
   margin: 0;
@@ -731,6 +730,44 @@ button:focus-visible,
 }
 
 /* --- Reply stats: KPI row under each reply ------------------------------------- */
+.reply-meta {
+  flex-shrink: 0;
+  align-self: flex-start;
+  width: min(100%, 640px);
+  margin-top: -0.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.meta-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+.meta-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.2rem 0.7rem;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 0.74rem;
+  cursor: pointer;
+}
+.meta-chip:hover { color: var(--text); }
+.meta-chip-value { color: var(--text); font-weight: 600; }
+.meta-chip::after {
+  content: "";
+  width: 0.4rem;
+  height: 0.4rem;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform 0.15s;
+}
+.meta-chip.open::after { transform: rotate(-135deg); }
+.meta-chip .result-type { margin: 0; }
+.reply-meta .reply-stats, .reply-meta .result-panel { margin-top: 0; width: 100%; max-width: none; }
+.reply-meta [hidden] { display: none; }
 .reply-stats {
   flex-shrink: 0; /* overflow:hidden would otherwise let the scrolling column squash it */
   align-self: flex-start;
@@ -862,6 +899,9 @@ button:focus-visible,
 .stat-tooltip strong { color: var(--text); font-weight: 600; }
 
 @media (max-width: 520px) {
+  .meta-chips { gap: 0.3rem; }
+  .meta-chip { padding: 0.2rem 0.5rem; gap: 0.35rem; }
+  .meta-chip .result-type { font-size: 0.62rem; padding: 0.12rem 0.45rem; }
   .reply-stats { grid-template-columns: 1fr 1fr; width: 100%; }
 }
 @media (prefers-reduced-motion: reduce) {

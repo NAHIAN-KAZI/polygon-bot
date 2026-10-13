@@ -1,0 +1,61 @@
+- generic [active] [ref=f13e1]:
+  - generic [ref=f13e2]:
+    - banner [ref=f13e3]:
+      - generic [ref=f13e4]: ✦
+      - generic [ref=f13e6]:
+        - button "…" [disabled] [ref=f13e7]
+        - button "Key" [ref=f13e10] [cursor=pointer]
+        - button "Banking-service test fields" [ref=f13e12] [cursor=pointer]
+        - button "Knowledge base" [ref=f13e17] [cursor=pointer]
+    - main [ref=f13e21]:
+      - generic [ref=f13e23]:
+        - generic [ref=f13e24]: ✦
+        - heading "Ask Polygon Bot anything" [level=1] [ref=f13e25]
+        - paragraph [ref=f13e26]: Answers are grounded in whatever's been added to the knowledge base.
+      - generic [ref=f13e27]:
+        - button "Attach image" [ref=f13e28] [cursor=pointer]
+        - textbox "Message Polygon Bot..." [ref=f13e33]
+        - button "Record a voice message" [ref=f13e34] [cursor=pointer]
+        - button "Send" [ref=f13e38] [cursor=pointer]
+  - complementary [ref=f13e41]:
+    - generic [ref=f13e42]:
+      - heading "Knowledge base" [level=2] [ref=f13e43]
+      - button "Close" [ref=f13e44] [cursor=pointer]
+    - generic [ref=f13e47]:
+      - generic [ref=f13e48] [cursor=pointer]:
+        - generic [ref=f13e49]: +
+        - generic [ref=f13e50]: Add document
+      - button "Upload" [ref=f13e51] [cursor=pointer]
+    - list [ref=f13e53]:
+      - listitem [ref=f13e54]: Empty. Add a document to begin.
+  - complementary [ref=f13e55]:
+    - generic [ref=f13e56]:
+      - heading "Banking-service test fields" [level=2] [ref=f13e57]
+      - button "Close" [ref=f13e58] [cursor=pointer]
+    - paragraph [ref=f13e61]: Optional. Skip the routing and call a service directly, and log in to the bank platform.
+    - generic [ref=f13e62]:
+      - generic [ref=f13e63]:
+        - generic [ref=f13e64]: category
+        - textbox "category" [ref=f13e65]:
+          - /placeholder: e.g. account_info
+      - generic [ref=f13e66]:
+        - generic [ref=f13e67]: service
+        - textbox "service" [ref=f13e68]:
+          - /placeholder: e.g. balance
+      - generic [ref=f13e69]:
+        - generic [ref=f13e70]: subservice
+        - textbox "subservice" [ref=f13e71]:
+          - /placeholder: optional
+      - generic [ref=f13e72]:
+        - generic [ref=f13e73]: payload (JSON)
+        - textbox "payload (JSON)" [ref=f13e74]:
+          - /placeholder: "e.g. {\"amount\": 42.5}"
+      - generic [ref=f13e75]:
+        - generic [ref=f13e76]: Authorization bearer token
+        - textbox "Authorization bearer token" [ref=f13e77]:
+          - /placeholder: "JWT (sent as Authorization: Bearer <token>)"
+      - generic [ref=f13e78]:
+        - textbox "username" [ref=f13e79]: shanto
+        - textbox "password (blank = saved test account)" [ref=f13e80]
+        - button "Login" [disabled] [ref=f13e81]
+      - generic [ref=f13e82]: Logging in with saved test account...

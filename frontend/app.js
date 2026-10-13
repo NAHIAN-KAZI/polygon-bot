@@ -355,12 +355,6 @@ function prettyOrDash(value) {
 function addResultPanel(result) {
   const panel = document.createElement("div");
   panel.className = "result-panel";
-
-  const badge = document.createElement("span");
-  badge.className = "result-type" + (result.type === "BANKING_SERVICE" ? "" : " warn");
-  badge.textContent = result.type;
-  panel.appendChild(badge);
-
   const dl = document.createElement("dl");
   const rows = [
     ["category", result.category],
@@ -378,9 +372,40 @@ function addResultPanel(result) {
   }
   panel.appendChild(dl);
 
-  messages.appendChild(panel);
-  messages.scrollTop = messages.scrollHeight;
+  const badge = document.createElement("span");
+  badge.className = "result-type" + (result.type === "BANKING_SERVICE" ? "" : " warn");
+  badge.textContent = result.type;
+  addMetaChip([badge], panel);
   return panel;
+}
+
+// Reply details sit in one row of collapsed chips under the answer (routing result, response
+// time); opening a chip shows its content full-width under the row.
+function metaRow() {
+  const last = messages.lastElementChild;
+  if (last && last.classList.contains("reply-meta")) return last;
+  const meta = el("div", "reply-meta");
+  meta.append(el("div", "meta-chips"));
+  messages.appendChild(meta);
+  return meta;
+}
+
+function addMetaChip(labelNodes, body) {
+  const meta = metaRow();
+  const chip = el("button", "meta-chip");
+  chip.type = "button";
+  chip.setAttribute("aria-expanded", "false");
+  chip.append(...labelNodes);
+  body.hidden = true;
+  chip.addEventListener("click", () => {
+    body.hidden = !body.hidden;
+    chip.setAttribute("aria-expanded", String(!body.hidden));
+    chip.classList.toggle("open", !body.hidden);
+    messages.scrollTop = messages.scrollHeight;
+  });
+  meta.querySelector(".meta-chips").appendChild(chip);
+  meta.appendChild(body);
+  messages.scrollTop = messages.scrollHeight;
 }
 
 function formatTokens(n) {
@@ -536,8 +561,8 @@ function addReplyStats(timing, stats) {
       stats.llm_calls ? `avg ${formatSeconds(stats.llm_ms / stats.llm_calls)} each` : "none needed"));
     row.append(tokens, calls);
   }
-  messages.appendChild(row);
-  messages.scrollTop = messages.scrollHeight;
+  addMetaChip([el("span", "meta-chip-label", "Response time"),
+               el("span", "meta-chip-value", formatSeconds(timing.totalMs))], row);
 }
 
 // --- image input ------------------------------------------------------------------

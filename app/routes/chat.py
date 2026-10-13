@@ -2491,9 +2491,11 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
     stored_message = (_REDACTED_SUBMISSION if _has_secret_fields(req.payload) or _looks_like_typed_secret(req.message)
                       else req.message)
 
-    async def say_text(say: tuple) -> str:
+    async def say_stream(say: tuple):
+        """The customer-facing message for this turn, a sentence at a time (each number-checked)."""
         kind, facts, must = say
-        return await compose(kind, facts, message=composer_message, history=history, must_include=must)
+        async for piece in compose_stream(kind, facts, message=composer_message, history=history, must_include=must):
+            yield piece
     last_session_classification = (session_turns[-1].classification or {}) if session_turns else {}
 
     # T-57: a pending freeze OTP step. Applies to a plain follow-up, or to an explicit
@@ -2592,8 +2594,10 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
         confirmation_turn_classification: dict
 
         if outcome == "negative":
-            decline_token = await say_text(_say("declined", what=_service_name(conf_category, conf_service)))
-            yield _sse("token", {"token": decline_token})
+            decline_token = ""
+            async for _piece in say_stream(_say("declined", what=_service_name(conf_category, conf_service))):
+                decline_token += _piece
+                yield _sse("token", {"token": _piece})
             yield _result_event(
                 "BANKING_SERVICE", conf_category, conf_service, conf_subservice,
                 payload={"executed": False, "cancelled": True},
@@ -2612,8 +2616,10 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                 request_id=request_id,
             )
         elif outcome == "unclear":
-            reask_token = await say_text(_confirm_say((conf_category, conf_service), conf_payload))
-            yield _sse("token", {"token": reask_token})
+            reask_token = ""
+            async for _piece in say_stream(_confirm_say((conf_category, conf_service), conf_payload)):
+                reask_token += _piece
+                yield _sse("token", {"token": _piece})
             yield _result_event("CONFIRMATION_REQUIRED", conf_category, conf_service, conf_subservice, payload=conf_payload)
             confirmation_turn_classification = {
                 "type": "CONFIRMATION_REQUIRED",
@@ -2645,8 +2651,10 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                     customer_identity, token, conf_category, conf_service, conf_subservice, conf_payload
                 )
             except AdapterAuthError:
-                confirm_auth_token = await say_text(_say("login_needed", request=_service_name(conf_category, conf_service)))
-                yield _sse("token", {"token": confirm_auth_token})
+                confirm_auth_token = ""
+                async for _piece in say_stream(_say("login_needed", request=_service_name(conf_category, conf_service))):
+                    confirm_auth_token += _piece
+                    yield _sse("token", {"token": _piece})
                 yield _result_event("AUTH_REQUIRED", conf_category, conf_service, conf_subservice)
                 confirmation_turn_classification = {
                     "type": "AUTH_REQUIRED",
@@ -2667,12 +2675,15 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                 if isinstance(exc, AdapterRejectedError):
                     # Not "nothing changed": live, the address PATCH saved and still answered
                     # 409 "A record with the given value already exists".
-                    confirm_unavailable_token = await say_text(_say(
+                    unavailable_say = _say(
                         "refused_by_bank", request=_service_name(conf_category, conf_service),
-                        bank_message=exc.bank_message, was_it_saved="unknown; check in the app"))
+                        bank_message=exc.bank_message, was_it_saved="unknown; check in the app")
                 else:
-                    confirm_unavailable_token = await say_text(_say("unavailable", service=_service_name(conf_category, conf_service)))
-                yield _sse("token", {"token": confirm_unavailable_token})
+                    unavailable_say = _say("unavailable", service=_service_name(conf_category, conf_service))
+                confirm_unavailable_token = ""
+                async for _piece in say_stream(unavailable_say):
+                    confirm_unavailable_token += _piece
+                    yield _sse("token", {"token": _piece})
                 yield _result_event("SERVICE_UNAVAILABLE", conf_category, conf_service, conf_subservice)
                 confirmation_turn_classification = {
                     "type": "SERVICE_UNAVAILABLE",
@@ -2694,8 +2705,10 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                     dict(adapter_result.data) if isinstance(adapter_result.data, dict) else {"result": adapter_result.data}
                 )
                 executed_data["executed"] = True
-                success_token = await say_text(_done_say((conf_category, conf_service), conf_payload))
-                yield _sse("token", {"token": success_token})
+                success_token = ""
+                async for _piece in say_stream(_done_say((conf_category, conf_service), conf_payload)):
+                    success_token += _piece
+                    yield _sse("token", {"token": _piece})
                 yield _result_event(
                     "BANKING_SERVICE", conf_category, conf_service, conf_subservice,
                     payload=executed_data,
@@ -2815,14 +2828,17 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
         # a hint of what is unclear, and the options (the services it could have meant) let the
         # reply offer concrete choices instead of "what do you need?".
         hint = None if result.question == _CLARIFICATION_FALLBACK else result.question
-        result = Clarification(question=await say_text(_say(
+        clarify_text = ""
+        async for _piece in say_stream(_say(
             "clarify", what_is_unclear=hint or "what the customer would like to do",
             could_mean=list(result.options) or None,
             can_help_with=None if result.options else [
                 "balance and transactions", "transfers and fees", "cards",
-                "disputes and complaints", "profile details"])), options=result.options)
+                "disputes and complaints", "profile details"])):
+            clarify_text += _piece
+            yield _sse("token", {"token": _piece})
+        result = Clarification(question=clarify_text, options=result.options)
     if isinstance(result, Clarification):
-        yield _sse("token", {"token": result.question})
         yield _result_event("CLARIFICATION_REQUIRED", None, None, None)
         turn_classification = {
             "type": "CLARIFICATION_REQUIRED",
@@ -2840,8 +2856,10 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
         )
 
     elif isinstance(result, UnknownService):
-        unknown_service_token = await say_text(_say("not_in_chat", request=_service_name(result.category, result.service)))
-        yield _sse("token", {"token": unknown_service_token})
+        unknown_service_token = ""
+        async for _piece in say_stream(_say("not_in_chat", request=_service_name(result.category, result.service))):
+            unknown_service_token += _piece
+            yield _sse("token", {"token": _piece})
         yield _result_event("UNKNOWN_SERVICE", result.category, result.service, result.subservice)
         turn_classification = {
             "type": "UNKNOWN_SERVICE",
@@ -2866,8 +2884,10 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
         )
 
         if customer_identity is None:
-            auth_required_token = await say_text(_say("login_needed", request=_service_name(category, service)))
-            yield _sse("token", {"token": auth_required_token})
+            auth_required_token = ""
+            async for _piece in say_stream(_say("login_needed", request=_service_name(category, service))):
+                auth_required_token += _piece
+                yield _sse("token", {"token": _piece})
             yield _result_event("AUTH_REQUIRED", category, service, subservice)
             turn_classification = {
                 "type": "AUTH_REQUIRED",
@@ -2900,8 +2920,10 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                         customer_identity, token, "account_info", "cards", None, None
                     )
                 except AdapterAuthError:
-                    freeze_cards_auth_token = await say_text(_say("login_needed", request=_service_name(category, service)))
-                    yield _sse("token", {"token": freeze_cards_auth_token})
+                    freeze_cards_auth_token = ""
+                    async for _piece in say_stream(_say("login_needed", request=_service_name(category, service))):
+                        freeze_cards_auth_token += _piece
+                        yield _sse("token", {"token": _piece})
                     yield _result_event("AUTH_REQUIRED", category, service, subservice)
                     turn_classification = {
                         "type": "AUTH_REQUIRED",
@@ -2919,8 +2941,10 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                         request_id=request_id,
                     )
                 except AdapterUnavailableError:
-                    freeze_cards_unavailable_token = await say_text(_say("unavailable", service="their card list"))
-                    yield _sse("token", {"token": freeze_cards_unavailable_token})
+                    freeze_cards_unavailable_token = ""
+                    async for _piece in say_stream(_say("unavailable", service="their card list")):
+                        freeze_cards_unavailable_token += _piece
+                        yield _sse("token", {"token": _piece})
                     yield _result_event("SERVICE_UNAVAILABLE", category, service, subservice)
                     turn_classification = {
                         "type": "SERVICE_UNAVAILABLE",
@@ -2941,8 +2965,10 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                     cards = cards_result.data.get("cards") if isinstance(cards_result.data, dict) else None
                     cards = cards if isinstance(cards, list) else []
                     if len(cards) == 0:
-                        no_cards_token = await say_text(_say("answer", cards_on_file="none"))
-                        yield _sse("token", {"token": no_cards_token})
+                        no_cards_token = ""
+                        async for _piece in say_stream(_say("answer", cards_on_file="none")):
+                            no_cards_token += _piece
+                            yield _sse("token", {"token": _piece})
                         yield _result_event("BANKING_SERVICE", category, service, subservice, payload={"cards": []})
                         turn_classification = {
                             "type": "BANKING_SERVICE",
@@ -2966,8 +2992,10 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                         if len(card_number) >= 4:
                             payload["cardLast4"] = card_number[-4:]
                     else:
-                        card_selection_token = await say_text(_choose_say("which of their cards they mean", cards))
-                        yield _sse("token", {"token": card_selection_token})
+                        card_selection_token = ""
+                        async for _piece in say_stream(_choose_say("which of their cards they mean", cards)):
+                            card_selection_token += _piece
+                            yield _sse("token", {"token": _piece})
                         yield _result_event(
                             "ACCOUNT_SELECTION_REQUIRED", category, service, subservice, payload={"accounts": cards}
                         )
@@ -3031,9 +3059,11 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
             if turn_classification is None:
                 missing_fields = _missing_payload_fields(category, service, payload)
                 if missing_fields:
-                    clarification_question = await say_text(
-                        _ask_say(category, service, subservice, payload, missing_fields))
-                    yield _sse("token", {"token": clarification_question})
+                    clarification_question = ""
+                    async for _piece in say_stream(
+                        _ask_say(category, service, subservice, payload, missing_fields)):
+                        clarification_question += _piece
+                        yield _sse("token", {"token": _piece})
                     # What is being asked for, so the app can show a box for it (a complaint or
                     # dispute text box, an amount field...). Optional for the app: absent = plain chat.
                     yield _result_event("CLARIFICATION_REQUIRED", None, None, None,
@@ -3067,8 +3097,10 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                     collected_payload = dict(payload or {})
                     collected_payload["formattedAmount"] = _format_bdt(collected_payload.get("amount"))
                     collected_payload["executed"] = False
-                    transfer_summary_token = await say_text(_transfer_summary_say(service, subservice, payload or {}))
-                    yield _sse("token", {"token": transfer_summary_token})
+                    transfer_summary_token = ""
+                    async for _piece in say_stream(_transfer_summary_say(service, subservice, payload or {})):
+                        transfer_summary_token += _piece
+                        yield _sse("token", {"token": _piece})
                     routing_action = f"{subservice}_transfer"
                     yield _result_event(
                         "BANKING_SERVICE",
@@ -3109,8 +3141,10 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                     # FAILED_TRANSFER 8.2 -- identical contract, one implementation.
                     collected_payload = dict(payload or {})
                     collected_payload["executed"] = False
-                    dispute_summary_token = await say_text(_dispute_summary_say(payload or {}))
-                    yield _sse("token", {"token": dispute_summary_token})
+                    dispute_summary_token = ""
+                    async for _piece in say_stream(_dispute_summary_say(payload or {})):
+                        dispute_summary_token += _piece
+                        yield _sse("token", {"token": _piece})
                     yield _result_event(
                         "BANKING_SERVICE",
                         category,
@@ -3166,8 +3200,10 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                     # top of this function) triggers the actual fulfill_banking_service
                     # call; nothing below this point calls the real adapter.
                     # Composed; the exact values that will be saved are validated in it.
-                    confirmation_question = await say_text(_confirm_say((category, service), payload))
-                    yield _sse("token", {"token": confirmation_question})
+                    confirmation_question = ""
+                    async for _piece in say_stream(_confirm_say((category, service), payload)):
+                        confirmation_question += _piece
+                        yield _sse("token", {"token": _piece})
                     yield _result_event(
                         "CONFIRMATION_REQUIRED", category, service, subservice, payload=_strip_secrets(payload)
                     )
@@ -3196,8 +3232,10 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                             customer_identity, token, category, service, subservice, payload
                         )
                     except AdapterAuthError:
-                        adapter_auth_error_token = await say_text(_say("login_needed", request=_service_name(category, service)))
-                        yield _sse("token", {"token": adapter_auth_error_token})
+                        adapter_auth_error_token = ""
+                        async for _piece in say_stream(_say("login_needed", request=_service_name(category, service))):
+                            adapter_auth_error_token += _piece
+                            yield _sse("token", {"token": _piece})
                         yield _result_event("AUTH_REQUIRED", category, service, subservice)
                         turn_classification = {
                             "type": "AUTH_REQUIRED",
@@ -3213,8 +3251,10 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                             request_id=request_id,
                         )
                     except AdapterAccountSelectionRequiredError as exc:
-                        account_selection_token = await say_text(_choose_say("which of their accounts they mean", exc.accounts))
-                        yield _sse("token", {"token": account_selection_token})
+                        account_selection_token = ""
+                        async for _piece in say_stream(_choose_say("which of their accounts they mean", exc.accounts)):
+                            account_selection_token += _piece
+                            yield _sse("token", {"token": _piece})
                         yield _result_event(
                             "ACCOUNT_SELECTION_REQUIRED", category, service, subservice, payload={"accounts": exc.accounts}
                         )
@@ -3239,8 +3279,10 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                             request_id=request_id,
                         )
                     except AdapterUnavailableError:
-                        service_unavailable_token = await say_text(_say("unavailable", service=_service_name(category, service)))
-                        yield _sse("token", {"token": service_unavailable_token})
+                        service_unavailable_token = ""
+                        async for _piece in say_stream(_say("unavailable", service=_service_name(category, service))):
+                            service_unavailable_token += _piece
+                            yield _sse("token", {"token": _piece})
                         yield _result_event("SERVICE_UNAVAILABLE", category, service, subservice)
                         turn_classification = {
                             "type": "SERVICE_UNAVAILABLE",
@@ -3279,11 +3321,13 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                                 matches = _match_beneficiaries(payload.get("nameQuery", ""), beneficiaries)
 
                             if len(matches) == 0:
-                                beneficiary_reply_token = await say_text(_say(
+                                beneficiary_reply_token = ""
+                                async for _piece in say_stream(_say(
                                     "ask", {"name searched": payload.get("nameQuery")},
                                     problem="no saved beneficiary has that name",
-                                    options=["check the name", "send to a new account or wallet instead"]))
-                                yield _sse("token", {"token": beneficiary_reply_token})
+                                    options=["check the name", "send to a new account or wallet instead"])):
+                                    beneficiary_reply_token += _piece
+                                    yield _sse("token", {"token": _piece})
                                 yield _result_event("CLARIFICATION_REQUIRED", None, None, None)
                                 turn_classification = {
                                     "type": "CLARIFICATION_REQUIRED",
@@ -3295,12 +3339,14 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                             elif len(matches) == 1:
                                 matched = matches[0]
                                 destination = _resolve_beneficiary_destination(matched)
-                                beneficiary_reply_token = await say_text(_say(
+                                beneficiary_reply_token = ""
+                                async for _piece in say_stream(_say(
                                     "redirect", {"beneficiary": _beneficiary_name(matched)},
                                     screen=("a transfer form right here in the chat, pre-filled" if destination
                                             else "the beneficiary list in the app (this type can't be opened automatically)"),
-                                    done_in_chat="no; they confirm the amount and press Send on the form"))
-                                yield _sse("token", {"token": beneficiary_reply_token})
+                                    done_in_chat="no; they confirm the amount and press Send on the form")):
+                                    beneficiary_reply_token += _piece
+                                    yield _sse("token", {"token": _piece})
                                 routing_action = destination["action"] if destination else "manual"
                                 yield _result_event(
                                     "BENEFICIARY_MATCH",
@@ -3322,10 +3368,12 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                                     "subservice": subservice,
                                 }
                             else:
-                                beneficiary_reply_token = await say_text(_say(
+                                beneficiary_reply_token = ""
+                                async for _piece in say_stream(_say(
                                     "choose", question_about="which saved beneficiary they mean",
-                                    options=[_beneficiary_name(b) for b in matches]))
-                                yield _sse("token", {"token": beneficiary_reply_token})
+                                    options=[_beneficiary_name(b) for b in matches])):
+                                    beneficiary_reply_token += _piece
+                                    yield _sse("token", {"token": _piece})
                                 yield _result_event(
                                     "BENEFICIARY_SELECTION_REQUIRED",
                                     category,
@@ -3353,17 +3401,18 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                             )
                         else:
                             if data.get("mock") is True:
-                                banking_service_token = await say_text(_say(
-                                    "unavailable", service=_service_name(category, service),
-                                    status="not connected to the chat yet"))
+                                banking_service_token = ""
+                                async for _piece in say_stream(_say(
+                                        "unavailable", service=_service_name(category, service),
+                                        status="not connected to the chat yet")):
+                                    banking_service_token += _piece
+                                    yield _sse("token", {"token": _piece})
                             else:
                                 data = _enrich_payload(service, subservice, data)
                                 banking_service_token = ""
                                 async for piece in _stream_reply(reply_context, service, subservice, data):
                                     banking_service_token += piece
                                     yield _sse("token", {"token": piece})
-                            if data.get("mock") is True:
-                                yield _sse("token", {"token": banking_service_token})
                             yield _result_event(
                                 "BANKING_SERVICE",
                                 category,
