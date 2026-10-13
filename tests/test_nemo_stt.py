@@ -138,4 +138,6 @@ def test_capabilities_list_the_offered_voice_modes(client, monkeypatch, audio_mo
     monkeypatch.setattr(settings, "STT_URL", stt_url)
     body = client.get("/chat/capabilities", headers=AUTH_HEADERS).json()
     assert body["voice_modes"] == modes
-    assert body["audio_input"] is bool(modes)
+    # audio_input stays "the model hears audio": the mobile app shows its mic on it and sends
+    # audio_mode "audio", which an STT-only deployment can't take.
+    assert body["audio_input"] is audio_model

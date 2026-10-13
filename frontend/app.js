@@ -663,10 +663,13 @@ async function loadCapabilities() {
     const caps = await res.json();
     attachBtn.hidden = !caps.image_input;
     maxImageMb = caps.max_image_mb || maxImageMb;
+    // voice_modes lists every way this backend takes a voice message; audio_input only says
+    // whether the model itself hears audio (older backends send just that).
+    const offered = (caps.voice_modes || (caps.audio_input ? voiceModes : []))
+      .filter((m) => m in VOICE_MODES);
     // Recording needs a secure page (https or localhost) and a browser that can record.
-    micBtn.hidden = !(caps.audio_input && navigator.mediaDevices && window.MediaRecorder);
+    micBtn.hidden = !(offered.length && navigator.mediaDevices && window.MediaRecorder);
     voiceModeBtn.hidden = micBtn.hidden;
-    const offered = (caps.voice_modes || voiceModes).filter((m) => m in VOICE_MODES);
     if (offered.length) voiceModes = offered;
     showVoiceMode();
     maxAudioSeconds = caps.max_audio_seconds || maxAudioSeconds;

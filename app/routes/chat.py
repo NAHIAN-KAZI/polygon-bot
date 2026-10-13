@@ -3492,11 +3492,14 @@ async def _with_stats(events):
 
 @router.get("/capabilities")
 async def chat_capabilities():
-    """Optional inputs this deployment accepts, so a frontend can show only what works."""
+    """Optional inputs this deployment accepts, so a frontend can show only what works.
+    audio_input: the model hears audio, i.e. audio_mode "audio" works -- the mobile app shows its
+    mic on this alone (handoffs/VOICE_IMAGE_LANGUAGE.md), so it must not turn on for "nemo".
+    voice_modes: every audio_mode this deployment accepts."""
     voice_modes = (["both", "transcript", "audio"] if settings.LLM_AUDIO_INPUT else []) + (
         ["nemo"] if settings.STT_URL else [])
     return {"image_input": settings.LLM_IMAGE_INPUT, "max_image_mb": settings.MAX_IMAGE_MB,
-            "audio_input": bool(voice_modes), "voice_modes": voice_modes,
+            "audio_input": settings.LLM_AUDIO_INPUT, "voice_modes": voice_modes,
             "max_audio_seconds": settings.MAX_AUDIO_SECONDS, "read_aloud": settings.TTS_ENABLED}
 
 
