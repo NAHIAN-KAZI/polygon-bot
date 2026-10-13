@@ -4,7 +4,9 @@ transcriber (app.conversation.speech) and routed by classify() alone -- no bank,
 It measures whether a spoken request reaches the right service, and how close the
 transcript is to what was said.
 
-  python -m experiments.dynamic_suite.voice_route [--only 1.6,4.8] [--styles bangla_sentence,mixed]
+  python -m experiments.dynamic_suite.voice_route [--only 1.6,4.8] [--styles bangla_sentence,mixed] [--stt nemo]
+
+--stt nemo transcribes with the speech-to-text server (STT_URL, Titu STT) instead of the model.
 
 Spoken styles: bangla_sentence and mixed (questions_multilingual.json), sentence (questions.json).
 Banglish is not spoken: people who type Banglish speak Bangla.
@@ -25,7 +27,7 @@ from pathlib import Path
 import app.banking.taxonomy as taxonomy_module
 from app.banking import ui_actions
 from app.banking.routing import classify
-from app.conversation.speech import AudioInputError, transcribe
+from app.conversation.speech import AudioInputError, transcribe, transcribe_nemo
 from experiments.dynamic_suite.checks import judge
 from experiments.dynamic_suite.route_only import SNAPSHOT, as_result
 
@@ -61,6 +63,8 @@ def similarity(a: str, b: str) -> float:
 async def main():
     arg = lambda name: set(sys.argv[sys.argv.index(name) + 1].split(",")) if name in sys.argv else set()
     only, styles = arg("--only"), arg("--styles")
+    stt = "nemo" if "nemo" in arg("--stt") else "model"
+    hear = transcribe_nemo if stt == "nemo" else transcribe
     cached = json.loads(SNAPSHOT.read_text())
     if not any(c["id"] == ui_actions.CATEGORY for c in cached["categories"]):
         cached["categories"].append(ui_actions.catalog_category())
@@ -68,7 +72,7 @@ async def main():
     taxonomy_module._index = taxonomy_module._build_index(cached["categories"])
     (RESULTS / "dynamic").mkdir(parents=True, exist_ok=True)
     records = []
-    with open(RESULTS / "dynamic" / f"voice_{time.strftime('%Y%m%d_%H%M%S')}.jsonl", "w") as log:
+    with open(RESULTS / "dynamic" / f"voice_{stt}_{time.strftime('%Y%m%d_%H%M%S')}.jsonl", "w") as log:
         for path, style, voice in SOURCES:
             if styles and style not in styles:
                 continue
@@ -79,16 +83,19 @@ async def main():
                 if not question:
                     continue
                 expected = tuple(row["expected"]) if isinstance(row["expected"], list) else row["expected"]
+                started = time.perf_counter()
                 try:
-                    heard = await transcribe(speak(question, voice))
+                    heard = await hear(speak(question, voice))
                 except AudioInputError as exc:
                     heard = ""
                     result = {"type": "TRANSPORT_ERROR", "error": str(exc)}
-                else:
+                heard_seconds = round(time.perf_counter() - started, 2)
+                if heard:
                     result = as_result(await classify(heard, []))
                 status, why = judge(expected, "", result)
                 rec = {"row": key, "name": row["name"], "style": style, "voice": voice, "question": question,
-                       "heard": heard, "heard_similarity": round(similarity(question, heard), 2),
+                       "stt": stt, "heard": heard, "heard_seconds": heard_seconds,
+                       "heard_similarity": round(similarity(question, heard), 2),
                        "got": f'{result.get("type")} {result.get("category")}/{result.get("service")}/{result.get("subservice")}',
                        "status": status, "why": why}
                 records.append(rec)
@@ -100,7 +107,9 @@ async def main():
     for style in dict.fromkeys(r["style"] for r in records):
         rs = [r for r in records if r["style"] == style]
         sim = sum(r["heard_similarity"] for r in rs) / len(rs)
-        print(f"  {style:16} {dict(Counter(r['status'] for r in rs))}  transcript similarity {sim:.2f}")
+        secs = sum(r["heard_seconds"] for r in rs) / len(rs)
+        print(f"  {style:16} {dict(Counter(r['status'] for r in rs))}  transcript similarity {sim:.2f}"
+              f"  transcription {secs:.2f}s avg")
 
 
 if __name__ == "__main__":
