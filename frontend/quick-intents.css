@@ -1,0 +1,56 @@
+/* Demo-only quick-test chips above the composer (see quick-intents.js). */
+.quick-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0 0 0.6rem;
+}
+
+.quick-label {
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.quick-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.quick-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+/* TRANSFER has ~25 use cases: keep the bar compact and scroll inside it. */
+.quick-options {
+  max-height: 7.5rem;
+  overflow-y: auto;
+  padding-right: 0.2rem;
+}
+
+.quick-chip {
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+  color: var(--text);
+  font: 500 0.78rem var(--font-body);
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.quick-chip:hover {
+  border-color: var(--green);
+  background: rgba(51, 225, 122, 0.1);
+}
+
+.quick-intent { font-weight: 600; letter-spacing: 0.02em; }
+
+.quick-back {
+  color: var(--text-dim);
+  background: transparent;
+}
