@@ -1,6 +1,7 @@
 import copy
 import difflib
 import json
+from typing import Literal
 import logging
 import re
 import time
@@ -43,7 +44,8 @@ from app.banking.session import ChatTurn, get_classification_context, get_sessio
 from app.banking.taxonomy import get_taxonomy, is_valid_path
 from app import llm_backend
 from app.config import settings
-from app.conversation.speech import AudioInputError, transcribe
+import app.banking.routing as routing_module
+from app.conversation.speech import AudioInputError, decode_audio, transcribe
 from app.conversation.vision import ImageInputError, read_image, with_image_text
 from app.conversation.composer import (
     _FOREIGN_CURRENCY, build_messages, check_reply, compose, compose_stream, facts_listing, generate_chat,
@@ -142,6 +144,11 @@ class ChatRequest(BaseModel):
     # model transcribes it, the transcript is sent first as a "transcript" event, then
     # answered like typed text.
     audio: str | None = None
+    # "transcript": the text alone is routed. "both": the model also hears the audio while
+    # routing (the transcript is still made, shown, and used by every check). "audio": no
+    # transcript step; the model only hears the audio (checks that quote the customer's words
+    # have no text to work on).
+    audio_mode: Literal["transcript", "both", "audio"] = "transcript"
 
     @field_validator("message")
     @classmethod
@@ -3500,11 +3507,20 @@ async def chat_capabilities():
             "audio_input": settings.LLM_AUDIO_INPUT, "max_audio_seconds": settings.MAX_AUDIO_SECONDS}
 
 
+_VOICE_PLACEHOLDER = "(voice message)"
+
+
 async def _chat_with_media(req: ChatRequest, authorization: str | None):
     """Turn a voice message into text first, then handle any image, then answer as text."""
+    heard_token = None
     if req.audio:
         try:
-            spoken = await transcribe(req.audio)
+            if req.audio_mode == "audio":
+                spoken = ""
+                heard_audio = decode_audio(req.audio)
+            else:
+                spoken = await transcribe(req.audio)
+                heard_audio = decode_audio(req.audio) if req.audio_mode == "both" else None
         except AudioInputError as exc:
             yield _sse("error", {"detail": str(exc)})
             return
@@ -3512,15 +3528,23 @@ async def _chat_with_media(req: ChatRequest, authorization: str | None):
             logger.warning("audio input: model call failed", exc_info=True)
             yield _sse("error", {"detail": "The voice message couldn't be heard right now."})
             return
-        yield _sse("transcript", {"text": spoken})
-        message = f"{req.message}\n\n{spoken}" if req.message else spoken
+        if spoken:
+            yield _sse("transcript", {"text": spoken})
+        text = spoken or _VOICE_PLACEHOLDER
+        message = f"{req.message}\n\n{text}" if req.message else text
+        if heard_audio:
+            heard_token = routing_module.heard_audio.set((heard_audio, bool(spoken)))
         req = req.model_copy(update={"message": message[:4000], "audio": None})
-    if req.image:
-        async for event in _chat_with_image(req, authorization):
+    try:
+        if req.image:
+            async for event in _chat_with_image(req, authorization):
+                yield event
+            return
+        async for event in _chat_stream(req, authorization):
             yield event
-        return
-    async for event in _chat_stream(req, authorization):
-        yield event
+    finally:
+        if heard_token is not None:
+            routing_module.heard_audio.set(None)
 
 
 async def _chat_with_image(req: ChatRequest, authorization: str | None):

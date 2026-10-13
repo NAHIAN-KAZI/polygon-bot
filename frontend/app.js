@@ -33,6 +33,8 @@ const attachThumb = document.getElementById("attachThumb");
 const attachName = document.getElementById("attachName");
 const attachRemove = document.getElementById("attachRemove");
 const micBtn = document.getElementById("micBtn");
+const voiceModeBtn = document.getElementById("voiceModeBtn");
+const voiceModeLabel = document.getElementById("voiceModeLabel");
 const recTimer = document.getElementById("recTimer");
 
 const KEY_STORAGE = "chatbot_api_key";
@@ -565,6 +567,29 @@ function addReplyStats(timing, stats) {
                el("span", "meta-chip-value", formatSeconds(timing.totalMs))], row);
 }
 
+// --- voice mode: what the model works from for a spoken message ------------------------
+const VOICE_MODES = {
+  both: "Voice: audio + transcript",
+  transcript: "Voice: transcript only",
+  audio: "Voice: audio only",
+};
+let voiceMode = "transcript";
+try {
+  const saved = localStorage.getItem("voiceMode");
+  if (saved in VOICE_MODES) voiceMode = saved;
+} catch (e) { /* private mode */ }
+function showVoiceMode() {
+  voiceModeLabel.textContent = VOICE_MODES[voiceMode];
+  voiceModeBtn.classList.toggle("on", voiceMode !== "transcript");
+}
+voiceModeBtn.addEventListener("click", () => {
+  const order = Object.keys(VOICE_MODES);
+  voiceMode = order[(order.indexOf(voiceMode) + 1) % order.length];
+  try { localStorage.setItem("voiceMode", voiceMode); } catch (e) { /* optional */ }
+  showVoiceMode();
+});
+showVoiceMode();
+
 // --- image input ------------------------------------------------------------------
 // Shown only when the backend says its model reads images (GET /chat/capabilities).
 let pendingImage = null; // data: URL, downscaled
@@ -582,6 +607,7 @@ async function loadCapabilities() {
     maxImageMb = caps.max_image_mb || maxImageMb;
     // Recording needs a secure page (https or localhost) and a browser that can record.
     micBtn.hidden = !(caps.audio_input && navigator.mediaDevices && window.MediaRecorder);
+    voiceModeBtn.hidden = micBtn.hidden;
     maxAudioSeconds = caps.max_audio_seconds || maxAudioSeconds;
   } catch (e) {
     // optional
@@ -790,7 +816,7 @@ chatForm.addEventListener("submit", async (e) => {
   const userDiv = addMessage("user", question);
   let voiceLine = null;
   if (audio) {
-    voiceLine = el("div", "voice-line", "🎤 Voice message · transcribing…");
+    voiceLine = el("div", "voice-line", voiceMode === "audio" ? "🎤 Voice message (audio only)" : "🎤 Voice message · transcribing…");
     if (!question) userDiv.textContent = "";
     userDiv.appendChild(voiceLine);
   }
@@ -820,7 +846,7 @@ chatForm.addEventListener("submit", async (e) => {
         ...(question ? { message: question } : {}),
         include_stats: true,
         ...(image ? { image } : {}),
-        ...(audio ? { audio } : {}),
+        ...(audio ? { audio, audio_mode: voiceMode } : {}),
         ...extras.body,
       }),
     });

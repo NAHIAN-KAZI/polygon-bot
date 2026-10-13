@@ -8,6 +8,7 @@ without real taxonomy values reliably guesses a banking-service route instead
 of asking for clarification.
 """
 
+import contextvars
 import json
 import re
 from dataclasses import dataclass
@@ -638,7 +639,7 @@ async def _pick_domain(message: str, recent_turns: list[ChatTurn] | None) -> str
     for sample, answer, wants in _DOMAIN_EXAMPLES:
         messages += [{"role": "user", "content": sample},
                      {"role": "assistant", "content": json.dumps({"domain": answer, "wants": wants})}]
-    messages.append({"role": "user", "content": message})
+    messages.append(_user_turn(message))
     try:
         data = await llm_backend.post(
             "/api/chat",
@@ -737,6 +738,25 @@ def _option_names(allowed: frozenset | None, limit: int = 8) -> tuple[str, ...]:
             if (category.get("id"), service.get("id")) in allowed and service.get("name") not in names:
                 names.append(service["name"])
     return tuple(names[:limit])
+
+
+# The customer's voice message while a voice turn is routed: (raw base64 WAV, whether a transcript
+# accompanies it). Set only in the "both" and "audio" voice modes. Routing only; every check
+# after it still runs on the message text.
+heard_audio: contextvars.ContextVar[tuple[str, bool] | None] = contextvars.ContextVar("heard_audio", default=None)
+_HEARD_NOTE = (" [The customer's voice message is attached. The text above is an automatic "
+               "transcript that may mishear words or numbers; where they differ, go by what you hear.]")
+_AUDIO_ONLY_NOTE = (" [The customer's request is the attached voice message; the text above is only a "
+                    "placeholder. Work from what you hear.]")
+
+
+def _user_turn(message: str) -> dict:
+    heard = heard_audio.get()
+    if not heard:
+        return {"role": "user", "content": message}
+    audio, transcribed = heard
+    return {"role": "user", "content": message + (_HEARD_NOTE if transcribed else _AUDIO_ONLY_NOTE),
+            "audio": [audio]}
 
 
 async def classify(
@@ -910,7 +930,7 @@ async def _classify_scoped(
         # (8/8 follow-ups vs 6/8 described-only; live 2026-10-13 a stolen card was never blocked).
         messages += [{"role": "user", "content": recent_turns[-1].message},
                      {"role": "assistant", "content": recent_turns[-1].classification["question"]}]
-    messages.append({"role": "user", "content": message})
+    messages.append(_user_turn(message))
 
     tool_calls = await _post_classification(messages)
     if not tool_calls:

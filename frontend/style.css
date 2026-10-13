@@ -140,6 +140,8 @@ body {
   flex-shrink: 0;
 }
 .pill.set .dot, .pill.ok .dot { background: var(--good); box-shadow: 0 0 8px var(--good); }
+.pill.on .dot { background: var(--accent, #7c9cff); box-shadow: 0 0 8px var(--accent, #7c9cff); }
+.pill[hidden] { display: none; }
 .pill.down .dot { background: var(--bad); box-shadow: 0 0 8px var(--bad); }
 
 /* Context gauge: largest prompt of the last message vs the model's window. */
