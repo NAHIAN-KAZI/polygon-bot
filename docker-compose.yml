@@ -8,6 +8,11 @@ services:
       - "8000:8000"
     env_file:
       - .env
+    environment:
+      # The port above is network-reachable, and /demo-config would hand API_KEY to anyone
+      # who can call it. Compose environment wins over .env, so autofill cannot be switched
+      # on by accident; to use it, bind the port to 127.0.0.1 and remove this line.
+      DEMO_PORTAL_AUTOFILL_API_KEY: "false"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
