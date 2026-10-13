@@ -1633,6 +1633,39 @@ async def _ground_freeze_request(result, message: str, recent_turns: list[ChatTu
     return BankingService(result.category, result.service, result.subservice, payload or None)
 
 
+async def _card_from_last_turn(message: str, recent_turns: list[ChatTurn]) -> dict | None:
+    """{"cardId", "cardLast4"} of the card the customer just picked, when this message is
+    about that same card (a card service followed by another: "2nd ta" -> "freeze kore den").
+    Read by the model so "freeze my other card" still asks. None otherwise."""
+    last = (recent_turns or [None])[-1]
+    request = ((last.classification or {}).get("selected_card") if last else None) or {}
+    if not isinstance(request, dict) or not request.get("cardId"):
+        return None
+    prompt = (
+        f'A bank customer had just chosen their card ending {request.get("cardLast4") or "(unknown)"} '
+        f'while writing: "{_LONG_DIGITS_RE.sub(_mask_digit_run, last.message or "")}"\n'
+        f'Their next message is: "{_LONG_DIGITS_RE.sub(_mask_digit_run, message)}"\n\n'
+        "Is the next message about that same card, with no other card named or implied "
+        "(English, Bangla or Banglish)? Respond only with JSON: {\"same_card\": true or false}"
+    )
+    try:
+        data = await llm_backend.post(
+            "/api/generate",
+            {
+                "model": settings.OLLAMA_MODEL, "prompt": prompt, "stream": False, "format": "json",
+                "think": settings.OLLAMA_THINK,
+                "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0},
+            },
+            timeout=20.0,
+        )
+        same = json.loads(data.get("response") or "{}").get("same_card") is True
+    except Exception:
+        return None
+    if not same:
+        return None
+    return {k: request[k] for k in ("cardId", "cardLast4") if request.get(k) is not None}
+
+
 async def _llm_pick_candidate(message: str, candidates: list[dict]) -> int | None:
     """Ask the model which numbered option (if any) the customer's reply picks.
     Options are shown masked (type + last 4 only). Returns a 0-based index, or
@@ -2858,6 +2891,10 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                 # _resolve_account_number's "payload already has one -> skip the
                 # call entirely" shortcut (the `not ... .get("cardId")` guard above).
                 payload = dict(payload or {})
+                same_card = await _card_from_last_turn(req.message, session_turns)
+                if same_card:
+                    payload.update(same_card)
+            if (category, service) in _CARD_PICK_KEYS and not (payload or {}).get("cardId"):
                 try:
                     cards_result = await fulfill_banking_service(
                         customer_identity, token, "account_info", "cards", None, None
@@ -3357,6 +3394,11 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
     yield _sse("done", {})
 
     if customer_identity is not None:
+        if isinstance(turn_classification, dict) and isinstance(result, BankingService):
+            # Which card was acted on (never its number), so "freeze it" next turn needn't ask again.
+            chosen = {k: payload[k] for k in ("cardId", "cardLast4") if (payload or {}).get(k) is not None}
+            if chosen.get("cardId"):
+                turn_classification = {**turn_classification, "selected_card": chosen}
         if (isinstance(turn_classification, dict)
                 and turn_classification.get("type") == "BANKING_SERVICE"
                 and isinstance(result, BankingService)
