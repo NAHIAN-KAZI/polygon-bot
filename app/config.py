@@ -37,6 +37,12 @@ class Settings:
     # titu_stt_bn_fastconformer on NeMo), e.g. http://spark:8791. Empty = mode not offered.
     STT_URL: str = os.environ.get("STT_URL", "").rstrip("/")
     STT_API_KEY: str = os.environ.get("STT_API_KEY", "")
+    # "Read aloud" button on replies (POST /tts, Microsoft's Edge neural voices via edge-tts).
+    # The reply text is sent to Microsoft and replies can hold account details, so it's off
+    # unless switched on. The Bangla voice is used whenever the reply has Bangla script.
+    TTS_ENABLED: bool = os.environ.get("TTS_ENABLED", "false").lower() == "true"
+    TTS_VOICE_BN: str = os.environ.get("TTS_VOICE_BN", "bn-BD-NabanitaNeural")
+    TTS_VOICE_EN: str = os.environ.get("TTS_VOICE_EN", "en-IN-NeerjaNeural")
     EMBED_DIM: int = int(os.environ.get("EMBED_DIM", "384"))
 
     QDRANT_URL: str = os.environ.get("QDRANT_URL", "http://qdrant:6333")

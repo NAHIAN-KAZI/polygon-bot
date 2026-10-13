@@ -3497,7 +3497,7 @@ async def chat_capabilities():
         ["nemo"] if settings.STT_URL else [])
     return {"image_input": settings.LLM_IMAGE_INPUT, "max_image_mb": settings.MAX_IMAGE_MB,
             "audio_input": bool(voice_modes), "voice_modes": voice_modes,
-            "max_audio_seconds": settings.MAX_AUDIO_SECONDS}
+            "max_audio_seconds": settings.MAX_AUDIO_SECONDS, "read_aloud": settings.TTS_ENABLED}
 
 
 _VOICE_PLACEHOLDER = "(voice message)"

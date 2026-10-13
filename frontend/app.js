@@ -596,6 +596,58 @@ voiceModeBtn.addEventListener("click", () => {
 });
 showVoiceMode();
 
+// --- read aloud: a reply spoken by the server (POST /tts) --------------------------------
+// Offered only when GET /chat/capabilities says read_aloud. One reply plays at a time.
+let readAloud = false;
+let playing = null; // { audio, chip, label } of the reply being read
+
+function stopReading() {
+  if (!playing) return;
+  playing.audio.pause();
+  playing.chip.classList.remove("playing");
+  playing.label.textContent = "Read aloud";
+  playing = null;
+}
+
+function addReadAloudChip(text) {
+  if (!readAloud || !text) return;
+  const chip = el("button", "meta-chip read-aloud");
+  const label = el("span", "meta-chip-value", "Read aloud");
+  chip.type = "button";
+  chip.append(el("span", "meta-chip-label", "🔊"), label);
+  let url = null; // fetched once, replayed from memory
+  chip.addEventListener("click", async () => {
+    if (playing && playing.chip === chip) { stopReading(); return; }
+    stopReading();
+    const audio = new Audio();
+    playing = { audio, chip, label };
+    chip.classList.add("playing");
+    label.textContent = "Loading…";
+    try {
+      if (!url) {
+        const res = await fetch("/tts", {
+          method: "POST",
+          headers: headers({ "Content-Type": "application/json" }),
+          body: JSON.stringify({ text }),
+        });
+        if (!res.ok) throw new Error(res.statusText);
+        url = URL.createObjectURL(await res.blob());
+      }
+      if (!playing || playing.audio !== audio) return; // stopped while loading
+      audio.src = url;
+      audio.addEventListener("ended", stopReading);
+      label.textContent = "Stop";
+      await audio.play();
+    } catch (err) {
+      if (playing && playing.audio === audio) {
+        stopReading();
+        label.textContent = "Couldn't read aloud";
+      }
+    }
+  });
+  metaRow().querySelector(".meta-chips").appendChild(chip);
+}
+
 // --- image input ------------------------------------------------------------------
 // Shown only when the backend says its model reads images (GET /chat/capabilities).
 let pendingImage = null; // data: URL, downscaled
@@ -618,6 +670,7 @@ async function loadCapabilities() {
     if (offered.length) voiceModes = offered;
     showVoiceMode();
     maxAudioSeconds = caps.max_audio_seconds || maxAudioSeconds;
+    readAloud = Boolean(caps.read_aloud);
   } catch (e) {
     // optional
   }
@@ -932,6 +985,7 @@ chatForm.addEventListener("submit", async (e) => {
     if (result) {
       addResultPanel(result);
     }
+    if (!botDiv.classList.contains("error")) addReadAloudChip(botDiv.textContent.trim());
     addReplyStats({ totalMs: performance.now() - startedAt, firstTokenMs }, stats);
   } catch (err) {
     botDiv.className = "msg bot error";
