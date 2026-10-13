@@ -1,10 +1,9 @@
-// Demo-only quick tests: one chip per intent. Clicking sends that intent's opening message
-// to the model, then shows the intent's use cases as more chips (each sends its own message).
+// Demo-only quick tests: one chip per intent. Clicking an intent only shows its use cases as
+// more chips; nothing is sent until a use-case chip is clicked (each sends its own message).
 // Messages come from handoffs/TEST_MESSAGES.md. Not part of the Dart UI handoff.
 const QUICK_INTENTS = [
   {
     "intent": "ACCOUNT_INFO",
-    "message": "Can you please list all of my bank accounts?",
     "options": [
       {
         "label": "1.1 Get all accounts",
@@ -58,7 +57,6 @@ const QUICK_INTENTS = [
   },
   {
     "intent": "CHECK_BALANCE",
-    "message": "How much money do I have in my account right now?",
     "options": [
       {
         "label": "6.1 Account balance",
@@ -72,7 +70,6 @@ const QUICK_INTENTS = [
   },
   {
     "intent": "FAILED_TRANSFER",
-    "message": "Can you show me my recent transactions?",
     "options": [
       {
         "label": "8.1 Transaction history",
@@ -98,7 +95,6 @@ const QUICK_INTENTS = [
   },
   {
     "intent": "EDIT_PERSONAL_DETAILS",
-    "message": "Can you please show me my profile details?",
     "options": [
       {
         "label": "7.1 Get profile",
@@ -156,7 +152,6 @@ const QUICK_INTENTS = [
   },
   {
     "intent": "TRANSFER",
-    "message": "I want to send money.",
     "options": [
       {
         "label": "14.1 Own account transfer",
@@ -262,7 +257,6 @@ const QUICK_INTENTS = [
   },
   {
     "intent": "MINI_STATEMENT",
-    "message": "Please show me my recent transactions.",
     "options": [
       {
         "label": "13.1 Transaction list",
@@ -309,7 +303,7 @@ const QUICK_INTENTS = [
     const row = document.createElement("div");
     row.className = "quick-row";
     for (const item of QUICK_INTENTS) {
-      row.append(chip(item.intent, () => { send(item.message); showOptions(item); }, "quick-intent"));
+      row.append(chip(item.intent, () => showOptions(item), "quick-intent"));
     }
     bar.append(quickLabel("Quick tests"), row);
   }
