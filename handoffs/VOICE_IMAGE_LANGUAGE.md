@@ -46,7 +46,7 @@ What the app has to know:
 | `audio` | string | A voice message as a data URL: `data:audio/wav;base64,<base64>`. See "Voice" below. |
 | `image` | string | An image as a data URL: `data:image/png|jpeg|webp|gif;base64,<base64>`. At most `max_image_mb` (5). |
 | `message` | string | Still the typed text. With `audio` it may be empty or omitted; any text typed next to the recording is kept in front of the transcript. Maximum 4000 characters. |
-| `audio_mode` | `transcript` \| `both` \| `audio` | Leave out. Default `transcript` (the bot works from the transcript). The other two are for the model team's experiments. |
+| `audio_mode` | `transcript` \| `both` \| `audio` | **The mobile app always sends `"audio"`**: no transcript step, the model only hears the recording, and no transcript is ever shown. Default (if left out) is `transcript`; `both` is for the model team's experiments. |
 | `include_stats` | bool | Leave out. Adds a timing/tokens `stats` event used by the demo page. |
 
 Existing fields (`message`, `session_id`, `top_k`, `category`, `service`, `subservice`, `payload`) are unchanged.
@@ -59,7 +59,10 @@ Through the gateway they are `message`, `sessionKey`, `topK`, `category`, `servi
 - Length: at least 0.3 s and at most `max_audio_seconds` (30). At 16 kHz mono 16-bit, 30 s is about 960 KB, so about 1.3 MB
   as base64.
 - Recording UX: tap the mic to start, tap again (or reach the limit) to send. There is no hold-to-talk.
-- The bot never sees the audio file itself unless `audio_mode` is changed; it transcribes it first.
+- With `audio_mode: "audio"` (the mobile app's mode) the bot does not transcribe: no `transcript` event is sent and the
+  customer's words are never shown as text. Checks that quote the customer's own words (for example, confirming that a
+  free-text value was really said) have no text to work on in this mode, so a voice turn is checked less strictly than a
+  typed one. Typed text sent with the recording is still used.
 
 ### Image
 
@@ -77,11 +80,11 @@ and one optional event before `done`.
 
 | Event | `data` | When | What the app does |
 |---|---|---|---|
-| `transcript` | `{"text": "<what was said>"}` | Voice message understood | Replace the placeholder in the customer's bubble with this text (see UI below). |
+| `transcript` | `{"text": "<what was said>"}` | Only with `audio_mode` `transcript` or `both` | **The mobile app does not use these modes and shows no transcript.** Ignore the event if it ever arrives. |
 | `image` | `{"text": "<what the image shows>"}` | Image read | Show it as a small caption under the customer's bubble, so they can check it. |
 | `stats` | `{"server_ms", "llm_ms", "llm_calls", "prompt_tokens", "completion_tokens", "context_tokens", "context_window", "model"}` | Only with `include_stats` | Ignore. |
 
-Sequence for a voice turn: `transcript` → `token`… → `result` → `done`. A parser that ignores unknown event names (the
+Sequence for a voice turn in the app's `audio` mode: `token`… → `result` → `done`. (With a transcript mode: `transcript` first.) A parser that ignores unknown event names (the
 Polygon AI parser does) stays safe if it does not handle them yet.
 
 ### Errors
@@ -146,7 +149,7 @@ Do these in order; each is a small, separately testable step.
 | 2 | Send `image` and `audio` (and allow an empty `message` with `audio`) | `domain/repo/polygon_ai_repository.dart`, `domain/usecase/stream_polygon_ai_chat_use_case.dart`, `data/repo_impl/polygon_ai_http_impl.dart`, the public chat repo/use case, the `PolygonAiStreamCall` typedef |
 | 3 | Capabilities: `AiCapabilities` model, `getCapabilities()`, URL `polygonAiCapabilitiesUrl` (`/support/v1/ai/capabilities`) | `domain/entity/ai_capabilities.dart`, repo, `core/data/http/urls/polygon_ai_api_urls.dart` and its implementation |
 | 4 | Controller: capabilities, pending image, voice recording state, `sendVoice`, transcript and image events | `presentation/controller/polygon_ai_chat_controller_base.dart` |
-| 5 | Voice recorder (the `record` package, 16 kHz mono WAV) | `presentation/voice/ai_voice_recorder.dart`, `pubspec.yaml`, Android and iOS permissions |
+| 5 | Voice recorder (the `record` package, 16 kHz mono WAV, sent with `audio_mode: audio`) | `presentation/voice/ai_voice_recorder.dart`, `pubspec.yaml`, Android and iOS permissions |
 | 6 | Composer: attach button, image tray, mic button with recording state | `presentation/widgets/polygon_ai_composer.dart` |
 | 7 | Bubbles: voice placeholder, image caption | `presentation/widgets/polygon_ai_message_bubble.dart`, `domain/entity/ai_chat_message_item.dart` |
 | 8 | Tests | `test/features/polygon_ai/` |
@@ -168,12 +171,12 @@ Future<void> send() async {
   await _runTurn(text.isEmpty ? 'Please look at this image.' : text, image: image);
 }
 
-// voice: a finished recording
+// voice: a finished recording, sent audio-only (the request carries audio_mode: "audio")
 Future<void> sendVoice(String wavDataUrl) => _runTurn('', audio: wavDataUrl, display: '🎤 Voice message');
 
 // events
-case AiTranscriptEvent(:final text):   // replace the placeholder in the user bubble just before the reply
-  messages[assistantIndex - 1] = messages[assistantIndex - 1].copyWith(content: '🎤 “$text”');
+case AiTranscriptEvent():              // never shown in the app (audio-only voice); ignore
+  break;
 case AiImageEvent(:final text):        // caption on the user bubble
   messages[assistantIndex - 1] = messages[assistantIndex - 1].copyWith(imageCaption: text);
 ```
@@ -201,25 +204,28 @@ Image attached                      Recording
 | Attach button | Opens the gallery picker (`image_picker`). Downscale to 1280 px on the longer side, JPEG 0.85, check the size against `max_image_mb`; show a snackbar if it is too big. Shows a thumbnail tray above the input with a remove (✕) button. |
 | Send with a picture | Sends the typed text (or "Please look at this image.") plus the picture; the picture appears in the customer's bubble. |
 | Mic button | First tap asks for the microphone permission, then starts recording; the input row shows a red dot, a running timer and a Stop button. Second tap (or reaching `max_audio_seconds`) stops and sends. Ignore recordings under 0.5 s. Disable the mic and attach buttons while `isSending`. |
-| Voice bubble | The customer's bubble first shows `🎤 Voice message`; when `transcript` arrives it becomes `🎤 “<text>”`. If the turn fails, it stays as the placeholder with the normal failed/retry state. |
+| Voice bubble | The customer's bubble shows `🎤 Voice message` and nothing else: no transcript is shown. If the turn fails, it keeps that text with the normal failed/retry state. |
 | Image caption | Small secondary text under the customer's bubble: `Image read as: <text>`. |
 | Permissions | Android `RECORD_AUDIO`; iOS `NSMicrophoneUsageDescription`. The photo library permission already exists. |
 
 ### Acceptance checks
 
 1. English, Bangla and Banglish messages each get a reply in the right language (see the table in section 1).
-2. A 5-second voice message in Bangla shows `🎤 “…”` in the customer's bubble and gets a Bangla reply.
+2. A 5-second voice message in Bangla shows `🎤 Voice message` (no transcript text) in the customer's bubble and gets a Bangla reply.
 3. A voice message under 0.3 s or with silence shows the matching error text and offers Retry.
 4. With `capabilities` failing or both flags false, neither button is shown, and typed chat still works.
 5. An image of a failed-transfer screen shows the caption and the bot's reply refers to what it shows.
 6. The pre-login public chat shows neither button.
 7. `transcript`, `image` and `stats` frames do not break a build that has not been updated yet.
+8. The request body of a voice turn carries `"audio_mode": "audio"`.
 
 ## Known gaps
 
 1. Voice and image exist only in the backend and the demo web page so far. They have not been run against the Flutter app,
    and they need the gateway changes in section 5.
-2. Reply language quality for Banglish and for mixed English–Bangla messages depends on the model (Gemma4); spot-check
+2. Audio-only voice (the mobile app's mode) was not compared against the transcript mode for routing accuracy; check a few
+   spoken banking requests in English and Bangla, including a yes/no answer to a confirmation.
+3. Reply language quality for Banglish and for mixed English–Bangla messages depends on the model (Gemma4); spot-check
    long or very informal messages.
-3. The language of a reply to a bare `yes`/`no`/number is taken from earlier turns, but the data-answer path (`balance`,
+4. The language of a reply to a bare `yes`/`no`/number is taken from earlier turns, but the data-answer path (`balance`,
    transactions) does not pass earlier turns, so a lone number can answer in the default English.
