@@ -46,7 +46,7 @@ What the app has to know:
 | `audio` | string | A voice message as a data URL: `data:audio/wav;base64,<base64>`. See "Voice" below. |
 | `image` | string | An image as a data URL: `data:image/png|jpeg|webp|gif;base64,<base64>`. At most `max_image_mb` (5). |
 | `message` | string | Still the typed text. With `audio` it may be empty or omitted; any text typed next to the recording is kept in front of the transcript. Maximum 4000 characters. |
-| `audio_mode` | `transcript` \| `both` \| `audio` | **The mobile app always sends `"audio"`**: no transcript step, the model only hears the recording, and no transcript is ever shown. Default (if left out) is `transcript`; `both` is for the model team's experiments. |
+| `audio_mode` | `transcript` \| `both` \| `audio` | **The mobile app always sends `"audio"`**: the model hears the recording, and no transcript is ever shown. Default (if left out) is `transcript`; `both` is for the model team's experiments. |
 | `include_stats` | bool | Leave out. Adds a timing/tokens `stats` event used by the demo page. |
 
 Existing fields (`message`, `session_id`, `top_k`, `category`, `service`, `subservice`, `payload`) are unchanged.
@@ -59,10 +59,11 @@ Through the gateway they are `message`, `sessionKey`, `topK`, `category`, `servi
 - Length: at least 0.3 s and at most `max_audio_seconds` (30). At 16 kHz mono 16-bit, 30 s is about 960 KB, so about 1.3 MB
   as base64.
 - Recording UX: tap the mic to start, tap again (or reach the limit) to send. There is no hold-to-talk.
-- With `audio_mode: "audio"` (the mobile app's mode) the bot does not transcribe: no `transcript` event is sent and the
-  customer's words are never shown as text. Checks that quote the customer's own words (for example, confirming that a
-  free-text value was really said) have no text to work on in this mode, so a voice turn is checked less strictly than a
-  typed one. Typed text sent with the recording is still used.
+- With `audio_mode: "audio"` (the mobile app's mode) no `transcript` event is sent and the customer's words are never
+  shown as text. Inside the bot the recording is still written down as text: the model hears the recording while it
+  decides what the customer wants, and every later step (checks that quote the customer's own words, the reply and its
+  language, follow-ups on the next message) works on that text, so a voice turn is checked exactly like a typed one.
+  Typed text sent with the recording is still used.
 
 ### Image
 

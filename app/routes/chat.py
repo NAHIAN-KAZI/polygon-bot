@@ -141,14 +141,14 @@ class ChatRequest(BaseModel):
     # The model reads it into text, sent first as an "image" event, then joined to message.
     image: str | None = None
     # Optional voice message (data:audio/wav;base64,...) when LLM_AUDIO_INPUT is on. The
-    # model transcribes it, the transcript is sent first as a "transcript" event, then
-    # answered like typed text.
+    # model transcribes it, the transcript is sent first as a "transcript" event (except in
+    # "audio" mode), then answered like typed text.
     audio: str | None = None
     # "transcript": the text alone is routed. "both": the model also hears the audio while
-    # routing (the transcript is still made, shown, and used by every check). "audio": no
-    # transcript step; the model only hears the audio (checks that quote the customer's words
-    # have no text to work on). "nemo": like "transcript", but the transcript comes from the
-    # separate speech-to-text server (STT_URL) instead of the model.
+    # routing (the transcript is still made, shown, and used by every check). "audio": the
+    # mobile app's mode -- like "both", but the transcript is never sent to the customer.
+    # "nemo": like "transcript", but the transcript comes from the separate speech-to-text
+    # server (STT_URL) instead of the model.
     audio_mode: Literal["transcript", "both", "audio", "nemo"] = "transcript"
 
     @field_validator("message")
@@ -3503,23 +3503,22 @@ async def chat_capabilities():
             "max_audio_seconds": settings.MAX_AUDIO_SECONDS, "read_aloud": settings.TTS_ENABLED}
 
 
-_VOICE_PLACEHOLDER = "(voice message)"
-
-
 async def _chat_with_media(req: ChatRequest, authorization: str | None):
     """Turn a voice message into text first, then handle any image, then answer as text."""
     heard_token = None
     if req.audio:
         try:
-            if req.audio_mode == "audio":
-                spoken = ""
-                heard_audio = decode_audio(req.audio)
-            elif req.audio_mode == "nemo":
+            if req.audio_mode == "nemo":
                 spoken = await transcribe_nemo(req.audio)
                 heard_audio = None
             else:
+                # "audio" mode is transcribed too: every step after routing (grounding the
+                # customer's words, follow-up context, the reply and its language) works on
+                # the text. Live 2026-10-14, with only a "(voice message)" placeholder, a
+                # correctly routed balance question was answered "I cannot process voice
+                # messages".
                 spoken = await transcribe(req.audio)
-                heard_audio = decode_audio(req.audio) if req.audio_mode == "both" else None
+                heard_audio = decode_audio(req.audio) if req.audio_mode in ("both", "audio") else None
         except AudioInputError as exc:
             yield _sse("error", {"detail": str(exc)})
             return
@@ -3527,12 +3526,11 @@ async def _chat_with_media(req: ChatRequest, authorization: str | None):
             logger.warning("audio input: model call failed", exc_info=True)
             yield _sse("error", {"detail": "The voice message couldn't be heard right now."})
             return
-        if spoken:
+        if req.audio_mode != "audio":  # the mobile app never shows the customer a transcript
             yield _sse("transcript", {"text": spoken})
-        text = spoken or _VOICE_PLACEHOLDER
-        message = f"{req.message}\n\n{text}" if req.message else text
+        message = f"{req.message}\n\n{spoken}" if req.message else spoken
         if heard_audio:
-            heard_token = routing_module.heard_audio.set((heard_audio, bool(spoken)))
+            heard_token = routing_module.heard_audio.set(heard_audio)
         req = req.model_copy(update={"message": message[:4000], "audio": None})
     try:
         if req.image:

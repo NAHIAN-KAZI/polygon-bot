@@ -740,23 +740,19 @@ def _option_names(allowed: frozenset | None, limit: int = 8) -> tuple[str, ...]:
     return tuple(names[:limit])
 
 
-# The customer's voice message while a voice turn is routed: (raw base64 WAV, whether a transcript
-# accompanies it). Set only in the "both" and "audio" voice modes. Routing only; every check
-# after it still runs on the message text.
-heard_audio: contextvars.ContextVar[tuple[str, bool] | None] = contextvars.ContextVar("heard_audio", default=None)
+# The customer's voice message (raw base64 WAV) while a voice turn is routed. Set only in the
+# "both" and "audio" voice modes, always next to its transcript. Routing only; every check
+# after it still runs on the transcript.
+heard_audio: contextvars.ContextVar[str | None] = contextvars.ContextVar("heard_audio", default=None)
 _HEARD_NOTE = (" [The customer's voice message is attached. The text above is an automatic "
                "transcript that may mishear words or numbers; where they differ, go by what you hear.]")
-_AUDIO_ONLY_NOTE = (" [The customer's request is the attached voice message; the text above is only a "
-                    "placeholder. Work from what you hear.]")
 
 
 def _user_turn(message: str) -> dict:
-    heard = heard_audio.get()
-    if not heard:
+    audio = heard_audio.get()
+    if not audio:
         return {"role": "user", "content": message}
-    audio, transcribed = heard
-    return {"role": "user", "content": message + (_HEARD_NOTE if transcribed else _AUDIO_ONLY_NOTE),
-            "audio": [audio]}
+    return {"role": "user", "content": message + _HEARD_NOTE, "audio": [audio]}
 
 
 async def classify(

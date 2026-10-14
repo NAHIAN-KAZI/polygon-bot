@@ -7,9 +7,12 @@ import struct
 import httpx
 import pytest
 
+import app.banking.routing as routing
 import app.routes.chat as chat_module
 from app import llm_backend
-from app.banking.routing import KbQuestion
+from app.banking.adapters.base import AdapterResult
+from app.banking.identity import CustomerIdentity
+from app.banking.routing import BankingService, KbQuestion
 from app.config import settings
 from app.conversation import speech
 from tests.conftest import AUTH_HEADERS
@@ -169,6 +172,70 @@ def test_voice_message_with_image_handles_both(client, audio_on, monkeypatch):
     assert seen["image_message"] == "why did this fail"
     assert seen["classified"] == "why did this fail\n\n(Attached image: A failed transfer.)"
 
+
+@pytest.mark.parametrize("mode, shows_transcript", [("both", True), ("audio", False)])
+def test_routing_hears_the_recording_and_everything_runs_on_the_transcript(
+        client, audio_on, monkeypatch, mode, shows_transcript):
+    seen = {}
+
+    async def fake_transcribe(data_url):
+        return "আমার ব্যালেন্স কত"
+
+    async def fake_classify(message, recent_turns=None):
+        seen["classified"] = message
+        seen["heard_audio"] = routing.heard_audio.get()
+        return KbQuestion()
+
+    monkeypatch.setattr(chat_module, "transcribe", fake_transcribe)
+    _answer_as_kb(monkeypatch, seen)
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+
+    resp = client.post("/chat", json={"audio": WAV_URL, "audio_mode": mode}, headers=AUTH_HEADERS)
+
+    names = [name for name, _ in _parse_sse(resp.text)]
+    assert ("transcript" in names) is shows_transcript  # the mobile app ("audio") never shows one
+    assert names[-1] == "done"
+    assert seen["classified"] == "আমার ব্যালেন্স কত"
+    assert seen["heard_audio"] == speech.decode_audio(WAV_URL)
+    assert routing.heard_audio.get() is None
+
+
+def test_audio_mode_banking_reply_answers_what_was_said(client, audio_on, monkeypatch):
+    # Live 2026-10-14: an audio-mode balance question was routed to accounts, but the reply
+    # writer only got a "(voice message)" placeholder and answered "I cannot process voice
+    # messages".
+    seen = {}
+
+    async def fake_transcribe(data_url):
+        return "how much money is in my account"
+
+    async def fake_classify(message, recent_turns=None):
+        return BankingService(category="account_info", service="accounts", subservice=None)
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id="cust-123")
+
+    async def fake_fulfill(customer_identity, jwt, category, service, subservice, payload):
+        return AdapterResult(data={"data": {"accounts": [{"accountNumber": "1234567890"}]}})
+
+    async def fake_synthesize_reply(message, service, subservice, data):
+        seen["reply_to"] = message
+        return "You have one account."
+
+    monkeypatch.setattr(chat_module, "transcribe", fake_transcribe)
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", fake_fulfill)
+    monkeypatch.setattr(chat_module, "_synthesize_reply", fake_synthesize_reply)
+    _install_session_fakes(monkeypatch)
+
+    resp = client.post("/chat", json={"audio": WAV_URL, "audio_mode": "audio"},
+                       headers={**AUTH_HEADERS, "Authorization": "Bearer sometoken"})
+
+    events = _parse_sse(resp.text)
+    assert "transcript" not in [name for name, _ in events]
+    assert seen["reply_to"] == "how much money is in my account"
+    assert next(data for name, data in events if name == "result")["type"] == "BANKING_SERVICE"
 
 def test_voice_input_disabled_is_an_error_event(client, monkeypatch):
     monkeypatch.setattr(settings, "LLM_AUDIO_INPUT", False)
