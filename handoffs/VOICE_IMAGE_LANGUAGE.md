@@ -200,23 +200,24 @@ keep `audio` and `image` in the stored retryable request.
 ### UI to build
 
 ```
-Composer, nothing attached
-┌──────────────────────────────────────────────┐
-│ [🖼] Ask Polygon AI...                [🎤] [↑]│
-└──────────────────────────────────────────────┘
- 🖼 only when capabilities.image_input   🎤 only when capabilities.audio_input
-
-Image attached                      Recording
+Composer, nothing attached                    Tap the attach button
+┌──────────────────────────────────────────┐  ┌──────────────────────────────┐
+│ [📎] Ask Polygon AI...               [↑] │  │ 🖼  Picture                  │
+└──────────────────────────────────────────┘  │     Choose one from gallery  │
+ 📎 only when a picture or voice is offered    │ 🎤  Voice message            │
+                                               │     Record, then tap stop    │
+Image attached                      Recording  └──────────────────────────────┘
 ┌──────────────────────────────┐    ┌──────────────────────────────┐
-│ [thumb] photo.jpg        [✕] │    │ ● Listening… 0:07     [■ Stop]│
+│ [thumb] photo.jpg        [✕] │    │ [■] ● Listening… 0:07        │
 └──────────────────────────────┘    └──────────────────────────────┘
 ```
 
 | Element | Behaviour |
 |---|---|
-| Attach button | Opens the gallery picker (`image_picker`). Downscale to 1280 px on the longer side, JPEG 0.85, check the size against `max_image_mb`; show a snackbar if it is too big. Shows a thumbnail tray above the input with a remove (✕) button. |
+| Attach button | One button left of the text box (a paperclip, like a messenger). Hidden unless `image_input` or `voice_modes` containing `nemo` is on. Tapping it opens a bottom sheet listing only what is available: **Picture** and **Voice message**. Disabled while a reply is being sent. Documents (PDF, Word) are not offered: the chatbot cannot read them. |
+| Picture | Opens the gallery picker (`image_picker`). Downscale to 1280 px on the longer side, JPEG 0.85, check the size against `max_image_mb`; show a snackbar if it is too big. Shows a thumbnail tray above the input with a remove (✕) button. |
 | Send with a picture | Sends the typed text (or "Please look at this image.") plus the picture; the picture appears in the customer's bubble. |
-| Mic button | First tap asks for the microphone permission, then starts recording; the input row shows a red dot, a running timer and a Stop button. Second tap (or reaching `max_audio_seconds`) stops and sends. Ignore recordings under 0.5 s. Disable the mic and attach buttons while `isSending`. |
+| Voice message | Chosen from the sheet: asks for the microphone permission on first use, then starts recording. The attach button turns into a red Stop button and the input row shows a red dot and a running timer. Tapping Stop (or reaching `max_audio_seconds`) stops and sends. Ignore recordings under 1 s. Send is disabled while recording. |
 | Voice bubble | The customer's bubble first shows `🎤 Voice message`; when the `transcript` event arrives it becomes `🎤 “<what was heard>”`. If the turn fails before that, it keeps the placeholder with the normal failed/retry state. |
 | Image caption | Small secondary text under the customer's bubble: `Image read as: <text>`. |
 | Permissions | Android `RECORD_AUDIO`; iOS `NSMicrophoneUsageDescription`. The photo library permission already exists. |
