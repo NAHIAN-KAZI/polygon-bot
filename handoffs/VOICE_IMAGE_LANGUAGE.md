@@ -46,7 +46,7 @@ What the app has to know:
 | `audio` | string | A voice message as a data URL: `data:audio/wav;base64,<base64>`. See "Voice" below. |
 | `image` | string | An image as a data URL: `data:image/png|jpeg|webp|gif;base64,<base64>`. At most `max_image_mb` (5). |
 | `message` | string | Still the typed text. With `audio` it may be empty or omitted; any text typed next to the recording is kept in front of the transcript. Maximum 4000 characters. |
-| `audio_mode` | `transcript` \| `both` \| `audio` | **The mobile app always sends `"audio"`**: the model hears the recording, and no transcript is ever shown. Default (if left out) is `transcript`; `both` is for the model team's experiments. |
+| `audio_mode` | `transcript` \| `both` \| `audio` \| `nemo` | **The mobile app always sends `"nemo"`**: the recording is turned into text by Titu STT, a Bangla speech-to-text model on its own server, and that text is then answered like typed text. The app never shows the transcript. Default (if left out) is `transcript`; `both` and `audio` are the language model's own modes, used by the demo page. |
 | `include_stats` | bool | Leave out. Adds a timing/tokens `stats` event used by the demo page. |
 
 Existing fields (`message`, `session_id`, `top_k`, `category`, `service`, `subservice`, `payload`) are unchanged.
@@ -59,11 +59,14 @@ Through the gateway they are `message`, `sessionKey`, `topK`, `category`, `servi
 - Length: at least 0.3 s and at most `max_audio_seconds` (30). At 16 kHz mono 16-bit, 30 s is about 960 KB, so about 1.3 MB
   as base64.
 - Recording UX: tap the mic to start, tap again (or reach the limit) to send. There is no hold-to-talk.
-- With `audio_mode: "audio"` (the mobile app's mode) no `transcript` event is sent and the customer's words are never
-  shown as text. Inside the bot the recording is still written down as text: the model hears the recording while it
-  decides what the customer wants, and every later step (checks that quote the customer's own words, the reply and its
-  language, follow-ups on the next message) works on that text, so a voice turn is checked exactly like a typed one.
-  Typed text sent with the recording is still used.
+- With `audio_mode: "nemo"` (the mobile app's mode) the chatbot sends the recording to the Titu STT server (`STT_URL`),
+  which returns Bangla text, and answers that text. Every later step (checks that quote the customer's own words, the reply
+  and its language, follow-ups on the next message) works on the text, so a voice turn is checked like a typed one. Typed
+  text sent with the recording is kept in front of the transcript.
+- Titu is trained on Bangla. English words come out transliterated into Bangla script, so mixed English–Bangla speech is
+  read less well than by the language-model modes.
+- The mode exists only where the STT server is set up. Without it the chatbot does not list `nemo` in `voice_modes`
+  (section 4) and the app must not show the mic; sending `nemo` anyway answers an error.
 
 ### Image
 
@@ -81,11 +84,11 @@ and one optional event before `done`.
 
 | Event | `data` | When | What the app does |
 |---|---|---|---|
-| `transcript` | `{"text": "<what was said>"}` | Only with `audio_mode` `transcript` or `both` | **The mobile app does not use these modes and shows no transcript.** Ignore the event if it ever arrives. |
+| `transcript` | `{"text": "<what was said>"}` | Every voice turn except `audio_mode` `audio` | **The app never shows the transcript.** Ignore the event. |
 | `image` | `{"text": "<what the image shows>"}` | Image read | Show it as a small caption under the customer's bubble, so they can check it. |
 | `stats` | `{"server_ms", "llm_ms", "llm_calls", "prompt_tokens", "completion_tokens", "context_tokens", "context_window", "model"}` | Only with `include_stats` | Ignore. |
 
-Sequence for a voice turn in the app's `audio` mode: `token`… → `result` → `done`. (With a transcript mode: `transcript` first.) A parser that ignores unknown event names (the
+Sequence for a voice turn in the app's `nemo` mode: `transcript` → `token`… → `result` → `done`, with the `transcript` event ignored. A parser that ignores unknown event names (the
 Polygon AI parser does) stays safe if it does not handle them yet.
 
 ### Errors
@@ -116,12 +119,17 @@ Show these through the app's existing error path (snackbar plus the failed bubbl
 Needs the API key like `/chat`. Response:
 
 ```json
-{"image_input": true, "max_image_mb": 5, "audio_input": true, "max_audio_seconds": 30}
+{"image_input": true, "max_image_mb": 5, "audio_input": true,
+ "voice_modes": ["both", "transcript", "audio", "nemo"], "max_audio_seconds": 30, "read_aloud": false}
 ```
 
-Show the attach button only when `image_input` is true and the mic only when `audio_input` is true. If the call fails, hide
-both. Voice and image are off in any environment where `LLM_AUDIO_INPUT` / `LLM_IMAGE_INPUT` are not set to `true`, and they
-need a model that reads audio and images (Gemma4 on vLLM does; Ollama's `llama3.1:8b` does not).
+Show the attach button only when `image_input` is true, and the mic only when `voice_modes` contains `"nemo"` (the mode the
+app sends). `audio_input` means something else (the language model itself hears audio) and is not used for the mic;
+`read_aloud` is for the demo page. If the call fails, or `voice_modes` is missing, hide the mic.
+
+Picture input is off unless `LLM_IMAGE_INPUT=true` and needs a model that reads images (Gemma4 on vLLM does; Ollama's
+`llama3.1:8b` does not). The app's voice mode is off unless `STT_URL` points at a running Titu STT server (`stt_service/`,
+on a GPU box).
 
 ---
 
@@ -133,7 +141,7 @@ Java 25 Maven container):
 
 1. `AiChatRequest` takes `image`, `audio` and `audioMode`. `message` may be empty when `audio` is present. `image` and
    `audio` must be inline data URLs (`data:image/(png|jpeg|webp|gif);base64,…`, `data:audio/wav;base64,…`); links and
-   `file:` URLs are rejected. `audioMode` must be `transcript`, `both` or `audio`.
+   `file:` URLs are rejected. `audioMode` must be `transcript`, `both`, `audio` or `nemo`.
 2. `RagChatClient.streamChat` forwards `image`, `audio` and `audio_mode` upstream, and leaves out an empty `message`.
 3. `GET /support/v1/ai/capabilities` (customer JWT) proxies `GET /chat/capabilities`. When the assistant is off or the
    chatbot is unreachable it answers `{"image_input":false,"max_image_mb":5,"audio_input":false,"max_audio_seconds":30}`
@@ -154,7 +162,7 @@ Do these in order; each is a small, separately testable step.
 | 2 | Send `image` and `audio` (and allow an empty `message` with `audio`) | `domain/repo/polygon_ai_repository.dart`, `domain/usecase/stream_polygon_ai_chat_use_case.dart`, `data/repo_impl/polygon_ai_http_impl.dart`, the public chat repo/use case, the `PolygonAiStreamCall` typedef |
 | 3 | Capabilities: `AiCapabilities` model, `getCapabilities()`, URL `polygonAiCapabilitiesUrl` (`/support/v1/ai/capabilities`) | `domain/entity/ai_capabilities.dart`, repo, `core/data/http/urls/polygon_ai_api_urls.dart` and its implementation |
 | 4 | Controller: capabilities, pending image, voice recording state, `sendVoice`, transcript and image events | `presentation/controller/polygon_ai_chat_controller_base.dart` |
-| 5 | Voice recorder (the `record` package, 16 kHz mono WAV, sent with `audio_mode: audio`) | `presentation/media/ai_voice_recorder.dart` and `presentation/media/ai_image_picker.dart`, `pubspec.yaml`, Android and iOS permissions |
+| 5 | Voice recorder (the `record` package, 16 kHz mono WAV, sent with `audio_mode: nemo`) | `presentation/media/ai_voice_recorder.dart` and `presentation/media/ai_image_picker.dart`, `pubspec.yaml`, Android and iOS permissions |
 | 6 | Composer: attach button, image tray, mic button with recording state | `presentation/widgets/polygon_ai_composer.dart` |
 | 7 | Bubbles: voice placeholder, image caption | `presentation/widgets/polygon_ai_message_bubble.dart`, `domain/entity/ai_chat_message_item.dart` |
 | 8 | Tests | `test/features/polygon_ai/` |
@@ -176,11 +184,11 @@ Future<void> send() async {
   await _runTurn(text.isEmpty ? 'Please look at this image.' : text, image: image);
 }
 
-// voice: a finished recording, sent audio-only (the request carries audio_mode: "audio")
+// voice: a finished recording, transcribed by Titu STT on the server (the request carries audio_mode: "nemo")
 Future<void> sendVoice(String wavDataUrl) => _runTurn('', audio: wavDataUrl, display: '🎤 Voice message');
 
 // events
-case AiTranscriptEvent():              // never shown in the app (audio-only voice); ignore
+case AiTranscriptEvent():              // never shown in the app; ignore
   break;
 case AiImageEvent(:final text):        // caption on the user bubble
   messages[assistantIndex - 1] = messages[assistantIndex - 1].copyWith(imageCaption: text);
@@ -209,7 +217,7 @@ Image attached                      Recording
 | Attach button | Opens the gallery picker (`image_picker`). Downscale to 1280 px on the longer side, JPEG 0.85, check the size against `max_image_mb`; show a snackbar if it is too big. Shows a thumbnail tray above the input with a remove (✕) button. |
 | Send with a picture | Sends the typed text (or "Please look at this image.") plus the picture; the picture appears in the customer's bubble. |
 | Mic button | First tap asks for the microphone permission, then starts recording; the input row shows a red dot, a running timer and a Stop button. Second tap (or reaching `max_audio_seconds`) stops and sends. Ignore recordings under 0.5 s. Disable the mic and attach buttons while `isSending`. |
-| Voice bubble | The customer's bubble shows `🎤 Voice message` and nothing else: no transcript is shown. If the turn fails, it keeps that text with the normal failed/retry state. |
+| Voice bubble | The customer's bubble shows `🎤 Voice message` and nothing else: the transcript is never shown. If the turn fails, it keeps that text with the normal failed/retry state. |
 | Image caption | Small secondary text under the customer's bubble: `Image read as: <text>`. |
 | Permissions | Android `RECORD_AUDIO`; iOS `NSMicrophoneUsageDescription`. The photo library permission already exists. |
 
@@ -222,15 +230,16 @@ Image attached                      Recording
 5. An image of a failed-transfer screen shows the caption and the bot's reply refers to what it shows.
 6. The pre-login public chat shows neither button.
 7. `transcript`, `image` and `stats` frames do not break a build that has not been updated yet.
-8. The request body of a voice turn carries `"audio_mode": "audio"`.
+8. The request body of a voice turn carries `"audio_mode": "nemo"`, and the mic is hidden when `voice_modes` lacks `nemo`.
 
 ## Known gaps
 
 1. Voice and image have been exercised only through the demo web page and unit tests. The Flutter side compiles, analyses
    cleanly and its tests pass (Flutter 3.44.4), but nobody has recorded a voice message or attached a picture on a real
    device, and the gateway has not been run against a live chatbot.
-2. Audio-only voice (the mobile app's mode) was not compared against the transcript mode for routing accuracy; check a few
-   spoken banking requests in English and Bangla, including a yes/no answer to a confirmation.
+2. Titu STT (`nemo`, the mobile app's mode) has not been tried from the app and needs its STT server running (`STT_URL`).
+   Check a few spoken banking requests in Bangla and in mixed English–Bangla, including a yes/no answer to a confirmation.
+   Keep the STT port reachable only from the chatbot host, with `STT_API_KEY` set: customer voice is sent there.
 3. Reply language quality for Banglish and for mixed English–Bangla messages depends on the model (Gemma4); spot-check
    long or very informal messages.
 4. The language of a reply to a bare `yes`/`no`/number is taken from earlier turns, but the data-answer path (`balance`,
