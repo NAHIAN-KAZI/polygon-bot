@@ -222,14 +222,13 @@ Picture attached (above the row)        Attach sheet (tap 📎)
 |---|---|---|---|
 | Nothing typed, voice available | 📎 attach (if pictures are on) | Text box, hint `Ask Polygon AI...` | 🎤 mic: starts recording |
 | Nothing typed, no voice (and the pre-login chat) | 📎 if pictures are on, else none | Text box | ➤ send, dimmed and disabled |
-| Right after a voice message was transcribed (until the customer sends anything else) | 📎 | Text box | ⚡ quick actions: replaces the mic |
 | Text typed, or a picture attached | 📎 | Text box (hint `Add a message (optional)` with a picture) | ➤ send, filled in the primary colour |
 | Recording | 🗑 discard (red-tinted): throws the recording away | Red pulsing dot, `0:07 / 0:30`, `Recording… tap ➤ to send` | ➤ stop and send |
 | Reply being fetched | 📎 disabled | Text box | Spinner, not tappable |
 
 | Element | Behaviour |
 |---|---|
-| ⚡ Quick actions | Shown where the mic normally is from the moment a voice message's `transcript` arrives until the customer sends anything else or starts a new chat; only when the chat has quick replies (the signed-in chat: Balance, My cards, Recent transactions, Transfer money, Fees). Tapping it opens a sheet listing those as one-tap messages, plus **Record another voice message** so voice is never lost. Typed text or a picture still turns the button into ➤ send. |
+| ⚡ icon | Only the icon changes: from the moment a voice message's `transcript` arrives until the customer sends anything else or starts a new chat, the mic button shows a ⚡ instead of the 🎤. It is the same button in the same place and still starts a new recording. |
 | Action button | Switches with a short scale-and-fade animation, with a light haptic tick on send and a medium one on starting or ending a recording. Every button is 44 × 44 and has a tooltip. The rules are one pure function, `aiComposerAction(hasText, hasPicture, isRecording, isSending, voiceAvailable, quickActions)`. |
 | Attach button | One button left of the text box (a paperclip). Hidden unless `image_input` is on. Opens a bottom sheet: **Photo library** and **Camera**. Disabled while a reply is being fetched. Documents (PDF, Word) are not offered: the chatbot cannot read them. |
 | Picture | Downscale to 1280 px on the longer side, JPEG 0.85, check the size against `max_image_mb`; show a snackbar if it is too big. A tray above the input shows the thumbnail, the name, `Ready to send` and a remove (✕) button. |
