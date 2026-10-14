@@ -46,7 +46,7 @@ What the app has to know:
 | `audio` | string | A voice message as a data URL: `data:audio/wav;base64,<base64>`. See "Voice" below. |
 | `image` | string | An image as a data URL: `data:image/png|jpeg|webp|gif;base64,<base64>`. At most `max_image_mb` (5). |
 | `message` | string | Still the typed text. With `audio` it may be empty or omitted; any text typed next to the recording is kept in front of the transcript. Maximum 4000 characters. |
-| `audio_mode` | `transcript` \| `both` \| `audio` \| `nemo` | **The mobile app always sends `"nemo"`**: the recording is turned into text by Titu STT, a Bangla speech-to-text model on its own server, and that text is then answered like typed text. The app never shows the transcript. Default (if left out) is `transcript`; `both` and `audio` are the language model's own modes, used by the demo page. |
+| `audio_mode` | `transcript` \| `both` \| `audio` \| `nemo` | **The mobile app always sends `"nemo"`**: the recording is turned into text by Titu STT, a Bangla speech-to-text model on its own server, and that text is then answered like typed text. The app shows the transcript in the customer's own bubble (see UI below). Default (if left out) is `transcript`; `both` and `audio` are the language model's own modes, used by the demo page. |
 | `include_stats` | bool | Leave out. Adds a timing/tokens `stats` event used by the demo page. |
 
 Existing fields (`message`, `session_id`, `top_k`, `category`, `service`, `subservice`, `payload`) are unchanged.
@@ -84,11 +84,11 @@ and one optional event before `done`.
 
 | Event | `data` | When | What the app does |
 |---|---|---|---|
-| `transcript` | `{"text": "<what was said>"}` | Every voice turn except `audio_mode` `audio` | **The app never shows the transcript.** Ignore the event. |
+| `transcript` | `{"text": "<what was said>"}` | Every voice turn except `audio_mode` `audio` | Show it in the customer's own voice bubble, replacing the `🎤 Voice message` placeholder, so they can see whether they were understood. |
 | `image` | `{"text": "<what the image shows>"}` | Image read | Show it as a small caption under the customer's bubble, so they can check it. |
 | `stats` | `{"server_ms", "llm_ms", "llm_calls", "prompt_tokens", "completion_tokens", "context_tokens", "context_window", "model"}` | Only with `include_stats` | Ignore. |
 
-Sequence for a voice turn in the app's `nemo` mode: `transcript` → `token`… → `result` → `done`, with the `transcript` event ignored. A parser that ignores unknown event names (the
+Sequence for a voice turn in the app's `nemo` mode: `transcript` → `token`… → `result` → `done`. A parser that ignores unknown event names (the
 Polygon AI parser does) stays safe if it does not handle them yet.
 
 ### Errors
@@ -188,8 +188,8 @@ Future<void> send() async {
 Future<void> sendVoice(String wavDataUrl) => _runTurn('', audio: wavDataUrl, display: '🎤 Voice message');
 
 // events
-case AiTranscriptEvent():              // never shown in the app; ignore
-  break;
+case AiTranscriptEvent(:final text):   // what Titu heard, shown in the customer's bubble
+  messages[assistantIndex - 1] = messages[assistantIndex - 1].copyWith(content: '🎤 “$text”');
 case AiImageEvent(:final text):        // caption on the user bubble
   messages[assistantIndex - 1] = messages[assistantIndex - 1].copyWith(imageCaption: text);
 ```
@@ -217,14 +217,14 @@ Image attached                      Recording
 | Attach button | Opens the gallery picker (`image_picker`). Downscale to 1280 px on the longer side, JPEG 0.85, check the size against `max_image_mb`; show a snackbar if it is too big. Shows a thumbnail tray above the input with a remove (✕) button. |
 | Send with a picture | Sends the typed text (or "Please look at this image.") plus the picture; the picture appears in the customer's bubble. |
 | Mic button | First tap asks for the microphone permission, then starts recording; the input row shows a red dot, a running timer and a Stop button. Second tap (or reaching `max_audio_seconds`) stops and sends. Ignore recordings under 0.5 s. Disable the mic and attach buttons while `isSending`. |
-| Voice bubble | The customer's bubble shows `🎤 Voice message` and nothing else: the transcript is never shown. If the turn fails, it keeps that text with the normal failed/retry state. |
+| Voice bubble | The customer's bubble first shows `🎤 Voice message`; when the `transcript` event arrives it becomes `🎤 “<what was heard>”`. If the turn fails before that, it keeps the placeholder with the normal failed/retry state. |
 | Image caption | Small secondary text under the customer's bubble: `Image read as: <text>`. |
 | Permissions | Android `RECORD_AUDIO`; iOS `NSMicrophoneUsageDescription`. The photo library permission already exists. |
 
 ### Acceptance checks
 
 1. English, Bangla and Banglish messages each get a reply in the right language (see the table in section 1).
-2. A 5-second voice message in Bangla shows `🎤 Voice message` (no transcript text) in the customer's bubble and gets a Bangla reply.
+2. A 5-second voice message in Bangla shows `🎤 “…”` with the heard text in the customer's bubble and gets a Bangla reply.
 3. A voice message under 0.3 s or with silence shows the matching error text and offers Retry.
 4. With `capabilities` failing or both flags false, neither button is shown, and typed chat still works.
 5. An image of a failed-transfer screen shows the caption and the bot's reply refers to what it shows.
