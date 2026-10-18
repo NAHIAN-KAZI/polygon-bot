@@ -14,7 +14,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.auth import require_api_key
-from app.banking import audit
+from app.banking import audit, dates
 from app.banking.adapters import fulfill_banking_service
 from app.banking.adapters.base import (
     AdapterAccountSelectionRequiredError,
@@ -752,6 +752,37 @@ def _bd_mobile(value: object) -> str | None:
     if digits.startswith("880"):
         digits = digits[2:]
     return digits if _BD_MOBILE_RE.fullmatch(digits) else None
+
+
+_DATE_RANGE_KEYS = (("polygon_services", "transaction_history"), ("account_info", "account_transactions"))
+_STATEMENT_KEY = ("card_info", "credit_card_statement")
+
+
+def _normalize_dates(result):
+    """The dates the model wrote, made safe before they reach the bank adapter.
+
+    A period must be real yyyy-MM-dd dates: one date alone is a single day, a reversed pair is
+    swapped, and anything unreadable is dropped (the customer then gets the plain recent list
+    instead of a filter built on a bad date). A statement month must be yyyy-MM. The model is
+    told today's date and the format (build_system_prompt); this is the check on what it wrote.
+    """
+    if not isinstance(result, BankingService):
+        return result
+    key = (result.category, result.service)
+    payload = dict(result.payload or {})
+    if key in _DATE_RANGE_KEYS:
+        payload = dates.normalize_date_range(payload) or {}
+    elif key == _STATEMENT_KEY and "month" in payload:
+        month = dates.normalize_month(payload.get("month"))
+        if month:
+            payload["month"] = month
+        else:
+            payload.pop("month")
+    else:
+        return result
+    if payload == (result.payload or {}):
+        return result
+    return BankingService(result.category, result.service, result.subservice, payload or None)
 
 
 def _normalize_change_request(result):
@@ -2821,6 +2852,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
             result = await _fill_known_from_message(result, req.message)
 
     result = _clean_extracted_fields(result)
+    result = _normalize_dates(result)
     result = _normalize_change_request(result)
     turn_classification: dict | None = None
 

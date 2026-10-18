@@ -1,5 +1,5 @@
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import httpx
 
@@ -11,6 +11,7 @@ from app.banking.adapters.base import (
     AdapterUnavailableError,
     AdapterValidationError,
 )
+from app.banking.dates import BANK_TZ, bank_today, parse_day
 from app.banking.identity import CustomerIdentity
 from app.config import settings
 
@@ -145,14 +146,17 @@ _DATE_RANGE_MAX_RECORDS = 200
 _DATE_RANGE_PAGE_SIZE = 50
 
 
-async def _fetch_all_pages(
+async def _fetch_pages(
     method: str, path: str, jwt: str | None, base_params: dict, list_key: str,
-) -> list:
+) -> tuple[list, bool]:
     """Pages through path (bounded to _DATE_RANGE_MAX_PAGES /
     _DATE_RANGE_MAX_RECORDS, whichever hits first) while pagination.hasNext is
-    true, accumulating items found under list_key across all fetched pages."""
+    true, accumulating items found under list_key across all fetched pages.
+    The flag is True when the cap stopped the search while the bank still had
+    more items, so what was fetched is not the whole history."""
     items: list = []
     page = 0
+    truncated = False
     while page < _DATE_RANGE_MAX_PAGES and len(items) < _DATE_RANGE_MAX_RECORDS:
         body = await _call(
             method, path, jwt,
@@ -162,17 +166,27 @@ async def _fetch_all_pages(
         if not (body.get("pagination") or {}).get("hasNext"):
             break
         page += 1
+        truncated = page >= _DATE_RANGE_MAX_PAGES or len(items) >= _DATE_RANGE_MAX_RECORDS
+    return items, truncated
+
+
+async def _fetch_all_pages(
+    method: str, path: str, jwt: str | None, base_params: dict, list_key: str,
+) -> list:
+    items, _ = await _fetch_pages(method, path, jwt, base_params, list_key)
     return items
 
 
 def _filter_by_date_range(
     items: list, timestamp_key: str, start_date: str, end_date: str,
 ) -> list:
-    """Keeps only items whose timestamp_key falls within [start_date
-    00:00:00, end_date 23:59:59] inclusive, both boundaries interpreted as
-    UTC. Items missing or with unparseable timestamps are dropped."""
-    start_dt = datetime.fromisoformat(f"{start_date}T00:00:00+00:00")
-    end_dt = datetime.fromisoformat(f"{end_date}T23:59:59+00:00")
+    """Keeps only items whose timestamp_key falls within the customer's days
+    start_date through end_date, both included. A day is a Bangladesh calendar
+    day (UTC+6): a transaction at 02:00 on the 5th is stored as 20:00 UTC on
+    the 4th and must still show for "the 5th". Items missing a timestamp are
+    dropped; an unparseable one raises."""
+    start_dt = datetime.fromisoformat(f"{start_date}T00:00:00").replace(tzinfo=BANK_TZ)
+    end_dt = datetime.fromisoformat(f"{end_date}T00:00:00").replace(tzinfo=BANK_TZ) + timedelta(days=1)
     filtered = []
     for item in items:
         raw_ts = item.get(timestamp_key)
@@ -181,7 +195,7 @@ def _filter_by_date_range(
         item_dt = datetime.fromisoformat(raw_ts.replace("Z", "+00:00"))
         if item_dt.tzinfo is None:
             item_dt = item_dt.replace(tzinfo=timezone.utc)
-        if start_dt <= item_dt <= end_dt:
+        if start_dt <= item_dt < end_dt:
             filtered.append(item)
     return filtered
 
@@ -196,9 +210,26 @@ async def _fetch_and_filter_date_range(
     start_date: str,
     end_date: str,
 ) -> dict:
-    items = await _fetch_all_pages(method, path, jwt, base_params, list_key)
+    items, truncated = await _fetch_pages(method, path, jwt, base_params, list_key)
     filtered = _filter_by_date_range(items, timestamp_key, start_date, end_date)
-    return {list_key: filtered, "pagination": {"totalCount": len(filtered)}, "dateFiltered": True}
+    result = {list_key: filtered, "pagination": {"totalCount": len(filtered)}, "dateFiltered": True}
+    if truncated and not filtered:
+        # Not "nothing happened in that period": only the latest records were searched.
+        result["searchNote"] = (
+            f"Only the latest {len(items)} records were searched, so older ones in that "
+            "period may exist."
+        )
+    return result
+
+
+def _date_bounds(payload: dict) -> tuple[str, str] | None:
+    """(start, end) as yyyy-MM-dd for a payload that names a period, else None. An open end is
+    today and an open start is the beginning of time; upstream normally supplies both."""
+    start = parse_day(payload.get("startDate"))
+    end = parse_day(payload.get("endDate"))
+    if start is None and end is None:
+        return None
+    return (start or date.min).isoformat(), (end or bank_today()).isoformat()
 
 
 class BalanceAdapter:
@@ -234,9 +265,11 @@ class TransactionHistoryAdapter:
         payload = payload or {}
         account_number = await _resolve_account_number(customer_identity, jwt, payload)
 
-        start_date = payload.get("startDate")
-        end_date = payload.get("endDate")
-        if start_date and end_date:
+        bounds = _date_bounds(payload)
+        if bounds:
+            # A period was asked for: answer for that period, or say it could not be searched.
+            # Falling back to the plain recent list here would pass off "everything" as the
+            # answer to "the 5th".
             try:
                 data = await _fetch_and_filter_date_range(
                     "GET",
@@ -245,12 +278,11 @@ class TransactionHistoryAdapter:
                     {"accountNumber": account_number},
                     "transactions",
                     "txnTime",
-                    start_date,
-                    end_date,
+                    *bounds,
                 )
-                return AdapterResult(data=data)
-            except Exception:
-                pass
+            except (ValueError, TypeError, KeyError) as exc:
+                raise AdapterUnavailableError("Could not search transactions for that period") from exc
+            return AdapterResult(data=data)
 
         body = await _call(
             "GET",
@@ -307,9 +339,8 @@ class LoginHistoryAdapter:
             # in from" was answered "service unavailable").
             return AdapterResult(data=await self._all_devices(jwt, payload))
 
-        start_date = payload.get("startDate")
-        end_date = payload.get("endDate")
-        if start_date and end_date:
+        bounds = _date_bounds(payload)
+        if bounds:
             try:
                 data = await _fetch_and_filter_date_range(
                     "GET",
@@ -318,12 +349,11 @@ class LoginHistoryAdapter:
                     {},
                     "records",
                     "loginAt",
-                    start_date,
-                    end_date,
+                    *bounds,
                 )
-                return AdapterResult(data=data)
-            except Exception:
-                pass
+            except (ValueError, TypeError, KeyError) as exc:
+                raise AdapterUnavailableError("Could not search logins for that period") from exc
+            return AdapterResult(data=data)
 
         body = await _call(
             "GET",

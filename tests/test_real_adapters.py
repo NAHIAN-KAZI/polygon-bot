@@ -16,6 +16,7 @@ it with asyncio.run() inside sync test functions rather than adding
 pytest-asyncio as a dependency.
 """
 import asyncio
+from datetime import date
 
 import httpx
 import pytest
@@ -647,9 +648,11 @@ def test_fetch_all_pages_stops_at_page_cap_without_infinite_loop(monkeypatch):
 
 
 def test_filter_by_date_range_includes_start_and_end_boundary_inclusive():
+    # Days are Bangladesh days (UTC+6): the 10th starts at 18:00Z on the 9th and the 12th ends at
+    # 17:59:59Z on the 12th.
     items = [
-        {"txnTime": "2026-01-10T00:00:00Z"},
-        {"txnTime": "2026-01-12T23:59:59Z"},
+        {"txnTime": "2026-01-09T18:00:00Z"},
+        {"txnTime": "2026-01-12T17:59:59Z"},
     ]
 
     filtered = real._filter_by_date_range(items, "txnTime", "2026-01-10", "2026-01-12")
@@ -659,8 +662,8 @@ def test_filter_by_date_range_includes_start_and_end_boundary_inclusive():
 
 def test_filter_by_date_range_excludes_items_outside_range():
     items = [
-        {"txnTime": "2026-01-09T23:59:59Z"},
-        {"txnTime": "2026-01-13T00:00:00Z"},
+        {"txnTime": "2026-01-09T17:59:59Z"},  # 23:59:59 on the 9th in Bangladesh
+        {"txnTime": "2026-01-12T18:00:00Z"},  # 00:00 on the 13th in Bangladesh
     ]
 
     filtered = real._filter_by_date_range(items, "txnTime", "2026-01-10", "2026-01-12")
@@ -670,14 +673,22 @@ def test_filter_by_date_range_excludes_items_outside_range():
 
 def test_filter_by_date_range_parses_z_suffix_and_offset_timestamps():
     items = [
-        {"txnTime": "2026-01-10T00:00:00Z"},
-        {"txnTime": "2026-01-10T06:00:00+06:00"},  # same instant as UTC midnight
-        {"txnTime": "2026-01-13T05:59:00+06:00"},  # == 2026-01-12T23:59:00Z
+        {"txnTime": "2026-01-09T18:00:00Z"},
+        {"txnTime": "2026-01-10T00:00:00+06:00"},  # same instant as the line above
+        {"txnTime": "2026-01-12T23:59:00+06:00"},
     ]
 
     filtered = real._filter_by_date_range(items, "txnTime", "2026-01-10", "2026-01-12")
 
     assert len(filtered) == 3
+
+
+def test_filter_by_date_range_early_morning_belongs_to_its_bangladesh_day():
+    # 02:00 on the 5th in Bangladesh is stored as 20:00Z on the 4th.
+    items = [{"txnTime": "2026-01-04T20:00:00Z"}]
+
+    assert real._filter_by_date_range(items, "txnTime", "2026-01-05", "2026-01-05") == items
+    assert real._filter_by_date_range(items, "txnTime", "2026-01-04", "2026-01-04") == []
 
 
 def test_filter_by_date_range_skips_items_missing_timestamp():
@@ -753,8 +764,15 @@ def test_transaction_history_adapter_date_range_happy_path(monkeypatch):
     assert calls[0]["params"] == {"accountNumber": "111", "page": 0, "size": 50}
 
 
-def test_transaction_history_adapter_only_start_date_falls_back_to_single_page(monkeypatch):
-    body = {"data": {"transactions": []}}
+def test_transaction_history_adapter_only_start_date_searches_start_through_today(monkeypatch):
+    monkeypatch.setattr(real, "bank_today", lambda: date(2026, 1, 15))
+    body = {
+        "transactions": [
+            {"id": "tx-in", "txnTime": "2026-01-11T04:00:00Z"},
+            {"id": "tx-before", "txnTime": "2026-01-09T04:00:00Z"},
+        ],
+        "pagination": {"hasNext": False},
+    }
     calls = _install_sequential_responses(monkeypatch, [FakeResponse(json_data=body)])
 
     result = asyncio.run(
@@ -765,12 +783,19 @@ def test_transaction_history_adapter_only_start_date_falls_back_to_single_page(m
     )
 
     assert len(calls) == 1
-    assert calls[0]["params"] == {"accountNumber": "111", "page": 0, "size": 10}
-    assert result == AdapterResult(data=body)
+    assert calls[0]["params"] == {"accountNumber": "111", "page": 0, "size": 50}
+    assert result.data["dateFiltered"] is True
+    assert result.data["transactions"] == [body["transactions"][0]]
 
 
-def test_transaction_history_adapter_only_end_date_falls_back_to_single_page(monkeypatch):
-    body = {"data": {"transactions": []}}
+def test_transaction_history_adapter_only_end_date_searches_everything_up_to_it(monkeypatch):
+    body = {
+        "transactions": [
+            {"id": "tx-in", "txnTime": "2026-01-11T04:00:00Z"},
+            {"id": "tx-after", "txnTime": "2026-01-14T04:00:00Z"},
+        ],
+        "pagination": {"hasNext": False},
+    }
     calls = _install_sequential_responses(monkeypatch, [FakeResponse(json_data=body)])
 
     result = asyncio.run(
@@ -781,8 +806,8 @@ def test_transaction_history_adapter_only_end_date_falls_back_to_single_page(mon
     )
 
     assert len(calls) == 1
-    assert calls[0]["params"] == {"accountNumber": "111", "page": 0, "size": 10}
-    assert result == AdapterResult(data=body)
+    assert result.data["dateFiltered"] is True
+    assert result.data["transactions"] == [body["transactions"][0]]
 
 
 def test_transaction_history_adapter_neither_date_uses_original_single_page_params(monkeypatch):
@@ -800,14 +825,33 @@ def test_transaction_history_adapter_neither_date_uses_original_single_page_para
     assert result == AdapterResult(data=body)
 
 
-def test_transaction_history_adapter_date_range_failure_falls_back_to_single_page(monkeypatch):
+def test_transaction_history_adapter_date_range_failure_is_reported_not_passed_off_as_everything(monkeypatch):
     date_range_body = {
         "transactions": [{"id": "tx-1", "txnTime": "not-a-timestamp"}],
         "pagination": {"hasNext": False},
     }
-    fallback_body = {"data": {"transactions": [{"id": "tx-1"}]}}
-    calls = _install_sequential_responses(
-        monkeypatch, [FakeResponse(json_data=date_range_body), FakeResponse(json_data=fallback_body)]
+    calls = _install_sequential_responses(monkeypatch, [FakeResponse(json_data=date_range_body)])
+
+    # A period was asked for, so the plain recent list must not stand in for the answer.
+    with pytest.raises(AdapterUnavailableError):
+        asyncio.run(
+            real.transaction_history_adapter.fulfill(
+                _IDENTITY, _JWT, "transaction_history",
+                {"accountNumber": "111", "startDate": "2026-01-10", "endDate": "2026-01-12"},
+            )
+        )
+
+    assert len(calls) == 1
+
+
+def test_transaction_history_adapter_says_when_only_the_latest_records_were_searched(monkeypatch):
+    monkeypatch.setattr(real, "_DATE_RANGE_MAX_PAGES", 2)
+    page = {
+        "transactions": [{"id": "tx", "txnTime": "2026-03-01T04:00:00Z"}],
+        "pagination": {"hasNext": True},
+    }
+    _install_sequential_responses(
+        monkeypatch, [FakeResponse(json_data=page), FakeResponse(json_data=page)]
     )
 
     result = asyncio.run(
@@ -817,10 +861,8 @@ def test_transaction_history_adapter_date_range_failure_falls_back_to_single_pag
         )
     )
 
-    assert len(calls) == 2
-    assert calls[0]["params"] == {"accountNumber": "111", "page": 0, "size": 50}
-    assert calls[1]["params"] == {"accountNumber": "111", "page": 0, "size": 10}
-    assert result == AdapterResult(data=fallback_body)
+    assert result.data["transactions"] == []
+    assert "searchNote" in result.data  # not "nothing happened": older records were not searched
 
 
 # --- T-33: LoginHistoryAdapter.fulfill date-range wiring --------------------
@@ -851,8 +893,15 @@ def test_login_history_adapter_date_range_happy_path(monkeypatch):
     assert calls[0]["params"] == {"page": 0, "size": 50}
 
 
-def test_login_history_adapter_only_start_date_falls_back_to_single_page(monkeypatch):
-    body = {"data": {"logins": []}}
+def test_login_history_adapter_only_start_date_searches_start_through_today(monkeypatch):
+    monkeypatch.setattr(real, "bank_today", lambda: date(2026, 1, 15))
+    body = {
+        "records": [
+            {"id": "login-in", "loginAt": "2026-01-11T04:00:00Z"},
+            {"id": "login-before", "loginAt": "2026-01-09T04:00:00Z"},
+        ],
+        "pagination": {"hasNext": False},
+    }
     calls = _install_sequential_responses(monkeypatch, [FakeResponse(json_data=body)])
 
     result = asyncio.run(
@@ -863,12 +912,19 @@ def test_login_history_adapter_only_start_date_falls_back_to_single_page(monkeyp
     )
 
     assert len(calls) == 1
-    assert calls[0]["params"] == {"page": 0, "size": 20}
-    assert result == AdapterResult(data=body)
+    assert calls[0]["params"] == {"page": 0, "size": 50}
+    assert result.data["dateFiltered"] is True
+    assert result.data["records"] == [body["records"][0]]
 
 
-def test_login_history_adapter_only_end_date_falls_back_to_single_page(monkeypatch):
-    body = {"data": {"logins": []}}
+def test_login_history_adapter_only_end_date_searches_everything_up_to_it(monkeypatch):
+    body = {
+        "records": [
+            {"id": "login-in", "loginAt": "2026-01-11T04:00:00Z"},
+            {"id": "login-after", "loginAt": "2026-01-14T04:00:00Z"},
+        ],
+        "pagination": {"hasNext": False},
+    }
     calls = _install_sequential_responses(monkeypatch, [FakeResponse(json_data=body)])
 
     result = asyncio.run(
@@ -879,8 +935,7 @@ def test_login_history_adapter_only_end_date_falls_back_to_single_page(monkeypat
     )
 
     assert len(calls) == 1
-    assert calls[0]["params"] == {"page": 0, "size": 20}
-    assert result == AdapterResult(data=body)
+    assert result.data["records"] == [body["records"][0]]
 
 
 def test_login_history_adapter_neither_date_uses_original_single_page_params(monkeypatch):
@@ -898,27 +953,22 @@ def test_login_history_adapter_neither_date_uses_original_single_page_params(mon
     assert result == AdapterResult(data=body)
 
 
-def test_login_history_adapter_date_range_failure_falls_back_to_single_page(monkeypatch):
+def test_login_history_adapter_date_range_failure_is_reported_not_passed_off_as_everything(monkeypatch):
     date_range_body = {
         "records": [{"id": "login-1", "loginAt": "not-a-timestamp"}],
         "pagination": {"hasNext": False},
     }
-    fallback_body = {"data": {"logins": [{"id": "login-1"}]}}
-    calls = _install_sequential_responses(
-        monkeypatch, [FakeResponse(json_data=date_range_body), FakeResponse(json_data=fallback_body)]
-    )
+    calls = _install_sequential_responses(monkeypatch, [FakeResponse(json_data=date_range_body)])
 
-    result = asyncio.run(
-        real.login_history_adapter.fulfill(
-            _IDENTITY, _JWT, "login_history",
-            {"deviceId": "dev-1", "startDate": "2026-01-10", "endDate": "2026-01-12"},
+    with pytest.raises(AdapterUnavailableError):
+        asyncio.run(
+            real.login_history_adapter.fulfill(
+                _IDENTITY, _JWT, "login_history",
+                {"deviceId": "dev-1", "startDate": "2026-01-10", "endDate": "2026-01-12"},
+            )
         )
-    )
 
-    assert len(calls) == 2
-    assert calls[0]["params"] == {"page": 0, "size": 50}
-    assert calls[1]["params"] == {"page": 0, "size": 20}
-    assert result == AdapterResult(data=fallback_body)
+    assert len(calls) == 1
 
 
 # --- T-41: FeesAdapter --------------------------------------------------------

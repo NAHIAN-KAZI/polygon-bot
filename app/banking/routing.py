@@ -14,6 +14,7 @@ import re
 from dataclasses import dataclass
 
 
+from app.banking.dates import prompt_today_line
 from app.banking.session import ChatTurn
 from app.banking import ui_actions
 from app.banking.taxonomy import get_taxonomy, is_valid_path
@@ -432,6 +433,7 @@ def build_system_prompt(
         "- payload holds only fields listed for that service and only values the customer "
         f"wrote (amount: {AMOUNT_GUIDANCE}; account and wallet numbers as digit strings). "
         "Leave unknown fields out; PINs, passwords, OTPs and CVVs stay out.\n"
+        f"{prompt_today_line()}"
         "- Decide WHICH service; never ask for the details it needs. Which card or account, "
         "the amount, a number, a recipient or a new value are asked for by the service itself "
         "after you route, so a message that says what the customer wants done -- in any "

@@ -367,6 +367,58 @@ def test_banking_service_real_adapter_balance_success(client, monkeypatch):
     assert result_event["payload"] == {"balance": "500.00", "balanceFormatted": "৳5.00"}
 
 
+def test_a_since_request_reaches_the_adapter_open_ended_not_as_one_day(client, monkeypatch):
+    seen = {}
+
+    async def fake_classify(message, recent_turns=None):
+        # The model gave only a start date for "show my transactions since 5 October".
+        return BankingService(category="polygon_services", service="transaction_history",
+                              subservice=None, payload={"startDate": "2026-10-05"})
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    async def fake_fulfill(customer_identity, jwt, category, service, subservice, payload):
+        seen["payload"] = payload
+        return AdapterResult(data={"transactions": [], "pagination": {"totalCount": 0}, "dateFiltered": True})
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", fake_fulfill)
+    _install_session_fakes(monkeypatch)
+
+    resp = client.post("/chat", json={"message": "show my transactions since 5 October"}, headers=JWT_HEADERS)
+
+    assert resp.status_code == 200
+    # Kept as "from the 5th": not dropped (which listed everything), not shrunk to the 5th alone.
+    assert seen["payload"]["startDate"] == "2026-10-05"
+    assert "endDate" not in seen["payload"]
+
+
+def test_an_unreadable_date_from_the_model_gives_the_plain_list_not_a_wrong_filter(client, monkeypatch):
+    seen = {}
+
+    async def fake_classify(message, recent_turns=None):
+        return BankingService(category="polygon_services", service="transaction_history",
+                              subservice=None, payload={"startDate": "last tuesday"})
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    async def fake_fulfill(customer_identity, jwt, category, service, subservice, payload):
+        seen["payload"] = payload
+        return AdapterResult(data={"transactions": [], "pagination": {"totalCount": 0}})
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", fake_fulfill)
+    _install_session_fakes(monkeypatch)
+
+    client.post("/chat", json={"message": "show my transactions for last tuesday"}, headers=JWT_HEADERS)
+
+    assert not (seen["payload"] or {}).get("startDate")
+
+
 class _FakeOllamaResponse:
     """Minimal httpx.Response stand-in for mocking Ollama's /api/chat,
     matching tests/test_routing.py's FakeResponse pattern."""
