@@ -3541,11 +3541,13 @@ async def _chat_with_media(req: ChatRequest, authorization: str | None):
                 spoken = await transcribe(req.audio)
                 heard_audio = decode_audio(req.audio) if req.audio_mode in ("both", "audio") else None
         except AudioInputError as exc:
-            yield _sse("error", {"detail": str(exc)})
+            # Written for the customer and not fixed by sending the same clip again.
+            yield _sse("error", {"detail": str(exc), "customer_safe": True, "retryable": False})
             return
         except Exception:
             logger.warning("audio input: model call failed", exc_info=True)
-            yield _sse("error", {"detail": "The voice message couldn't be heard right now."})
+            yield _sse("error", {"detail": "The voice message couldn't be heard right now.",
+                                 "customer_safe": True, "retryable": True})
             return
         if req.audio_mode != "audio":  # the mobile app never shows the customer a transcript
             yield _sse("transcript", {"text": spoken})
@@ -3570,11 +3572,12 @@ async def _chat_with_image(req: ChatRequest, authorization: str | None):
     try:
         image_text = await read_image(req.image, req.message)
     except ImageInputError as exc:
-        yield _sse("error", {"detail": str(exc)})
+        yield _sse("error", {"detail": str(exc), "customer_safe": True, "retryable": False})
         return
     except Exception:
         logger.warning("image input: model call failed", exc_info=True)
-        yield _sse("error", {"detail": "The attached image couldn't be read right now."})
+        yield _sse("error", {"detail": "The attached image couldn't be read right now.",
+                             "customer_safe": True, "retryable": True})
         return
     yield _sse("image", {"text": image_text})
     message = with_image_text(req.message, image_text)[:4000]

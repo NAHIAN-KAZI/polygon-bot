@@ -69,7 +69,7 @@ def decode_audio(data_url: str) -> str:
     if seconds > settings.MAX_AUDIO_SECONDS:
         raise AudioInputError(f"Voice messages can be at most {settings.MAX_AUDIO_SECONDS} seconds.")
     if seconds < 0.3:
-        raise AudioInputError("The voice message was too short. Hold the mic button and speak.")
+        raise AudioInputError("The voice message was too short. Please record it again and speak for a moment.")
     return b64
 
 

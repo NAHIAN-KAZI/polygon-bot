@@ -100,7 +100,7 @@ A failed voice or image turn sends one `error` event and then ends. `detail` is 
 | `Send the voice message as a WAV recording.` | Not a WAV data URL |
 | `The voice message couldn't be read.` | Bad base64 or WAV header |
 | `Voice messages can be at most 30 seconds.` | Too long |
-| `The voice message was too short. Hold the mic button and speak.` | Under 0.3 s (the wording says "hold"; the app taps) |
+| `The voice message was too short. Please record it again and speak for a moment.` | Under 0.3 s |
 | `I couldn't hear anything in that voice message. Please try again.` | Silence |
 | `Voice input isn't enabled for this assistant.` | `audio_input` is false |
 | `The voice message couldn't be heard right now.` | Model failure |
@@ -110,7 +110,10 @@ A failed voice or image turn sends one `error` event and then ends. `detail` is 
 | `Image input isn't enabled for this assistant.` | `image_input` is false |
 | `The attached image couldn't be read right now.` | Model failure |
 
-Show these through the app's existing error path (snackbar plus the failed bubble); a retry resends the same request.
+Show these in the failed bubble (and the snackbar). These frames carry two flags: `"customer_safe": true` means `detail` is
+written for the customer and is shown as is; `"retryable": false` means sending the same clip or picture again cannot
+work, so offer no Retry (the customer records or picks again). Frames without `customer_safe` (pipeline errors such as
+an unreachable model or vector store) carry internal wording: show a generic line and keep `detail` for debug logs.
 
 ---
 
@@ -242,7 +245,7 @@ Picture attached (above the row)        Attach sheet (tap 📎)
 
 1. English, Bangla and Banglish messages each get a reply in the right language (see the table in section 1).
 2. A 5-second voice message in Bangla shows `🎤 “…”` with the heard text in the customer's bubble and gets a Bangla reply.
-3. A voice message under 0.3 s or with silence shows the matching error text and offers Retry.
+3. A voice message under 0.3 s or with silence shows the matching error text in the bubble and offers no Retry (the customer records again).
 4. With `capabilities` failing or both flags false, neither button is shown, and typed chat still works.
 5. An image of a failed-transfer screen shows the caption and the bot's reply refers to what it shows.
 6. The pre-login public chat shows neither button.

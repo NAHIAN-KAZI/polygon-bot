@@ -240,7 +240,8 @@ def test_audio_mode_banking_reply_answers_what_was_said(client, audio_on, monkey
 def test_voice_input_disabled_is_an_error_event(client, monkeypatch):
     monkeypatch.setattr(settings, "LLM_AUDIO_INPUT", False)
     resp = client.post("/chat", json={"audio": WAV_URL}, headers=AUTH_HEADERS)
-    assert _parse_sse(resp.text) == [("error", {"detail": "Voice input isn't enabled for this assistant."})]
+    assert _parse_sse(resp.text) == [("error", {"detail": "Voice input isn't enabled for this assistant.",
+                                         "customer_safe": True, "retryable": False})]
 
 
 def test_voice_model_failure_is_an_error_event(client, audio_on, monkeypatch):
@@ -249,7 +250,8 @@ def test_voice_model_failure_is_an_error_event(client, audio_on, monkeypatch):
 
     monkeypatch.setattr(chat_module, "transcribe", boom)
     resp = client.post("/chat", json={"audio": WAV_URL}, headers=AUTH_HEADERS)
-    assert _parse_sse(resp.text) == [("error", {"detail": "The voice message couldn't be heard right now."})]
+    assert _parse_sse(resp.text) == [("error", {"detail": "The voice message couldn't be heard right now.",
+                                         "customer_safe": True, "retryable": True})]
 
 
 def test_message_still_required_without_audio(client):

@@ -145,13 +145,15 @@ def test_chat_with_image_reads_it_then_answers_the_combined_message(client, imag
 def test_chat_with_image_when_disabled_is_an_error_event(client, monkeypatch):
     monkeypatch.setattr(settings, "LLM_IMAGE_INPUT", False)
     resp = client.post("/chat", json={"message": "what is this", "image": PNG_URL}, headers=AUTH_HEADERS)
-    assert _parse_sse(resp.text) == [("error", {"detail": "Image input isn't enabled for this assistant."})]
+    assert _parse_sse(resp.text) == [("error", {"detail": "Image input isn't enabled for this assistant.",
+                                         "customer_safe": True, "retryable": False})]
 
 
 def test_chat_with_bad_image_is_an_error_event(client, images_on):
     resp = client.post("/chat", json={"message": "x", "image": "data:image/svg+xml;base64,PHN2Zz4="},
                        headers=AUTH_HEADERS)
-    assert _parse_sse(resp.text) == [("error", {"detail": "Attach a PNG, JPEG, WebP or GIF image."})]
+    assert _parse_sse(resp.text) == [("error", {"detail": "Attach a PNG, JPEG, WebP or GIF image.",
+                                         "customer_safe": True, "retryable": False})]
 
 
 def test_chat_with_image_model_failure_is_an_error_event(client, images_on, monkeypatch):
@@ -160,7 +162,8 @@ def test_chat_with_image_model_failure_is_an_error_event(client, images_on, monk
 
     monkeypatch.setattr(chat_module, "read_image", boom)
     resp = client.post("/chat", json={"message": "x", "image": PNG_URL}, headers=AUTH_HEADERS)
-    assert _parse_sse(resp.text) == [("error", {"detail": "The attached image couldn't be read right now."})]
+    assert _parse_sse(resp.text) == [("error", {"detail": "The attached image couldn't be read right now.",
+                                         "customer_safe": True, "retryable": True})]
 
 
 def test_capabilities(client, monkeypatch):

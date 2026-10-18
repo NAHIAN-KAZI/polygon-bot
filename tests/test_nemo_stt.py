@@ -124,7 +124,8 @@ def test_nemo_server_down_is_an_error_event(client, stt_on, monkeypatch):
 
     monkeypatch.setattr(chat_module, "transcribe_nemo", boom)
     resp = client.post("/chat", json={"audio": WAV_URL, "audio_mode": "nemo"}, headers=AUTH_HEADERS)
-    assert _parse_sse(resp.text) == [("error", {"detail": "The voice message couldn't be heard right now."})]
+    assert _parse_sse(resp.text) == [("error", {"detail": "The voice message couldn't be heard right now.",
+                                         "customer_safe": True, "retryable": True})]
 
 
 @pytest.mark.parametrize("audio_model, stt_url, modes", [
