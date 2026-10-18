@@ -48,7 +48,7 @@ import app.banking.routing as routing_module
 from app.conversation.speech import AudioInputError, decode_audio, transcribe, transcribe_nemo
 from app.conversation.vision import ImageInputError, read_image, with_image_text
 from app.conversation.composer import (
-    _FOREIGN_CURRENCY, build_messages, check_reply, compose, compose_stream, facts_listing, generate_chat,
+    _FOREIGN_CURRENCY, ascii_digits, build_messages, check_reply, compose, compose_stream, facts_listing, generate_chat,
     unsupported_numbers,
 )
 from app.embeddings import embed_text
@@ -748,7 +748,7 @@ _BD_MOBILE_RE = re.compile(r"01[3-9]\d{8}")
 
 
 def _bd_mobile(value: object) -> str | None:
-    digits = re.sub(r"\D", "", str(value or ""))
+    digits = re.sub(r"\D", "", ascii_digits(str(value or "")))
     if digits.startswith("880"):
         digits = digits[2:]
     return digits if _BD_MOBILE_RE.fullmatch(digits) else None
@@ -1469,9 +1469,9 @@ async def _ground_transfer_destination(result, message: str):
             and result.subservice):
         return result
     payload = result.payload or {}
-    wrote_digits = re.sub(r"\D", "", message or "")
+    wrote_digits = re.sub(r"\D", "", ascii_digits(message or ""))
     for field in ("accountNumber", "walletNumber"):
-        digits = re.sub(r"\D", "", str(payload.get(field) or ""))
+        digits = re.sub(r"\D", "", ascii_digits(str(payload.get(field) or "")))
         if len(digits) >= 6 and digits in wrote_digits:
             return result
     prompt = (
@@ -3093,11 +3093,16 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                     # confirmation summary once every required field is known. The
                     # customer completes the actual transfer in the app via
                     # routing.action, same pattern as BENEFICIARY_MATCH's redirect.
-                    collected_payload = dict(payload or {})
+                    # Bangla digits become ASCII here: the app's number parsers read only ASCII, so a
+                    # number typed in Bangla would otherwise lose its amount or destination.
+                    collected_payload = {
+                        k: (ascii_digits(v) if isinstance(v, str) and k in ("amount", *_NUMBER_FIELDS) else v)
+                        for k, v in (payload or {}).items()
+                    }
                     collected_payload["formattedAmount"] = _format_bdt(collected_payload.get("amount"))
                     collected_payload["executed"] = False
                     transfer_summary_token = ""
-                    async for _piece in say_stream(_transfer_summary_say(service, subservice, payload or {})):
+                    async for _piece in say_stream(_transfer_summary_say(service, subservice, collected_payload)):
                         transfer_summary_token += _piece
                         yield _sse("token", {"token": _piece})
                     routing_action = f"{subservice}_transfer"
@@ -3341,9 +3346,9 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                                 beneficiary_reply_token = ""
                                 async for _piece in say_stream(_say(
                                     "redirect", {"beneficiary": _beneficiary_name(matched)},
-                                    screen=("a transfer form right here in the chat, pre-filled" if destination
+                                    screen=("the saved beneficiary shown right below this message, with a button that opens the transfer form" if destination
                                             else "the beneficiary list in the app (this type can't be opened automatically)"),
-                                    done_in_chat="no; they confirm the amount and press Send on the form")):
+                                    done_in_chat="no; they tap the button, then confirm the amount and press Send on the form")):
                                     beneficiary_reply_token += _piece
                                     yield _sse("token", {"token": _piece})
                                 routing_action = destination["action"] if destination else "manual"

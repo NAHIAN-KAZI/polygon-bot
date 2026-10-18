@@ -466,3 +466,14 @@ def test_amount_with_a_unit_word_reaches_the_transfer_summary(client, chat_env):
     assert summary["kind"] == "summary"
     assert summary["must"] == {"amount": "Tk 50000", "wallet ending": "5678"}
     assert chat_env["fulfills"] == []
+
+
+def test_bangla_digits_in_a_transfer_reach_the_app_as_ascii(client, chat_env):
+    chat_env["session"] = []
+    chat_env["route"] = BankingService("transfer", "wallet_transfer", "bkash",
+                                       {"walletNumber": "০১৮১২৩৪৫৬৭৮", "amount": "৫০০"})
+    events = _post(client, "০১৮১২৩৪৫৬৭৮ নম্বরে bkash এ ৫০০ টাকা পাঠাও")
+    payload = _result(events)["payload"]
+    assert payload["walletNumber"] == "01812345678"  # the app's number parsers read ASCII only
+    assert str(payload["amount"]) == "500"
+    assert chat_env["composed"][-1]["must"]["wallet ending"] == "5678"

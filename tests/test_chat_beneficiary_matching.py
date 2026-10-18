@@ -264,7 +264,7 @@ def test_e2e_name_query_single_match_returns_beneficiary_match(client, monkeypat
     token_event = next(data for name, data in events if name == "token")
     assert token_event["token"].startswith("redirect:")
     assert "beneficiary: Ashan" in token_event["token"]
-    assert "pre-filled" in token_event["token"]  # a routable destination opens the transfer screen
+    assert "button that opens the transfer form" in token_event["token"]  # a routable destination opens the transfer screen
 
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "BENEFICIARY_MATCH"

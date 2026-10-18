@@ -2624,7 +2624,8 @@ def test_transfer_wallet_transfer_complete_payload_builds_summary_without_callin
     token_event = next(data for name, data in events if name == "token")
     assert token_event["token"].startswith("summary:")
     assert "amount: Tk 2000" in token_event["token"]
-    assert "wallet number: 01812345678" in token_event["token"]
+    assert "wallet ending: 5678" in token_event["token"]
+    assert "01812345678" not in token_event["token"]  # only the last 4 digits reach the reply
     assert "done in chat: no" in token_event["token"]
 
     result_event = next(data for name, data in events if name == "result")
