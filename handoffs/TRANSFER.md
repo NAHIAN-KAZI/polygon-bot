@@ -134,11 +134,17 @@ Missing fields are asked for in chat (`CLARIFICATION_REQUIRED`), one turn at a t
 `nagad_transfer`, `rocket_transfer`, `upay_transfer`. Map each to your transfer
 screen and pre-fill amount/number from `payload`.
 
+`payload.amount`, `walletNumber` and `accountNumber` are always ASCII digits, even when the customer typed Bangla
+digits (the bot converts them), so the app can parse them directly. In the chat, show the destination masked to its
+last 4 digits (the reply text does the same: "wallet ending 0315"); the form still receives the full number.
+
 **Beneficiary match** (send to a saved person): `type: "BENEFICIARY_MATCH"`,
-`payload: {"beneficiary": {...}, "destination": {"action": "own_bank_transfer" | "other_bank_transfer" | "wallet_transfer", "provider"?: "bkash"}}`.
-Several matches → `type: "BENEFICIARY_SELECTION_REQUIRED"` (`payload.beneficiaries`,
-pick one and send `payload: {"beneficiaryId": <id>}`). No match → `CLARIFICATION_REQUIRED`
-saying so.
+`payload: {"beneficiary": {...}, "destination": {"action": "own_bank_transfer" | "other_bank_transfer" | "wallet_transfer", "provider"?: "bkash"}, "amount"?: "500"}`.
+`amount` is present only when the customer said one ("send 500 to Rahim"): taka, ASCII digits, positive. Open the form with it
+(the app passes it with the beneficiary to the own-bank, other-bank and wallet forms).
+Several matches → `type: "BENEFICIARY_SELECTION_REQUIRED"` (`payload.beneficiaries`, plus the same `amount`
+when one was said; pick one and send `payload: {"beneficiaryId": <id>, "amount": <the same amount>}` so it comes
+back on the match). No match → `CLARIFICATION_REQUIRED` saying so.
 
 **Beneficiary list** (live): `{"beneficiaries": []}`.
 
@@ -175,10 +181,12 @@ void renderTransfer(ChatTurnResult turn) {
     case 'BENEFICIARY_MATCH':
       final b = (p['beneficiary'] as Map).cast<String, dynamic>();
       showBeneficiaryCard(b, onSend: () => showTransferBox(
-          (p['destination'] as Map)['action'], prefill: b));   // U8 box for that beneficiary
+          (p['destination'] as Map)['action'],
+          prefill: {...b, if (p['amount'] != null) 'amount': p['amount']}));   // U8 box for that beneficiary
     case 'BENEFICIARY_SELECTION_REQUIRED':
       showPicker((p['beneficiaries'] as List).cast<Map<String, dynamic>>(),
-          onPick: (b) => onSend('Selected', payload: {'beneficiaryId': b['id']}));
+          onPick: (b) => onSend('Selected', payload: {'beneficiaryId': b['id'],
+              if (p['amount'] != null) 'amount': p['amount']}));
     case 'CONFIRMATION_REQUIRED':
       showYesNo(onYes: () => onSend('Yes', payload: {'confirm': true}),
                 onNo: () => onSend('No', payload: {'confirm': false}));

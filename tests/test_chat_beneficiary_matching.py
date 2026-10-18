@@ -397,3 +397,43 @@ def test_e2e_non_beneficiary_banking_service_flow_unaffected(client, monkeypatch
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "BANKING_SERVICE"
     assert result_event["payload"] == {"balance": "500.00", "balanceFormatted": "৳5.00"}  # bank balances are poisha (T-65)
+
+
+# --- the amount said with a saved name ("send 500 to Ashan") ------------------
+
+
+def test_amount_prefill_keeps_a_positive_amount_in_ascii_digits():
+    assert chat_module._amount_prefill({"nameQuery": "Ashan", "amount": "৫০০"}) == {"amount": "500"}
+    assert chat_module._amount_prefill({"amount": 1500}) == {"amount": "1500"}
+    assert chat_module._amount_prefill({"amount": "2,000"}) == {"amount": "2000"}
+
+
+def test_amount_prefill_is_empty_without_a_usable_amount():
+    for payload in (None, {}, {"amount": None}, {"amount": "0"}, {"amount": "lots"}):
+        assert chat_module._amount_prefill(payload) == {}
+
+
+def test_e2e_single_match_carries_the_amount_to_the_app(client, monkeypatch):
+    message = _install_beneficiary_fixture(
+        monkeypatch, [ASHAN, BIKASH_MOM], message="send 500 to Ashan",
+        payload={"nameQuery": "Ashan", "amount": 500})
+    _install_audit_spy(monkeypatch)
+
+    resp = client.post("/chat", json={"message": message}, headers=JWT_HEADERS)
+
+    result_event = next(data for name, data in _parse_sse(resp.text) if name == "result")
+    assert result_event["type"] == "BENEFICIARY_MATCH"
+    assert result_event["payload"]["amount"] == "500"
+
+
+def test_e2e_several_matches_carry_the_amount_for_the_pick(client, monkeypatch):
+    message = _install_beneficiary_fixture(
+        monkeypatch, [ASHAN, BIKASH_MOM], message="send 500 to Bi",
+        payload={"nameQuery": "a", "amount": 500})
+    _install_audit_spy(monkeypatch)
+
+    resp = client.post("/chat", json={"message": message}, headers=JWT_HEADERS)
+
+    result_event = next(data for name, data in _parse_sse(resp.text) if name == "result")
+    assert result_event["type"] == "BENEFICIARY_SELECTION_REQUIRED"
+    assert result_event["payload"]["amount"] == "500"

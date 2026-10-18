@@ -2332,6 +2332,18 @@ def _beneficiary_name(beneficiary: dict) -> str | None:
     return beneficiary.get("nickname") or beneficiary.get("accountHolderName")
 
 
+def _amount_prefill(payload: dict | None) -> dict:
+    """The amount the customer said with a saved name ("send 500 to Rahim"), so the app's form
+    opens with it. ASCII digits, positive numbers only; `{}` when none was said. It travels back
+    with the pick when several beneficiaries matched."""
+    raw = (payload or {}).get("amount")
+    text = ascii_digits(str(raw)).replace(",", "").strip() if raw is not None else ""
+    try:
+        return {"amount": text} if text and float(text) > 0 else {}
+    except ValueError:
+        return {}
+
+
 def _trim_beneficiary(beneficiary: dict) -> dict:
     return {
         "id": beneficiary.get("id"),
@@ -3357,7 +3369,8 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                                     category,
                                     service,
                                     subservice,
-                                    payload={"beneficiary": matched, "destination": destination},
+                                    payload={"beneficiary": matched, "destination": destination,
+                                             **_amount_prefill(payload)},
                                     routing={
                                         "category": category,
                                         "service": service,
@@ -3383,7 +3396,8 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                                     category,
                                     service,
                                     subservice,
-                                    payload={"beneficiaries": [_trim_beneficiary(b) for b in matches]},
+                                    payload={"beneficiaries": [_trim_beneficiary(b) for b in matches],
+                                             **_amount_prefill(payload)},
                                 )
                                 turn_classification = {
                                     "type": "BENEFICIARY_SELECTION_REQUIRED",
