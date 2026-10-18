@@ -464,5 +464,5 @@ def test_amount_with_a_unit_word_reaches_the_transfer_summary(client, chat_env):
     assert result["payload"]["executed"] is False  # never executed in chat
     summary = chat_env["composed"][-1]
     assert summary["kind"] == "summary"
-    assert summary["must"] == {"amount": "Tk 50000", "wallet number": "01812345678"}
+    assert summary["must"] == {"amount": "Tk 50000", "wallet ending": "5678"}
     assert chat_env["fulfills"] == []

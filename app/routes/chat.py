@@ -2302,13 +2302,15 @@ def _transfer_summary_say(service: str, subservice: str | None, payload: dict) -
     """No transfer is executed in chat (ADR-0008): the customer finishes it in the app."""
     amount = payload.get("amount")
     must = {"amount": f"Tk {amount}"} if amount is not None else {}
+    # Only the last 4 digits ever reach the reply: a missing exact value is appended to it as a
+    # "label: value" line, which must never be the whole number the customer typed.
     if service == "wallet_transfer":
-        must["wallet number"] = payload.get("walletNumber")
+        must["wallet ending"] = _tail(payload.get("walletNumber"))
     else:
         must["account ending"] = _tail(payload.get("accountNumber"))
     return _say("summary", must, transfer_type=_subservice_name("transfer", service, subservice) or subservice,
-                where_to_finish="a transfer form right here in the chat, already filled in",
-                done_in_chat="no; they review it and press Send on that form")
+                where_to_finish="the transfer shown right below this message, already filled in",
+                done_in_chat="no; they check it there and press the button on it to review and send")
 
 
 def _dispute_summary_say(payload: dict) -> tuple:
