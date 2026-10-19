@@ -146,6 +146,8 @@ Several matches → `type: "BENEFICIARY_SELECTION_REQUIRED"` (`payload.beneficia
 when one was said; pick one and send `payload: {"beneficiaryId": <id>, "amount": <the same amount>}` so it comes
 back on the match). No match → `CLARIFICATION_REQUIRED` saying so.
 
+**Finding the saved name.** The name the customer says is compared with their saved nicknames and holder names as text first. When nothing matches (a name said in Bangla or Banglish for a saved English-letter name, or a loosely spelled voice transcript), the model compares by sound across scripts and spellings. It sees only the names, never account or wallet numbers, and can only pick from the customer's own list. When it finds nobody the customer gets the same "check the name" question as before. Two people who sound alike (for example Jahid and Zahid) both come back, so the customer chooses (`BENEFICIARY_SELECTION_REQUIRED`).
+
 **Beneficiary list** (live): `{"beneficiaries": []}`.
 
 **Add beneficiary** — a yes/no step (live):

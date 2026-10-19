@@ -437,3 +437,110 @@ def test_e2e_several_matches_carry_the_amount_for_the_pick(client, monkeypatch):
     result_event = next(data for name, data in _parse_sse(resp.text) if name == "result")
     assert result_event["type"] == "BENEFICIARY_SELECTION_REQUIRED"
     assert result_event["payload"]["amount"] == "500"
+
+
+# --- the same name in another script or spelling ("জাহিদ" for "Jahid"): the model decides ---------
+
+JAHID = {"id": "ben-9", "nickname": "Jahid", "accountHolderName": "Jahid Iqbak",
+         "serviceType": "OTHER_BANK", "accountNumber": "1234567893848", "bankName": "Agrani Bank PLC."}
+RAHIM = {"id": "ben-10", "nickname": "Rahim", "accountHolderName": "Abdur Rahim",
+         "serviceType": "OWN_BANK", "accountNumber": "9988776655"}
+
+
+def _fake_model(monkeypatch, reply, seen=None):
+    """Replace the model call: `reply` is the raw text it answers with (or an exception to raise)."""
+    async def fake_post(path, body, timeout=None):
+        if seen is not None:
+            seen.append(body.get("prompt", ""))
+        if isinstance(reply, Exception):
+            raise reply
+        return {"response": reply}
+
+    monkeypatch.setattr(chat_module.llm_backend, "post", fake_post)
+
+
+def _run(name, beneficiaries):
+    import asyncio
+    return asyncio.run(chat_module._llm_match_beneficiaries(name, beneficiaries))
+
+
+def test_model_match_returns_the_saved_recipient_it_points_at(monkeypatch):
+    _fake_model(monkeypatch, '{"matches": [1]}')
+    assert _run("জাহিদ", [RAHIM, JAHID]) == [JAHID]
+
+
+def test_model_cannot_invent_a_recipient(monkeypatch):
+    for bad in ('{"matches": [7]}', '{"matches": [-1]}', '{"matches": ["0"]}', '{"matches": [true]}',
+                '{"matches": [1.5]}', '{"matches": "all"}', '{"other": [0]}', "not json", "[0]", ""):
+        _fake_model(monkeypatch, bad)
+        assert _run("জাহিদ", [RAHIM, JAHID]) == [], bad
+
+
+def test_model_failure_means_no_match(monkeypatch):
+    _fake_model(monkeypatch, RuntimeError("model down"))
+    assert _run("জাহিদ", [JAHID]) == []
+
+
+def test_model_sees_names_only_never_account_numbers(monkeypatch):
+    seen = []
+    _fake_model(monkeypatch, '{"matches": []}', seen)
+    _run("জাহিদ", [JAHID, RAHIM])
+    assert len(seen) == 1
+    assert "Jahid Iqbak" in seen[0] and "Abdur Rahim" in seen[0]
+    for secret in ("1234567893848", "9988776655", "Agrani"):
+        assert secret not in seen[0]
+
+
+def test_model_is_not_asked_when_there_is_nothing_to_compare(monkeypatch):
+    seen = []
+    _fake_model(monkeypatch, '{"matches": [0]}', seen)
+    assert _run("", [JAHID]) == []
+    assert _run("জাহিদ", []) == []
+    assert _run("জাহিদ", [{"id": "x", "accountNumber": "111"}]) == []  # a recipient with no name
+    assert seen == []
+
+
+def test_model_matches_are_deduplicated_and_capped(monkeypatch):
+    many = [{"id": f"b{i}", "nickname": f"Name{i}"} for i in range(9)]
+    _fake_model(monkeypatch, '{"matches": [0, 0, 1, 2, 3, 4, 5, 6]}')
+    out = _run("x", many)
+    assert out == many[:5]
+
+
+def test_e2e_bangla_name_finds_the_saved_english_name(client, monkeypatch):
+    message = _install_beneficiary_fixture(
+        monkeypatch, [RAHIM, JAHID], message="জাহিদকে পাঁচ হাজার টাকা পাঠাও", payload={"nameQuery": "জাহিদ"})
+    _install_audit_spy(monkeypatch)
+    _fake_model(monkeypatch, '{"matches": [1]}')
+
+    resp = client.post("/chat", json={"message": message}, headers=JWT_HEADERS)
+
+    result = next(data for name, data in _parse_sse(resp.text) if name == "result")
+    assert result["type"] == "BENEFICIARY_MATCH"
+    assert result["payload"]["beneficiary"]["id"] == "ben-9"
+
+
+def test_e2e_no_model_call_when_plain_text_already_matches(client, monkeypatch):
+    message = _install_beneficiary_fixture(
+        monkeypatch, [RAHIM, JAHID], message="send money to Jahid", payload={"nameQuery": "Jahid"})
+    _install_audit_spy(monkeypatch)
+    seen = []
+    _fake_model(monkeypatch, '{"matches": [0]}', seen)
+
+    resp = client.post("/chat", json={"message": message}, headers=JWT_HEADERS)
+
+    result = next(data for name, data in _parse_sse(resp.text) if name == "result")
+    assert result["type"] == "BENEFICIARY_MATCH"
+    assert seen == []  # the instant text match was enough
+
+
+def test_e2e_model_finds_nobody_so_the_customer_is_asked_to_check_the_name(client, monkeypatch):
+    message = _install_beneficiary_fixture(
+        monkeypatch, [RAHIM, JAHID], message="সুমনকে টাকা পাঠাও", payload={"nameQuery": "সুমন"})
+    _install_audit_spy(monkeypatch)
+    _fake_model(monkeypatch, '{"matches": []}')
+
+    resp = client.post("/chat", json={"message": message}, headers=JWT_HEADERS)
+
+    result = next(data for name, data in _parse_sse(resp.text) if name == "result")
+    assert result["type"] == "CLARIFICATION_REQUIRED"

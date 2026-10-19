@@ -2248,6 +2248,75 @@ def _match_beneficiaries(name_query: str, beneficiaries: list[dict]) -> list[dic
     return list(fuzzy_matches.values())
 
 
+_MAX_NAMES_FOR_MODEL = 60
+_MAX_NAME_MATCHES = 5
+
+
+async def _llm_match_beneficiaries(name_query: str, beneficiaries: list[dict]) -> list[dict]:
+    """The saved recipients the customer means, found by the model when plain text matching found none.
+
+    Text matching cannot tell that "জাহিদ" and "Jahid" are one name: the customer says it in Bangla
+    (or Banglish, or a voice transcript spells it loosely) while the saved name is in English
+    letters. The model compares by meaning and sound, across scripts and spellings, so this works
+    for any name with no per-name rules.
+
+    Only the names go to the model (never account or wallet numbers), and it answers with
+    positions in the list it was shown. Anything it returns that is not a position in that list is
+    ignored, so it can pick from the customer's own recipients but never invent one. Any failure
+    means no match: the customer is then asked to check the name, as before.
+    """
+    query = (name_query or "").strip()
+    named = []
+    for b in beneficiaries:
+        if not isinstance(b, dict):
+            continue
+        nick, holder = b.get("nickname"), b.get("accountHolderName")
+        parts = [f'nickname "{v.strip()}"' if k == "nick" else f'account holder "{v.strip()}"'
+                 for k, v in (("nick", nick), ("holder", holder)) if isinstance(v, str) and v.strip()]
+        if parts:
+            named.append((b, "; ".join(parts)))
+    named = named[:_MAX_NAMES_FOR_MODEL]
+    if not query or not named:
+        return []
+    listing = "\n".join(f"{i}: {text}" for i, (_, text) in enumerate(named))
+    prompt = (
+        f'A bank customer asked to send money to "{query}". The name may be written in Bangla '
+        "script, in English letters or in Banglish, and may be spelled loosely or mis-heard from a "
+        "voice message.\n\nTheir saved recipients:\n" + listing + "\n\n"
+        "Which saved recipients is the customer naming? First write the name the customer said in "
+        "English letters exactly as it is pronounced, letter by letter. A saved recipient matches "
+        "only if that spelling is the same name as the saved one, allowing ordinary spelling "
+        "variants of the same sounds across scripts. A name with a different, extra or missing "
+        "consonant is a different name, a different person is not a match, and a recipient that "
+        "merely shares a first name with a longer name the customer said is not a match either. "
+        "Match only when you are sure. "
+        'Reply only with JSON: {"spoken_as": "<the name in English letters>", '
+        '"matches": [<numbers from the list>]}, an empty list when none.'
+    )
+    try:
+        data = await llm_backend.post(
+            "/api/generate",
+            {"model": settings.OLLAMA_MODEL, "prompt": prompt, "stream": False, "format": "json",
+             "think": settings.OLLAMA_THINK,
+             "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0}},
+            timeout=20.0,
+        )
+        parsed = json.loads(data.get("response") or "{}")
+    except Exception:
+        return []
+    picked = parsed.get("matches") if isinstance(parsed, dict) else None
+    if not isinstance(picked, list):
+        return []
+    out: list[dict] = []
+    for position in picked:
+        if isinstance(position, bool) or not isinstance(position, int) or not 0 <= position < len(named):
+            continue  # not a position in the list it was shown
+        beneficiary = named[position][0]
+        if beneficiary not in out:
+            out.append(beneficiary)
+    return out[:_MAX_NAME_MATCHES]
+
+
 def _resolve_beneficiary_destination(beneficiary: dict) -> dict | None:
     """Mirrors the mobile app's `beneficiarySendRoute()` switch on `serviceType`
     (see beneficiary-to-transfer-flow.md) — `None` means no deterministic
@@ -3367,6 +3436,10 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                                 ]
                             else:
                                 matches = _match_beneficiaries(payload.get("nameQuery", ""), beneficiaries)
+                                if not matches:
+                                    # Same name in another script or spelling ("জাহিদ" for "Jahid").
+                                    matches = await _llm_match_beneficiaries(
+                                        payload.get("nameQuery", ""), beneficiaries)
 
                             if len(matches) == 0:
                                 beneficiary_reply_token = ""
