@@ -921,6 +921,8 @@ def _profile_photo_outcome(category, service, subservice) -> _TurnOutcome:
 
 
 _UI_AMOUNT_FIELDS = ("amount", "requestedLimit", "newLimit")
+# A yes/no the model reads from what the customer said; it is never shown, only acted on.
+_UI_FLAG_FIELDS = ("forSelf",)
 
 
 def _ui_prefill(action: "ui_actions.UiAction", payload: dict | None, message: str) -> dict:
@@ -931,6 +933,8 @@ def _ui_prefill(action: "ui_actions.UiAction", payload: dict | None, message: st
     wrote_digits = re.sub(r"\D", "", message or "")
     wrote_numbers = re.findall(r"\d+", message or "")
     for field, _meaning in action.prefill:
+        if field in _UI_FLAG_FIELDS:
+            continue
         value = (payload or {}).get(field)
         if value in (None, "", [], {}):
             continue
@@ -953,15 +957,24 @@ def _ui_prefill(action: "ui_actions.UiAction", payload: dict | None, message: st
     return out
 
 
-def _ui_action_outcome(action: "ui_actions.UiAction", payload: dict | None, message: str) -> _TurnOutcome:
+def _ui_action_outcome(action: "ui_actions.UiAction", payload: dict | None, message: str,
+                       own_mobile: str | None = None) -> _TurnOutcome:
     """A request the chat does not carry out (T-79): no bank call. The app gets the screen to open
-    (with whatever the customer already said), or the information to show; the reply is composed."""
+    (with whatever the customer already said), or the information to show; the reply is composed.
+    `own_mobile` is the customer's own registered mobile from the verified login (never from
+    request input): used when they said the number is theirs, so they are not asked for it."""
     prefill = _ui_prefill(action, payload, message)
+    shown = dict(prefill)
+    own = _bd_mobile(own_mobile)
+    wants_own = str((payload or {}).get("forSelf")).strip().lower() in ("true", "yes", "1")
+    if own and wants_own and "recipientMobile" not in prefill and any(f == "forSelf" for f, _ in action.prefill):
+        prefill["recipientMobile"] = own
+        shown["recipientMobile"] = "their own registered mobile number"
     ui = {"kind": action.kind, "title": action.name, "screen": action.screen, "route": action.route,
           "prefill": prefill or None, "needs": action.needs}
     if action.kind == "screen":
         say = _say("redirect", screen=f"a {action.name} form right here in the chat",
-                   what_they_will_do_there=action.needs, already_filled_in=prefill or None,
+                   what_they_will_do_there=action.needs, already_filled_in=shown or None,
                    done_in_chat="no; they finish it with the buttons on that form")
     elif action.kind == "unavailable":
         say = _say("not_done", what=action.name, why=action.needs, changed="nothing")
@@ -3434,7 +3447,8 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                         request_id=request_id,
                     )
                 elif category == ui_actions.CATEGORY and ui_actions.get(service) is not None:
-                    app_outcome = _ui_action_outcome(ui_actions.get(service), payload, req.message)
+                    app_outcome = _ui_action_outcome(ui_actions.get(service), payload, req.message,
+                                                     customer_identity.customer_id if customer_identity else None)
                     async for chunk in _emit_outcome(app_outcome, request_id, customer_identity, turn_started_at, message=composer_message, history=history):
                         yield chunk
                     turn_classification = app_outcome.classification()

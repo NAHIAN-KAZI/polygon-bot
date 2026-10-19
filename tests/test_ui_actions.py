@@ -431,3 +431,34 @@ def test_the_platforms_mobile_recharge_is_handed_over_to_the_apps_recharge_scree
     assert _hand_over_to_app(other) is other      # everything else is untouched
     clarify = Clarification("which?")
     assert _hand_over_to_app(clarify) is clarify
+
+
+def _recharge(payload, message, own="01711223344"):
+    from app.routes.chat import _ui_action_outcome
+    return _ui_action_outcome(ui_actions.get("mobile_recharge"), payload, message, own)
+
+
+def test_recharge_for_their_own_number_is_prefilled_from_the_verified_login():
+    out = _recharge({"forSelf": True, "amount": 50}, "recharge 50 on my own number")
+    assert out.result_payload["ui"]["prefill"] == {"amount": 50, "recipientMobile": "01711223344"}
+    # the words are composed from a description, never the number itself
+    assert "01711223344" not in str(out.say)
+
+
+def test_recharge_keeps_a_number_the_customer_wrote_even_if_the_model_says_own():
+    out = _recharge({"forSelf": True, "recipientMobile": "01811223344", "amount": 50},
+                    "recharge 50 to 01811223344")
+    assert out.result_payload["ui"]["prefill"]["recipientMobile"] == "01811223344"
+
+
+def test_recharge_for_someone_else_never_gets_the_customers_number():
+    out = _recharge({"amount": 50}, "recharge 50 for my friend")
+    assert "recipientMobile" not in (out.result_payload["ui"]["prefill"] or {})
+    assert "forSelf" not in (out.result_payload["ui"]["prefill"] or {})
+    out = _recharge({"forSelf": False}, "recharge for my friend")
+    assert not out.result_payload["ui"]["prefill"]
+
+
+def test_recharge_without_a_valid_own_number_is_not_prefilled():
+    assert not _recharge({"forSelf": True}, "recharge my own number", own="not-a-phone").result_payload["ui"]["prefill"]
+    assert not _recharge({"forSelf": True}, "recharge my own number", own=None).result_payload["ui"]["prefill"]

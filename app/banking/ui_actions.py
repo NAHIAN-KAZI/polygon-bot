@@ -176,7 +176,8 @@ _LIST = [
        "choose the mobile operator, enter the mobile number to recharge (their own or someone else's), pick an amount or a pack, then confirm with a transaction PIN or one-time code",
        ["14.30"], "MobileRechargeScreen", "/mobile_recharge",
        [("recipientMobile", "the mobile number to recharge"), ("amount", "amount in taka"),
-        ("operator", "the mobile operator, as the customer wrote it")]),
+        ("operator", "the mobile operator, as the customer wrote it"),
+        ("forSelf", "true only when the customer says the recharge is for their own number, without writing a number")]),
     # ---- no backend ---------------------------------------------------------------------------
     _a("qr_payment_cards", "QR payment cards", "cards", "unavailable",
        "see, list or switch on/off the cards used for QR payments (the QR payment card settings; the bank's card products are a different thing)",
