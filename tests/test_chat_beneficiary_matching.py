@@ -565,3 +565,108 @@ def test_names_reach_the_model_as_escaped_data_not_as_instructions(monkeypatch):
     seen.clear()
     _run("Jahid", [{"id": "x", "nickname": "Bad\x00\x1bName"}, JAHID])
     assert "\x00" not in seen[0] and "\x1b" not in seen[0]
+
+
+# --- a typed reply after the picker ("জি" / "yes" / the name) must not lose the conversation ---------
+
+
+def _pick_model(monkeypatch, name_reply, pick_reply, seen=None):
+    """Fake model that answers the name-matching prompt and the picker-reply prompt differently."""
+    async def fake_post(path, body, timeout=None):
+        prompt = body.get("prompt", "")
+        if seen is not None:
+            seen.append(prompt)
+        if "saved recipients they meant" in prompt or "which of these saved recipients" in prompt:
+            return {"response": pick_reply}
+        return {"response": name_reply}
+
+    monkeypatch.setattr(chat_module.llm_backend, "post", fake_post)
+
+
+def _picker_turn(candidates, payload=None):
+    from datetime import datetime, timezone
+    from app.banking.session import ChatTurn
+    return ChatTurn(
+        timestamp=datetime.now(timezone.utc), message="জাহিদকে পাঠাবো",
+        classification={"type": "BENEFICIARY_SELECTION_REQUIRED", "category": "polygon_services",
+                        "service": "beneficiary", "subservice": None, "candidates": candidates,
+                        "payload": payload or {}})
+
+
+def _try(turns, message):
+    import asyncio
+    return asyncio.run(chat_module._try_beneficiary_selection_completion(turns, message))
+
+
+CAND = [{"id": "ben-9", "nickname": "Jahid", "accountHolderName": "Jahid Iqbak"}]
+
+
+def test_yes_after_the_picker_picks_the_single_candidate_and_keeps_the_amount(monkeypatch):
+    _pick_model(monkeypatch, "{}", '{"choice": 1}')
+    result = _try([_picker_turn(CAND, {"amount": "500"})], "জি")
+    assert (result.category, result.service) == ("polygon_services", "beneficiary")
+    assert result.payload == {"amount": "500", "beneficiaryId": "ben-9"}
+
+
+def test_a_reply_that_picks_nobody_is_a_new_request(monkeypatch):
+    for reply in ('{"choice": null}', '{"choice": 5}', '{"choice": 0}', '{"choice": true}', '{"choice": "1"}', "nope", ""):
+        _pick_model(monkeypatch, "{}", reply)
+        assert _try([_picker_turn(CAND)], "না, আমার ব্যালেন্স কত") is None, reply
+
+
+def test_only_a_beneficiary_picker_turn_is_answered_this_way(monkeypatch):
+    from datetime import datetime, timezone
+    from app.banking.session import ChatTurn
+    _pick_model(monkeypatch, "{}", '{"choice": 1}')
+    other = ChatTurn(timestamp=datetime.now(timezone.utc), message="x",
+                     classification={"type": "BANKING_SERVICE", "candidates": CAND})
+    assert _try([other], "yes") is None
+    assert _try([], "yes") is None
+    assert _try([_picker_turn([])], "yes") is None
+
+
+def test_picker_reply_failure_means_no_pick(monkeypatch):
+    async def boom(path, body, timeout=None):
+        raise RuntimeError("model down")
+    monkeypatch.setattr(chat_module.llm_backend, "post", boom)
+    assert _try([_picker_turn(CAND)], "জি") is None
+
+
+def test_e2e_bangla_name_then_a_typed_yes_reaches_the_recipient_with_the_amount(client, monkeypatch):
+    """The exact conversation from the phone: name + amount in Bangla, the picker, then a typed
+    'জি' (yes) instead of a tap."""
+    from app.banking import session as session_module
+    session_module._sessions.clear()
+    classified = []
+
+    async def fake_classify(message, recent_turns=None):
+        classified.append(message)
+        return BankingService(category="polygon_services", service="beneficiary", subservice=None,
+                              payload={"nameQuery": "জাহিদ", "amount": "৫০০"})
+
+    async def fake_verify_jwt(token):
+        return CustomerIdentity(customer_id=CUSTOMER_ID)
+
+    async def fake_fulfill(customer_identity, jwt, category, service, subservice, payload):
+        return AdapterResult(data={"beneficiaries": [RAHIM, JAHID]})
+
+    monkeypatch.setattr(chat_module, "classify", fake_classify)
+    monkeypatch.setattr(chat_module, "verify_jwt", fake_verify_jwt)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", fake_fulfill)
+    _install_audit_spy(monkeypatch)
+    _pick_model(monkeypatch, '{"matches": [1]}', '{"choice": 1}')
+
+    try:
+        first = client.post("/chat", json={"message": "জাহিদকে ৫০০ পাঠাবো"}, headers=JWT_HEADERS)
+        result1 = next(d for n, d in _parse_sse(first.text) if n == "result")
+        assert result1["type"] == "BENEFICIARY_SELECTION_REQUIRED"
+
+        second = client.post("/chat", json={"message": "জি"}, headers=JWT_HEADERS)
+        result2 = next(d for n, d in _parse_sse(second.text) if n == "result")
+    finally:
+        session_module._sessions.clear()
+
+    assert result2["type"] == "BENEFICIARY_MATCH"
+    assert result2["payload"]["beneficiary"]["id"] == "ben-9"
+    assert result2["payload"]["amount"] == "500"  # the amount said in the first message survived
+    assert classified == ["জাহিদকে ৫০০ পাঠাবো"]  # the "yes" was not sent to the classifier as a new request

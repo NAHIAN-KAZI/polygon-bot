@@ -1797,6 +1797,67 @@ async def _try_account_selection_completion(
     )
 
 
+async def _llm_pick_beneficiary(message: str, candidates: list[dict]) -> int | None:
+    """Which saved recipient (if any) a typed reply picks after "which one did you mean?".
+
+    A reply can pick by name or position, or just say yes when there was a single name
+    ("জি", "yes", "ha"). A no, a different request or anything unclear picks nothing, so it falls
+    through to a normal new request. Returns a 0-based index. Names only go to the model.
+    """
+    listing = "\n".join(
+        f"{i}. {_clean_for_model(c.get('nickname'))} / {_clean_for_model(c.get('accountHolderName'))}"
+        for i, c in enumerate(candidates, start=1))
+    prompt = (
+        "A bank customer was asked which of these saved recipients they meant (or, when there is "
+        "only one, whether that is the person):\n"
+        f"{listing}\n\n"
+        f"The customer replied: {json.dumps(_clean_for_model(message, 200), ensure_ascii=False)}\n\n"
+        "If the reply picks exactly one recipient (by name, by position, or by agreeing when there "
+        "is only one), in English, Bangla or Banglish, answer with that number. If it says no, asks "
+        "something else, is unclear, or could mean more than one recipient, answer null. "
+        'Respond only with JSON: {"choice": <number or null>}'
+    )
+    try:
+        data = await llm_backend.post(
+            "/api/generate",
+            {"model": settings.OLLAMA_MODEL, "prompt": prompt, "stream": False, "format": "json",
+             "think": settings.OLLAMA_THINK,
+             "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0}},
+            timeout=20.0,
+        )
+        choice = json.loads(data.get("response") or "{}").get("choice")
+    except Exception:
+        return None
+    if isinstance(choice, int) and not isinstance(choice, bool) and 1 <= choice <= len(candidates):
+        return choice - 1
+    return None
+
+
+async def _try_beneficiary_selection_completion(
+    recent_turns: list[ChatTurn], message: str
+) -> BankingService | None:
+    """If the last turn showed the saved-recipient picker, resolve a typed reply against the
+    candidates it stored and carry on with that recipient (and the amount the customer already
+    said). None when the reply picks no one: it is then a new request."""
+    if not recent_turns:
+        return None
+    last = recent_turns[-1].classification or {}
+    if last.get("type") != "BENEFICIARY_SELECTION_REQUIRED":
+        return None
+    candidates = [c for c in (last.get("candidates") or []) if isinstance(c, dict) and c.get("id") is not None]
+    if not candidates:
+        return None
+    index = await _llm_pick_beneficiary(message, candidates)
+    if index is None:
+        return None
+    return BankingService(
+        category=last.get("category"),
+        service=last.get("service"),
+        subservice=last.get("subservice"),
+        payload={**(last.get("payload") or {}), "beneficiaryId": candidates[index]["id"]},
+    )
+
+
 def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
@@ -2893,6 +2954,12 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
         fill_context = recent_turns
         result = await _try_account_selection_completion(recent_turns, req.message, req.payload)
         if result is None:
+            result = await _try_beneficiary_selection_completion(session_turns, req.message)
+            if result is not None:
+                # The picker turn is not part of the usual pending-question context (it is in
+                # the session, not in recent_turns), so the reply is read against it directly.
+                fill_context = session_turns
+        if result is None:
             if (not recent_turns and session_turns
                     and last_session_classification.get("type") == "BANKING_SERVICE"
                     and last_session_classification.get("request") is not None):
@@ -3534,6 +3601,10 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                                     "category": category,
                                     "service": service,
                                     "subservice": subservice,
+                                    # Kept so a typed reply ("yes", the name) can pick one later,
+                                    # with the amount the customer already said.
+                                    "candidates": [_trim_beneficiary(b) for b in matches],
+                                    "payload": _amount_prefill(payload),
                                 }
 
                             logger.info(json.dumps({
