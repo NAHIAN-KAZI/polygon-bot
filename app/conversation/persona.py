@@ -83,6 +83,11 @@ KIND_PURPOSE = {
                "what they could mean, name those options in plain words; otherwise offer a few "
                "things you can help with. If the message is only a greeting, greet them back "
                "and say what you can help with.",
+    "recall_app_action": "The customer is asking about something they just did in one of the "
+                         "app's own forms. Answer ONLY from the list of what they did in the "
+                         "facts: say plainly what happened and, where they ask, which item it "
+                         "concerned. If the list doesn't say, tell them you can't see that and "
+                         "offer to help another way. Never claim more than the list says.",
     "greet": "Greet the customer back (by first name if given) and say briefly what you "
              "can help with, from the services in the facts.",
     "smalltalk": "Respond briefly and kindly to their message, then offer help with their "
@@ -141,6 +146,9 @@ KIND_EXAMPLE = {
     "clarify": ("Customer: help\nFacts: what is unclear: what the customer wants; can help with: orders, "
                 "payments, profile\n"
                 "Reply: Happy to help! Is this about an order, a payment, or your profile?"),
+    "recall_app_action": ("Customer: did that go through?\nFacts: what the customer did in the app: "
+                          "[\"Remove saved item -- Item removed -- Blue notebook\"]\n"
+                          "Reply: Yes, the Blue notebook was removed. Anything else I can do?"),
     "greet": ("Customer: hi\nFacts: first name: Sam; can help with: orders, payments, profile\n"
               "Reply: Hi Sam! I can help with your orders, payments or profile — what do you need?"),
     "smalltalk": ("Customer: thanks!\nFacts: tone: friendly\n"

@@ -30,6 +30,22 @@ The customer's identity always comes from the JWT. The bot keeps a short
 per-customer conversation, so a typed follow-up ("the savings one", "500",
 "yes") is understood in context. The app only sends the next message.
 
+### `payload.uiContext` — what a box just did
+
+The chat never sees the calls an inline box makes itself (a card closed, a dispute submitted,
+a form that failed). So the next message the app sends carries one short line per outcome in
+`payload.uiContext` (an array of strings, for example
+`"In the app: Close card -- Card closed -- Debit card ending 0269"`), and the bot can then
+answer "did it work?" or "which card was it?" from it. Rules:
+
+- Send only outcomes the bot has not been told yet; the bot keeps up to the last 5 for the
+  session, so do not repeat them.
+- Lines are plain text: what was done, how it went, and the item (last digits only, never a full
+  number, code, PIN or password). The bot cuts each line to 240 characters.
+- The key is removed from `payload` before anything else reads it, so it never reaches a bank call.
+  A message that is only `uiContext` needs no other payload.
+- A question about it comes back as `result.type = KB_ANSWER` with `payload.grounded = false`.
+
 ## 2. Response stream (SSE)
 
 `text/event-stream`, in this order:
@@ -274,7 +290,7 @@ is changed and the message is answered as a new request.
 - `prefill` is passed as `Get.arguments` (a `Map<String, dynamic>` or `null`). Most target
   screens don't read it yet. They can adopt it with `if (Get.arguments is Map) ...`.
 
-### Registry (29 actions, `app/banking/ui_actions.py`)
+### Registry (30 actions, `app/banking/ui_actions.py`)
 
 "Rows" are the `planning/input/INTENT_IMPLEMENTATION_STATUS.md` rows each action covers.
 "In app" applies the rule above.
@@ -308,6 +324,7 @@ is changed and the message is answered as a new request.
 | `beneficiary_pin` | Pin a beneficiary | screen | `BeneficiaryScreen` | `/beneficiary` | Open | — | 14.25 |
 | `beneficiary_photo` | Beneficiary photo | screen | `BeneficiaryFormScreen` | `/beneficiary/form` | Open | — | 14.23, 14.24 |
 | `transfer_limit_change` | Change transfer limit | screen | `TransferLimitScreen` | `/transfer_limit` | Open | `newLimit` | 14.28, 14.29 |
+| `mobile_recharge` | Mobile recharge | screen | `MobileRechargeScreen` | `/mobile_recharge` | Open | `recipientMobile`, `amount`, `operator` | 14.30 |
 | `qr_payment_cards` | QR payment cards | unavailable | — | — | Info only | — | 4.22, 4.23 |
 | `other_banks_list` | List of other banks | unavailable | — | — | Info only | — | 14.4 |
 

@@ -37,9 +37,9 @@ def _doc(name: str) -> str:
 # --- registry integrity ------------------------------------------------------------------
 
 
-def test_there_are_29_actions_with_unique_ids_matching_their_keys():
+def test_there_are_30_actions_with_unique_ids_matching_their_keys():
     actions = list(ui_actions.UI_ACTIONS.values())
-    assert len(actions) == 29
+    assert len(actions) == 30
     assert len({a.id for a in actions}) == len(actions)
     assert all(key == a.id for key, a in ui_actions.UI_ACTIONS.items())
     assert ui_actions.CATEGORY == "app_actions"
@@ -416,3 +416,18 @@ def test_ground_freeze_request_maps_an_undo_request_to_card_unfreeze(monkeypatch
 
 # Captured at import, before conftest's autouse fixture swaps in a stand-in.
 _REAL_GROUND = chat_module._ground_freeze_request
+
+
+def test_the_platforms_mobile_recharge_is_handed_over_to_the_apps_recharge_screen():
+    from app.banking.routing import BankingService, Clarification
+    from app.routes.chat import _hand_over_to_app
+
+    handed = _hand_over_to_app(BankingService("payments", "mobile_recharge", None, {"amount": 100}))
+    assert (handed.category, handed.service) == (ui_actions.CATEGORY, "mobile_recharge")
+    assert handed.payload == {"amount": 100}      # what the customer said still travels with it
+    action = ui_actions.get("mobile_recharge")
+    assert action.kind == "screen" and action.route == "/mobile_recharge"
+    other = BankingService("account_info", "balance", None, None)
+    assert _hand_over_to_app(other) is other      # everything else is untouched
+    clarify = Clarification("which?")
+    assert _hand_over_to_app(clarify) is clarify

@@ -1,5 +1,4 @@
 import copy
-import difflib
 import json
 from typing import Literal
 import logging
@@ -28,6 +27,7 @@ from app.banking.routing import (
     AMOUNT_GUIDANCE,
     DOMAINS,
     SERVICE_DESCRIPTIONS,
+    AppActionsQuestion,
     BankingService,
     Clarification,
     KbQuestion,
@@ -40,7 +40,9 @@ from app.banking.routing import (
     _CLARIFICATION_FALLBACK,
 )
 from app.banking import ui_actions
-from app.banking.session import ChatTurn, get_classification_context, get_session, record_turn
+from app.banking.session import (
+    ChatTurn, get_classification_context, get_session, get_ui_notes, record_turn, record_ui_notes,
+)
 from app.banking.taxonomy import get_taxonomy, is_valid_path
 from app import llm_backend
 from app.config import settings
@@ -366,9 +368,11 @@ async def _read_pending_reply(question: str | None, message: str, payload: dict 
     prompt = (
         f'A bank assistant asked the customer: "{question or "a yes/no question"}"\n'
         f'The customer replied: "{message}"\n\n'
-        "Did the customer: confirm (agree to go ahead), decline (say no / cancel / stop), "
-        "unsure (hesitant, unclear, or asking about the same thing), or other (a different "
-        "request or question)? Copy the customer's words that show it. "
+        "Did the customer: confirm (agree to go ahead), decline (ONLY a no / cancel / stop, "
+        "with nothing else asked), unsure (hesitant, unclear, or asking about the same thing), "
+        "or other (a different request or question, even when they also say forget it, cancel "
+        "or no: they have moved on and the new request must be answered)? Copy the customer's "
+        "words that show it. "
         'Respond only with JSON: {"answer": "confirm|decline|unsure|other", "quote": "<words>"}'
     )
     try:
@@ -1636,6 +1640,19 @@ _CARD_PROBLEM_HINT = "what is happening with their card (freezing or reporting i
 _CARD_PROBLEM_OPTIONS = ("a lost or stolen card", "freezing a card", "card details and requests")
 
 
+# Platform services the chat does not carry out itself (no adapter, no bank call from here): the
+# app already has the screen, so the chat hands over to that app action instead of failing.
+_PLATFORM_TO_APP_ACTION = {("payments", "mobile_recharge"): "mobile_recharge"}
+
+
+def _hand_over_to_app(result):
+    if isinstance(result, BankingService):
+        action_id = _PLATFORM_TO_APP_ACTION.get((result.category, result.service))
+        if action_id and ui_actions.get(action_id) is not None:
+            return BankingService(ui_actions.CATEGORY, action_id, None, result.payload)
+    return result
+
+
 async def _ground_freeze_request(result, message: str, recent_turns: list[ChatTurn]):
     """Freeze only. The classifier invents a plausible reason ("lost") and routes
     vague card problems ("my card isn't working", "reset my PIN") to freeze. Keep the
@@ -2273,40 +2290,30 @@ def _describe_selection_account(a: dict) -> str:
 
 def _match_beneficiaries(name_query: str, beneficiaries: list[dict]) -> list[dict]:
     """Deterministic (no LLM) case-insensitive match of `name_query` against each
-    beneficiary's `nickname`/`accountHolderName`. Substring/prefix matches are
-    preferred; if none are found, falls back to `difflib` fuzzy matching over the
-    same fields. Skips entries missing both fields rather than raising."""
+    beneficiary's `nickname`/`accountHolderName`: the name the customer said is part of, or the
+    start of, a saved name. Only such a match is certain enough to go straight to the recipient.
+
+    There is no similar-spelling fallback on purpose. It matched "Rahim" to a saved "Jahid" (a
+    0.6 text similarity) and sent the customer to the wrong person. Near spellings and other
+    scripts are left to _llm_match_beneficiaries, whose result is always shown as a choice.
+    Skips entries missing both fields rather than raising."""
     query = (name_query or "").strip().lower()
     if not query or not isinstance(beneficiaries, list):
         return []
 
-    substring_matches: dict[int, dict] = {}
-    fuzzy_pool: dict[str, dict] = {}
+    matches: dict[int, dict] = {}
     for b in beneficiaries:
         if not isinstance(b, dict):
             continue
-        names = []
         for field in ("nickname", "accountHolderName"):
             value = b.get(field)
-            if isinstance(value, str) and value.strip():
-                names.append(value.strip().lower())
-        if not names:
-            continue
-        if any(query in name or name.startswith(query) for name in names):
-            substring_matches[id(b)] = b
-            continue
-        for name in names:
-            fuzzy_pool.setdefault(name, b)
-
-    if substring_matches:
-        return list(substring_matches.values())
-
-    close_names = difflib.get_close_matches(query, fuzzy_pool.keys(), n=5, cutoff=0.6)
-    fuzzy_matches: dict[int, dict] = {}
-    for name in close_names:
-        b = fuzzy_pool[name]
-        fuzzy_matches[id(b)] = b
-    return list(fuzzy_matches.values())
+            if not (isinstance(value, str) and value.strip()):
+                continue
+            name = value.strip().lower()
+            if query in name or name.startswith(query):
+                matches[id(b)] = b
+                break
+    return list(matches.values())
 
 
 _MAX_NAMES_FOR_MODEL = 60
@@ -2659,6 +2666,26 @@ async def _emit_outcome(
     )
 
 
+_UI_CONTEXT_KEY = "uiContext"
+_MAX_UI_NOTES_PER_REQUEST = 5
+
+
+def _split_ui_context(payload: dict | None) -> tuple[list[str], dict | None]:
+    """(notes, payload without them). The app reports what the customer did in its own forms as
+    short lines in payload.uiContext; they are data for the model, so each is plain text, capped,
+    and at most a few are taken. The key is always removed from the payload."""
+    if not isinstance(payload, dict) or _UI_CONTEXT_KEY not in payload:
+        return [], payload
+    raw = payload[_UI_CONTEXT_KEY]
+    notes = []
+    for item in (raw if isinstance(raw, list) else []):
+        note = _clean_for_model(item, 240)
+        if note:
+            notes.append(note)
+    rest = {k: v for k, v in payload.items() if k != _UI_CONTEXT_KEY}
+    return notes[-_MAX_UI_NOTES_PER_REQUEST:], (rest or None)
+
+
 def _session_safe_classification(classification: dict | None) -> dict | None:
     """Turn classification as persisted in session state: pin/password/otp stripped
     from any stored payload (defence in depth -- the freeze-OTP helpers already never
@@ -2675,9 +2702,19 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
     customer_identity = await verify_jwt(token) if token else None
 
     session_turns: list[ChatTurn] = get_session(customer_identity.customer_id) if customer_identity else []
+    # What the customer did in the app's own forms since their last message (reported by the app
+    # in payload.uiContext). Remembered for the session and taken out of the payload, so a
+    # direct request is never confused by it.
+    new_notes, cleaned_payload = _split_ui_context(req.payload)
+    if cleaned_payload != req.payload:
+        req = req.model_copy(update={"payload": cleaned_payload})
+    ui_notes: list[str] = []
+    if customer_identity is not None:
+        record_ui_notes(customer_identity.customer_id, new_notes)
+        ui_notes = get_ui_notes(customer_identity.customer_id)
     # T-77: every message is composed with the conversation so far, from text that
     # can never contain a typed code/password.
-    history = _history(session_turns)
+    history = _history(session_turns) + [("In the app the customer just did", n) for n in ui_notes]
     composer_message = _safe_for_model(req.message, req.payload)
     # What is written to the session and the log: a typed code/password is never kept,
     # at any step (a code typed into a yes/no step is as sensitive as one at an OTP step).
@@ -2973,16 +3010,18 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
             # Nothing pending, but the last turn was ANSWERED: hand it over as context so
             # a follow-up that only changes a detail ("and for nagad?") stays on it.
             classify_context = recent_turns
-            # Only after a fee quote (for "ok send it"): passing every answered turn
-            # derailed new requests live (a beneficiary add after a dispute answer).
+            # After ANY answered request, so "and for the 7th?", "to nagad instead" or "actually
+            # 1000" stay on it. The classifier is told that a message asking for something of its
+            # own is a new request, and the multi-turn audit checks that new questions after an
+            # answer are not pulled into the previous one (it was once limited to fee quotes
+            # because a model derailed a beneficiary add after a dispute answer).
             if (not recent_turns and session_turns
                     and last_session_classification.get("type") == "BANKING_SERVICE"
-                    and (last_session_classification.get("category"),
-                         last_session_classification.get("service")) == ("fees", "fee_quote")
                     and last_session_classification.get("request") is not None):
                 classify_context = session_turns[-1:]
             try:
-                result = await classify(req.message, recent_turns=classify_context)
+                result = await classify(req.message, recent_turns=classify_context,
+                                        **({"app_notes": ui_notes} if ui_notes else {}))
             except httpx.HTTPError as exc:
                 # Model server down, erroring or timed out: say so instead of breaking the stream.
                 detail = "Generation model failed or is unreachable"
@@ -2997,6 +3036,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                     subservice=result.subservice,
                     payload=req.payload,
                 )
+            result = _hand_over_to_app(result)
             result = _check_amount(result, req.message)
             result = _carry_forward_gathered(result, classify_context)
             result = await _ground_freeze_request(result, req.message, recent_turns)
@@ -3018,6 +3058,21 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                 customer_identity.customer_id,
                 ChatTurn(timestamp=datetime.now(timezone.utc), message=stored_message, classification=None),
             )
+        return
+
+    if isinstance(result, AppActionsQuestion):
+        # About what the customer just did in the app's own forms: the answer is the notes the
+        # app reported, passed to the composer as facts (so a card ending in them may be named).
+        async for _piece in say_stream(_say("recall_app_action", what_the_customer_did_in_the_app=list(ui_notes))):
+            yield _sse("token", {"token": _piece})
+        yield _result_event("KB_ANSWER", None, None, None,
+                            payload={"grounded": False, "hitCount": 0, "sources": None})
+        if customer_identity is not None:
+            record_turn(
+                customer_identity.customer_id,
+                ChatTurn(timestamp=datetime.now(timezone.utc), message=stored_message, classification=None),
+            )
+        yield _sse("done", {})
         return
 
     if isinstance(result, Clarification):

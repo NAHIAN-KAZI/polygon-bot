@@ -103,17 +103,19 @@ def test_match_prefers_substring_over_fuzzy():
     assert {b["id"] for b in result} == {"ben-1", "ben-2"}
 
 
-def test_match_fuzzy_fallback_triggers_only_without_substring_match():
-    # "Ashn" is not a substring/prefix of "Ashan" but is close enough for
-    # difflib.get_close_matches at cutoff=0.6.
-    result = chat_module._match_beneficiaries("Ashn", [ASHAN])
-    assert result == [ASHAN]
+def test_a_similar_spelling_is_not_a_certain_match():
+    # A near spelling used to match through text similarity: "Rahim" scored 0.6 against a saved
+    # "Jahid" and the customer was sent to the wrong person. Only a substring or the start of a
+    # saved name is certain; near spellings and other scripts go to the model and are shown as
+    # a choice (test_e2e_*_offered_as_a_choice).
+    assert chat_module._match_beneficiaries("Ashn", [ASHAN]) == []
+    jahid = {"id": "ben-9", "nickname": "Jahid", "accountHolderName": "Jahid Iqbak"}
+    assert chat_module._match_beneficiaries("Rahim", [jahid]) == []
+    assert chat_module._match_beneficiaries("Zahid", [jahid]) == []
 
 
-def test_match_fuzzy_fallback_does_not_trigger_when_substring_match_exists():
+def test_a_substring_match_is_unaffected_by_other_close_names():
     close_but_irrelevant = {"id": "ben-9", "nickname": "Ash", "accountHolderName": None}
-    # "Ashan" substring-matches ASHAN directly; the fuzzy pool (built only
-    # from non-substring-matched entries) should never even be consulted.
     result = chat_module._match_beneficiaries("Ashan", [ASHAN, close_but_irrelevant])
     assert result == [ASHAN]
 
@@ -670,3 +672,17 @@ def test_e2e_bangla_name_then_a_typed_yes_reaches_the_recipient_with_the_amount(
     assert result2["payload"]["beneficiary"]["id"] == "ben-9"
     assert result2["payload"]["amount"] == "500"  # the amount said in the first message survived
     assert classified == ["জাহিদকে ৫০০ পাঠাবো"]  # the "yes" was not sent to the classifier as a new request
+
+
+def test_e2e_a_name_that_only_resembles_a_saved_one_never_goes_straight_to_it(client, monkeypatch):
+    """"Rahim" with only "Jahid" saved: the model says it is not the same name, so the customer is
+    asked to check the name. It used to open Jahid's card."""
+    message = _install_beneficiary_fixture(
+        monkeypatch, [JAHID], message="send 300 to Rahim", payload={"nameQuery": "Rahim", "amount": 300})
+    _install_audit_spy(monkeypatch)
+    _fake_model(monkeypatch, '{"spoken_as": "Rahim", "matches": []}')
+
+    resp = client.post("/chat", json={"message": message}, headers=JWT_HEADERS)
+
+    result = next(data for name, data in _parse_sse(resp.text) if name == "result")
+    assert result["type"] == "CLARIFICATION_REQUIRED"

@@ -18,10 +18,16 @@ class ChatTurn:
     classification: dict | None = None
 
 
+MAX_UI_NOTES = 5
+
+
 @dataclass
 class _SessionEntry:
     last_active_at: datetime
     turns: list[ChatTurn] = field(default_factory=list)
+    # What the customer did in the app's own forms (a card closed, a dispute submitted): the
+    # chat never sees those calls, so the app reports each outcome in one short line.
+    ui_notes: list[str] = field(default_factory=list)
 
 
 _sessions: dict[str, _SessionEntry] = {}
@@ -48,6 +54,26 @@ def record_turn(customer_id: str, turn: ChatTurn) -> None:
     if len(entry.turns) > MAX_TURNS_PER_SESSION:
         entry.turns = entry.turns[-MAX_TURNS_PER_SESSION:]
     entry.last_active_at = turn.timestamp
+
+
+def record_ui_notes(customer_id: str, notes: list[str]) -> None:
+    """Remember what the customer just did in the app, for as long as the session lives."""
+    if not notes:
+        return
+    now = datetime.now(timezone.utc)
+    entry = _sessions.get(customer_id)
+    if entry is None or _is_expired(entry):
+        entry = _SessionEntry(last_active_at=now)
+        _sessions[customer_id] = entry
+    entry.ui_notes = (entry.ui_notes + list(notes))[-MAX_UI_NOTES:]
+    entry.last_active_at = now
+
+
+def get_ui_notes(customer_id: str) -> list[str]:
+    entry = _sessions.get(customer_id)
+    if entry is None or _is_expired(entry):
+        return []
+    return list(entry.ui_notes)
 
 
 _PENDING_CLARIFICATION_TYPES = {"CLARIFICATION_REQUIRED", "ACCOUNT_SELECTION_REQUIRED", "TRANSACTION_SELECTION_REQUIRED"}

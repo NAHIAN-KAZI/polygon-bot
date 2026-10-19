@@ -50,6 +50,7 @@ transfer-limit changes. Not built: wallet verify (14.15), recipient lookup (14.2
 | 14.21–14.25 | Beneficiary edit / delete / photo / pin | App actions `beneficiary_edit`, `beneficiary_delete`, `beneficiary_photo`, `beneficiary_pin` |
 | 14.27 | My transfer limit | Handled in chat: `transfer_info` / `transfer_limit` |
 | 14.28/14.29 | Transfer limit change / cancel pending | App action `transfer_limit_change`. Prefill: `newLimit` |
+| 14.30 | Mobile recharge (own number or someone else's) | App action `mobile_recharge` (the platform's `payments/mobile_recharge` is handed over to it; the bot never calls the bank for it). Prefill: `recipientMobile`, `amount`, `operator`. The app opens its Mobile Recharge screen (`/mobile_recharge`); that screen does not read the prefill yet (it only accepts a saved beneficiary as its argument) |
 
 Wallet verify (14.15) and recipient lookup (14.26) are not built.
 

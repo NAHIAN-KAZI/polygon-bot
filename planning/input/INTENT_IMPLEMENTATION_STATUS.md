@@ -240,3 +240,4 @@ No API needed — handled conversationally.
 | 14.27 My transfer limit — get | ✅ Done (T-64, `transfer_info`/`transfer_limit`) |
 | 14.28 My transfer limit — request change | ✅ App action (T-79): the bot returns `APP_ACTION` `transfer_limit_change` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
 | 14.29 My transfer limit — cancel pending change | ✅ App action (T-79): the bot returns `APP_ACTION` `transfer_limit_change` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
+| 14.30 Mobile recharge (own number or someone else's) | ✅ App action: the bot returns `APP_ACTION` `mobile_recharge` (the platform's `payments/mobile_recharge` is handed over to it) with the number, amount and operator from the customer's own words; the app opens its Mobile Recharge screen. No bank call by the bot |

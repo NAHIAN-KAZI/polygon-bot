@@ -170,6 +170,13 @@ _LIST = [
        "choose the account and the new limit, or open the pending request, and confirm with a one-time code and PIN",
        ["14.28", "14.29"], "TransferLimitScreen", "/transfer_limit",
        [("newLimit", "the new limit in taka")]),
+    # ---- bills and recharge -------------------------------------------------------------------
+    _a("mobile_recharge", "Mobile recharge", "transfers", "screen",
+       "recharge or top up a mobile phone number with talk time or a data pack: their own number or someone else's",
+       "choose the mobile operator, enter the mobile number to recharge (their own or someone else's), pick an amount or a pack, then confirm with a transaction PIN or one-time code",
+       ["14.30"], "MobileRechargeScreen", "/mobile_recharge",
+       [("recipientMobile", "the mobile number to recharge"), ("amount", "amount in taka"),
+        ("operator", "the mobile operator, as the customer wrote it")]),
     # ---- no backend ---------------------------------------------------------------------------
     _a("qr_payment_cards", "QR payment cards", "cards", "unavailable",
        "see, list or switch on/off the cards used for QR payments (the QR payment card settings; the bank's card products are a different thing)",
