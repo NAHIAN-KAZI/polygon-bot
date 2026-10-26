@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 import httpx
@@ -9,6 +10,8 @@ from app.config import settings
 from app.embeddings import embed_texts
 from app.vectorstore import upsert_chunks, delete_by_doc_id
 from app.catalog import add_document, list_documents, remove_document
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/documents", tags=["documents"], dependencies=[Depends(require_api_key)])
 
@@ -40,7 +43,9 @@ async def upload_document(file: UploadFile):
     try:
         vectors = await embed_texts([c.text for c in chunks])
         embedded_chunks = [
-            {"embedding": v, "chunk_index": c.chunk_index, "page": c.page, "text": c.text}
+            {"embedding": v, "chunk_index": c.chunk_index, "page": c.page, "text": c.text,
+             "section": c.section, "heading_path": c.heading_path, "source_url": c.source_url,
+             "product": c.product, "group": c.group}
             for c, v in zip(chunks, vectors)
         ]
         upsert_chunks(doc_id, filename, embedded_chunks)
@@ -51,7 +56,16 @@ async def upload_document(file: UploadFile):
     except Exception:
         raise HTTPException(status_code=502, detail="Vector store (Qdrant) is unreachable")
 
+    # A re-upload of the same file replaces the old copy (only now that the new one is stored, so a failed
+    # upload never leaves the knowledge base without it); otherwise every chunk would be answered twice.
+    replaced = [d["doc_id"] for d in list_documents() if d.get("filename") == filename and d["doc_id"] != doc_id]
     add_document(doc_id, filename, len(embedded_chunks))
+    for old_id in replaced:
+        remove_document(old_id)
+        try:
+            delete_by_doc_id(old_id)
+        except Exception:
+            logger.warning("replaced document %s: its old chunks could not be deleted from the vector store", old_id)
 
     return {"doc_id": doc_id, "filename": filename, "chunk_count": len(embedded_chunks)}
 

@@ -28,6 +28,12 @@ def upsert_chunks(doc_id: str, filename: str, chunks: list[dict]) -> None:
                 "chunk_index": c["chunk_index"],
                 "page": c["page"],
                 "text": c["text"],
+                # Markdown only (None otherwise): where the chunk sits and which product it is about.
+                "section": c.get("section"),
+                "heading_path": c.get("heading_path") or [],
+                "source_url": c.get("source_url"),
+                "product": c.get("product"),
+                "group": c.get("group"),
             },
         )
         for c in chunks
@@ -49,6 +55,11 @@ def search(query_vector: list[float], top_k: int) -> list[dict]:
             "filename": h.payload.get("filename"),
             "page": h.payload.get("page"),
             "text": h.payload.get("text"),
+            "section": h.payload.get("section"),
+            "heading_path": h.payload.get("heading_path") or [],
+            "source_url": h.payload.get("source_url"),
+            "product": h.payload.get("product"),
+            "group": h.payload.get("group"),
         }
         for h in hits
     ]

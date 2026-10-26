@@ -25,6 +25,7 @@ and `Authorization: Bearer <customer JWT>` for anything account-related.
 | `message` | string | ✅ | 1–4000 chars: what the customer typed, or a short label (`"Yes"`, `"Selected"`, `"Verify"`) when the app sends a structured answer |
 | `category`, `service`, `subservice` | string | — | Pass `category`+`service` together to call one service directly (ids as in each intent doc). **Leave them out when answering an open question** (§5): a request with `category`+`service` counts as a new request, and the pending one is dropped |
 | `payload` | object | — | Structured answers (picked account/card/transaction, yes/no, the verification form) or direct-route fields |
+| `disabled_use_cases` | string[] | — | **Set by the Java gateway only, never by the app** (the gateway ignores and overwrites anything the app sends). Ids of use cases the bank switched off in the back office; the bot refuses those (see §4 "Switched-off use cases") |
 
 The customer's identity always comes from the JWT. The bot keeps a short
 per-customer conversation, so a typed follow-up ("the savings one", "500",
@@ -44,7 +45,7 @@ answer "did it work?" or "which card was it?" from it. Rules:
   number, code, PIN or password). The bot cuts each line to 240 characters.
 - The key is removed from `payload` before anything else reads it, so it never reaches a bank call.
   A message that is only `uiContext` needs no other payload.
-- A question about it comes back as `result.type = KB_ANSWER` with `payload.grounded = false`.
+- A question about it comes back as `result.type = APP_ACTIONS_ANSWER` with an empty payload (a plain bubble; it is not a knowledge-base answer, so the back office does not count it as a knowledge gap).
 
 ## 2. Response stream (SSE)
 
@@ -80,6 +81,8 @@ Always handle both `done` and `error`, because a stream is not guaranteed to rea
 | `BENEFICIARY_MATCH` | "Send money to <name>" matched one saved beneficiary | Beneficiary card plus a "Send" button to the transfer screen (`TRANSFER.md`) |
 | `BENEFICIARY_SELECTION_REQUIRED` | Several beneficiaries match the name | Picker from `payload.beneficiaries` (`TRANSFER.md`) |
 | `KB_ANSWER` | Product/policy answer from the bank's knowledge base, or a polite off-topic decline | Bubble. `payload`: `{"grounded", "hitCount", "sources"}` (`sources` may be `null`) |
+| `APP_ACTIONS_ANSWER` | Answer about what the customer just did in an app box (from `payload.uiContext`) | Bubble only. `payload`: `{}` |
+| `USE_CASE_DISABLED` | The bank switched this use case off and the app has no screen for it | Bubble only. `payload`: `{"useCase": "<id>", "useCaseDisabled": true}` |
 | `UNKNOWN_SERVICE` | A direct route named a `category`/`service`/`subservice` that doesn't exist | Bubble. Check the ids you sent |
 | `SERVICE_UNAVAILABLE` | The bank's service failed or isn't available for this customer. `payload` is `null` | Bubble plus **Retry** (resend the customer's last request) |
 | `AUTH_REQUIRED` | JWT missing, expired or rejected. `payload` is `null` | Refresh the token or send the customer to log in, then offer **Retry** |
@@ -133,6 +136,27 @@ The approved in-chat changes are exactly these:
 Everything else that changes data, including unfreeze, PIN reset, close card, card
 applications, limit changes, KYC, email transfer, QR pay, beneficiary
 edit/delete/pin/photo and transfer-limit changes, is an `APP_ACTION`.
+
+### Switched-off use cases
+
+The back office (`ai-portal`, page **Use cases**) can switch each chat use case on or off; the full list, grouped by
+intent, is `GET /chat/use-cases` (ids are `<category>.<service>` or `app_actions.<action>`). When a request resolves
+to a switched-off use case the bot makes no bank call and answers that it is not available in chat right now (worded
+by the model, never fixed text). Two shapes, both with `payload.useCaseDisabled = true` and `payload.useCase = <id>`:
+
+- the app has a screen for it (for example freeze card): `result.type = APP_ACTION` with the usual `ui` object, so the
+  existing "open screen" button appears; the title is plain ("Freeze or unfreeze card");
+- no screen: `result.type = USE_CASE_DISABLED`, a plain bubble.
+
+A pending confirmation or verification step for a use case switched off meanwhile ends the same way and is never
+executed. The app's own screens and boxes are not affected: the switch governs what the chat does or starts.
+
+### Product tags (leads)
+
+`KB_ANSWER` and product `APP_ACTION` results may carry `payload.products`: a list of
+`{"name", "group", "strength"}` (`strength` is `info` when the customer asked about the product, `apply` when they
+want it). The model decides from the customer's words; the product comes from the knowledge-base chunks behind the
+answer. The app can ignore the key; the Java gateway lists these as leads in the back office. Absent when there is none.
 
 ## 5. Answering an open question
 

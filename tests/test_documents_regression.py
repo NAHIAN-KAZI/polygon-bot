@@ -100,3 +100,55 @@ def test_delete_nonexistent_document_returns_404(client, isolated_catalog):
     resp = client.delete("/documents/does-not-exist", headers=AUTH_HEADERS)
 
     assert resp.status_code == 404
+
+
+# --- re-upload replaces the old copy (T-111) --------------------------------------------------------------
+
+
+def _track(monkeypatch):
+    deleted, stored = [], []
+    monkeypatch.setattr(documents_module, "embed_texts", _fake_embed_texts)
+    monkeypatch.setattr(documents_module, "upsert_chunks", lambda doc_id, filename, chunks: stored.append((doc_id, chunks)))
+    monkeypatch.setattr(documents_module, "delete_by_doc_id", lambda doc_id: deleted.append(doc_id))
+    return deleted, stored
+
+
+def test_uploading_the_same_filename_again_replaces_the_old_copy(client, isolated_catalog, monkeypatch):
+    deleted, _stored = _track(monkeypatch)
+    files = lambda body: {"file": ("faq.md", body, "text/markdown")}  # noqa: E731
+    first = client.post("/documents", headers=AUTH_HEADERS, files=files(b"## A\n\nfirst version of the text"))
+    second = client.post("/documents", headers=AUTH_HEADERS, files=files(b"## A\n\nsecond version of the text"))
+    assert set(second.json()) == {"doc_id", "filename", "chunk_count"}      # the response contract is unchanged
+    assert deleted == [first.json()["doc_id"]]
+    listed = client.get("/documents", headers=AUTH_HEADERS).json()
+    assert [d["doc_id"] for d in listed] == [second.json()["doc_id"]]
+
+
+def test_a_different_filename_is_not_replaced(client, isolated_catalog, monkeypatch):
+    deleted, _stored = _track(monkeypatch)
+    client.post("/documents", headers=AUTH_HEADERS, files={"file": ("a.md", b"## A\n\ntext one", "text/markdown")})
+    client.post("/documents", headers=AUTH_HEADERS, files={"file": ("b.md", b"## B\n\ntext two", "text/markdown")})
+    assert deleted == []
+    assert len(client.get("/documents", headers=AUTH_HEADERS).json()) == 2
+
+
+def test_a_failed_reupload_leaves_the_old_copy_in_place(client, isolated_catalog, monkeypatch):
+    deleted, _stored = _track(monkeypatch)
+    first = client.post("/documents", headers=AUTH_HEADERS, files={"file": ("faq.md", b"## A\n\nfirst", "text/markdown")})
+
+    def boom(doc_id, filename, chunks):
+        raise RuntimeError("vector store down")
+
+    monkeypatch.setattr(documents_module, "upsert_chunks", boom)
+    failed = client.post("/documents", headers=AUTH_HEADERS, files={"file": ("faq.md", b"## A\n\nsecond", "text/markdown")})
+    assert failed.status_code == 502
+    assert deleted == []
+    assert [d["doc_id"] for d in client.get("/documents", headers=AUTH_HEADERS).json()] == [first.json()["doc_id"]]
+
+
+def test_the_chunk_metadata_reaches_the_vector_store(client, isolated_catalog, monkeypatch):
+    _deleted, stored = _track(monkeypatch)
+    client.post("/documents", headers=AUTH_HEADERS, files={"file": ("kb.md", b"## Cards\n\n### Visa Card\n\nA card for everyday spending anywhere.\n\nSource: http://x/visa\n", "text/markdown")})
+    chunk = stored[0][1][0]
+    assert (chunk["product"], chunk["group"], chunk["source_url"]) == ("Visa Card", "Cards", "http://x/visa")
+    assert chunk["heading_path"] == ["Cards", "Visa Card"] and chunk["section"] == "Visa Card"

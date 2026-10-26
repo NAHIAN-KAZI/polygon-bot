@@ -76,6 +76,10 @@ KIND_PURPOSE = {
     "redirect": "Tell the customer the form in the facts is shown right here in the chat for this, and why.",
     "not_in_chat": "Explain that what they want can't be done in this chat but can be done "
                    "in the app, then offer help with something else.",
+    "switched_off": "The bank has turned this request off in the chat for now. Say plainly that it "
+                    "isn't available in this chat right now, with a word of care if the customer "
+                    "described a problem. If the facts name an app screen, point to it; if they don't, "
+                    "do not mention the app or any other place. Then offer help with something else.",
     "caution": "Explain the serious, irreversible consequence in the facts clearly and "
                "kindly before they continue, and the gentler alternative if one is given.",
     "clarify": "You're not sure what the customer wants. Ask one short, friendly question "
@@ -140,6 +144,9 @@ KIND_EXAMPLE = {
     "not_in_chat": ("Customer: cancel it\nFacts: request: cancel an order; where: the orders screen in the app\n"
                     "Reply: Cancelling an order can't be done in this chat, but you can do it from the orders "
                     "screen in the app. Is there anything else I can help with?"),
+    "switched_off": ("Customer: cancel my order\nFacts: request: cancel an order\n"
+                     "Reply: Cancelling an order isn't available in this chat right now. Is there anything "
+                     "else I can help with?"),
     "caution": ("Customer: delete it\nFacts: consequence: the item is removed for good; alternative: hide it instead\n"
                 "Reply: Deleting it removes the item for good. If you only want it out of sight, hiding it is a "
                 "gentler option."),

@@ -209,7 +209,7 @@ def test_e2e_a_question_about_the_form_is_answered_from_the_notes(client, monkey
         session_module._sessions.clear()
     events = _parse_sse(resp.text)
     result = next(d for n, d in events if n == "result")
-    assert result["type"] == "KB_ANSWER" and result["payload"]["grounded"] is False
+    assert result["type"] == "APP_ACTIONS_ANSWER" and result["payload"] == {}
     assert events[-1][0] == "done"
     kind, facts, _must = facts_seen[0]
     assert kind == "recall_app_action"

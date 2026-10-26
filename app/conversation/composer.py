@@ -159,7 +159,7 @@ def _history_block(history: Sequence[tuple[str, str]] | None) -> str:
 
 # Kinds where every fact matters (safety, consent, irreversible steps): the model is
 # told to mention each one; for answers it picks what answers the question.
-_MENTION_ALL = {"confirm", "verify", "caution", "summary", "done", "refused_by_bank", "choose", "ask"}
+_MENTION_ALL = {"confirm", "verify", "caution", "summary", "done", "refused_by_bank", "choose", "ask", "switched_off"}
 
 
 def build_messages(kind: str, facts: Mapping, message: str,

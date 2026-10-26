@@ -77,6 +77,12 @@ def _no_generated_clarifications(monkeypatch):
 
     monkeypatch.setattr(chat_module, "_llm_pick_candidate", _no_pick)
 
+    # Lead tags are a model decision in production; tests that care patch llm_backend or this helper.
+    async def _no_lead_tags(message, products):
+        return []
+
+    monkeypatch.setattr(chat_module, "_read_product_interest", _no_lead_tags)
+
     # Freeze grounding check (an extra LLM call): pass the classification through
     # unchanged in tests; tests of the check itself capture the real function.
     async def _as_classified(result, message, recent_turns):
