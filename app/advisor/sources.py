@@ -62,25 +62,34 @@ async def monthly_summary(jwt: str | None, month: str) -> dict:
     return body if isinstance(body, dict) else {}
 
 
-async def monthly_summaries(jwt: str | None, months: list[str], concurrency: int = 6) -> tuple[list[dict], int]:
-    """Summaries for many months (oldest first) and how many could not be read. A month that fails is left out,
-    so a gap costs that month only. At most `concurrency` months are asked at once: the bank builds each one
-    from the customer's ledgers."""
+async def monthly_summaries(jwt: str | None, months: list[str], concurrency: int = 6, batch: int = 6) -> tuple[list[dict], int]:
+    """Summaries for many months (oldest first) and how many could not be read. `months` is newest first. They are
+    asked in batches of `batch`; once some month has had money moving, a batch with none is the time before the
+    customer's history began, so older months are not asked for. A month that fails is left out, so a gap costs
+    that month only. At most `concurrency` months are asked at once: the bank builds each from the customer's
+    ledgers."""
     gate = asyncio.Semaphore(concurrency)
 
     async def one(month: str) -> dict:
         async with gate:
             return await monthly_summary(jwt, month)
 
-    results = await asyncio.gather(*(one(m) for m in months), return_exceptions=True)
-    kept, failed = [], 0
-    for month, result in zip(months, results):
-        if isinstance(result, AdapterAuthError):
-            raise result
-        if isinstance(result, BaseException):
-            failed += 1
-        elif result:
-            kept.append({**result, "month": result.get("month") or month})
+    kept, failed, seen_activity = [], 0, False
+    for start in range(0, len(months), batch):
+        group = months[start:start + batch]
+        results = await asyncio.gather(*(one(m) for m in group), return_exceptions=True)
+        active = False
+        for month, result in zip(group, results):
+            if isinstance(result, AdapterAuthError):
+                raise result
+            if isinstance(result, BaseException):
+                failed += 1
+            elif result:
+                kept.append({**result, "month": result.get("month") or month})
+                active = active or bool(result.get("totalIncome") or result.get("totalExpense"))
+        if seen_activity and not active and not any(isinstance(r, BaseException) for r in results):
+            break
+        seen_activity = seen_activity or active
     return sorted(kept, key=lambda s: s["month"]), failed
 
 

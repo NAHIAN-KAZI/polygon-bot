@@ -21,7 +21,7 @@ from app.advisor.money import tk, to_poisha
 from app.config import settings
 from app.knowledge.product_cards import ProductCard
 
-_MAX_CANDIDATES = 40
+_MAX_CANDIDATES = 30
 _MAX_PICKS = 3
 _MAX_CUTS = 3
 
@@ -165,8 +165,8 @@ def pick_prompt(need: Need, message: str, profile: dict, cards: list[ProductCard
         "goal. The customer's current holdings are under \"already has\": do not choose a product of a kind they "
         "already hold unless the goal needs another one. For each give the reasons in short "
         "plain phrases about the customer's situation (their habits, goal or holdings) without any numbers and "
-        "without field names, because the figures are given to the reader separately, and one thing they should "
-        "keep in mind. Also say how each relates to what they already hold: \"new\" when they hold nothing of "
+        "without field names, because the figures are given to the reader separately: at most two reasons of "
+        "under twelve words each, and one thing to keep in mind in under fifteen words. Also say how each relates to what they already hold: \"new\" when they hold nothing of "
         "that kind, \"extra\" when they hold one of that kind and this would be another, \"upgrade\" when it "
         "would be a better one of a kind they hold. If none fits, choose none. Answer with JSON:\n"
         '{"picks": [{"number": 1, "reasons": ["..."], "keep_in_mind": "...", "relation": "new"}]}'

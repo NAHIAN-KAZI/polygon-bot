@@ -2654,8 +2654,8 @@ def _trim_beneficiary(beneficiary: dict) -> dict:
     }
 
 
-# Services that list what the bank sells, not anything about the customer: no login is needed to learn the answer.
-# Signed in, the live catalogue is read from the bank; signed out, the knowledge base answers instead.
+# Services that list what the bank sells, not anything about the customer: no login is needed to learn the answer,
+# and the knowledge base answers it for everyone, signed in or out.
 _PUBLIC_CATALOGUE_SERVICES = frozenset({("card_info", "card_products")})
 
 
@@ -3371,10 +3371,21 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
             result.payload,
         )
 
-        if customer_identity is None and (category, service) in _PUBLIC_CATALOGUE_SERVICES:
-            # What the bank offers is not the customer's own data: signed out, the knowledge base answers it.
-            async for chunk in _kb_stream(req, request_id):
+        if (category, service) in _PUBLIC_CATALOGUE_SERVICES:
+            # What the bank offers is not the customer's own data, so signed in or out the knowledge base answers it
+            # (the bank's own catalogue is a short list without the detail a customer asks about).
+            if (off_use_case := _switched_off(req.disabled_use_cases, category, service)) is not None:
+                async for chunk in _emit_outcome(_switched_off_outcome(off_use_case, category, service, subservice),
+                                                 request_id, customer_identity, turn_started_at,
+                                                 message=composer_message, history=history):
+                    yield chunk
+                yield _sse("done", {})
+                return
+            async for chunk in _kb_stream(req, request_id, _recent_customer_messages(recent_turns)):
                 yield chunk
+            if customer_identity is not None:
+                record_turn(customer_identity.customer_id,
+                            ChatTurn(timestamp=datetime.now(timezone.utc), message=stored_message, classification=None))
             return
 
         if customer_identity is None:

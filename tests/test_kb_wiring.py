@@ -132,3 +132,33 @@ def test_signed_out_a_service_with_personal_data_still_asks_for_login(client, mo
     from app.banking.routing import BankingService
     results = _chat_as(client, monkeypatch, BankingService("account_info", "balance", None, {}))
     assert [r["type"] for r in results] == ["AUTH_REQUIRED"]
+
+
+def test_signed_in_too_what_the_bank_offers_is_answered_from_the_knowledge_base(client, monkeypatch):
+    from app.banking.routing import BankingService
+    from app.banking.identity import CustomerIdentity
+
+    async def verify_jwt(token):
+        return CustomerIdentity(customer_id="cust-catalogue")
+
+    async def never(*a, **k):
+        raise AssertionError("the bank's own catalogue must not be called")
+
+    monkeypatch.setattr(chat_module, "verify_jwt", verify_jwt)
+    monkeypatch.setattr(chat_module, "fulfill_banking_service", never)
+    results = _chat_as(client, monkeypatch, BankingService("card_info", "card_products", None, {}),
+                       headers={**AUTH_HEADERS, "Authorization": "Bearer sometoken"})
+    assert [r["type"] for r in results] == ["KB_ANSWER"] and results[0]["payload"]["grounded"] is True
+
+
+def test_the_switch_for_that_use_case_still_applies_to_the_knowledge_route(client, monkeypatch):
+    from app.banking.routing import BankingService
+
+    async def classify(*a, **k):
+        return BankingService("card_info", "card_products", None, {})
+
+    monkeypatch.setattr(chat_module, "classify", classify)
+    resp = client.post("/chat", json={"message": "which cards do you offer?", "disabled_use_cases": ["card_info.card_products"]},
+                       headers=AUTH_HEADERS)
+    types = [json.loads(b.split("data: ", 1)[1])["type"] for b in resp.text.strip("\n").split("\n\n") if b.startswith("event: result")]
+    assert types == ["USE_CASE_DISABLED"]

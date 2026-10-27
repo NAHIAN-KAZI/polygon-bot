@@ -228,3 +228,57 @@ def test_embedded_debit_cards_and_loan_types_count(bank):
                       "cards": [{"cardType": "DEBIT"}, {"cardCategory": "CREDIT"}, "junk"]}]
     held = snapshot.holdings(snap)
     assert held["cards"] == {"debit": 1, "credit": 1} and held["loans"] == ["PERSONAL"]
+
+
+def _fake_summaries(monkeypatch, active_months, failing=()):
+    asked = []
+
+    async def one(jwt, month):
+        asked.append(month)
+        if month in failing:
+            raise AdapterUnavailableError("down")
+        busy = month in active_months
+        return {"month": month, "totalIncome": 100 if busy else 0, "totalExpense": 50 if busy else 0}
+
+    monkeypatch.setattr(sources, "monthly_summary", one)
+    return asked
+
+
+def test_history_stops_after_an_empty_batch_once_the_customers_activity_has_been_seen(monkeypatch):
+    months = sources.month_keys(date(2026, 10, 27), 36)               # 2026-10 back to 2023-11
+    asked = _fake_summaries(monkeypatch, active_months={"2026-10", "2026-09", "2026-08"})
+    kept, failed = asyncio.run(sources.monthly_summaries("jwt", months, batch=6))
+    assert [m["month"] for m in kept][-3:] == ["2026-08", "2026-09", "2026-10"] and failed == 0   # oldest first
+    assert len(asked) == 12 and "2023-11" not in asked                 # two batches of six, not all 36
+
+
+def test_a_whole_quiet_batch_after_activity_ends_the_search_even_if_older_activity_exists(monkeypatch):
+    months = sources.month_keys(date(2026, 10, 27), 18)
+    active = set(months[0:6]) | set(months[12:18])          # busy, then six quiet months in a row, then older activity
+    asked = _fake_summaries(monkeypatch, active_months=active)
+    asyncio.run(sources.monthly_summaries("jwt", months, batch=6))
+    assert len(asked) == 12                                  # stopped after the quiet batch, as designed
+
+
+def test_a_quiet_stretch_shorter_than_a_batch_does_not_stop_the_search(monkeypatch):
+    months = sources.month_keys(date(2026, 10, 27), 18)
+    active = set(months[0:6]) | {months[8]} | set(months[12:18])    # a gap of five quiet months inside one batch
+    asked = _fake_summaries(monkeypatch, active_months=active)
+    kept, _ = asyncio.run(sources.monthly_summaries("jwt", months, batch=6))
+    assert len(asked) == 18 and months[17] in {m["month"] for m in kept}
+
+
+def test_a_failing_month_never_ends_the_search_early_and_is_counted(monkeypatch):
+    months = sources.month_keys(date(2026, 10, 27), 18)
+    asked = _fake_summaries(monkeypatch, active_months={months[0]}, failing={months[7]})
+    kept, failed = asyncio.run(sources.monthly_summaries("jwt", months, batch=6))
+    assert failed == 1 and len(asked) == 18                              # the failed batch could not prove emptiness
+
+
+def test_a_lost_login_in_the_history_is_raised(monkeypatch):
+    async def expired(jwt, month):
+        raise AdapterAuthError("expired")
+
+    monkeypatch.setattr(sources, "monthly_summary", expired)
+    with pytest.raises(AdapterAuthError):
+        asyncio.run(sources.monthly_summaries("jwt", ["2026-10"]))
