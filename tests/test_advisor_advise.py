@@ -263,3 +263,30 @@ def test_the_apply_text_reaches_the_model_calls(monkeypatch):
     need = advise.Need(False, True, kinds=("savings account",))
     run(advise.advise("dps", [], snap(), need, CARDS, applying=True, applying_to="Open a DPS: monthly savings"))
     assert any("Open a DPS: monthly savings" in p for p in model.prompts)
+
+
+def test_the_screens_own_description_decides_which_candidates_may_be_offered(monkeypatch):
+    model = Model(monkeypatch, picks={"picks": [{"number": 1, "relation": "new"}, {"number": 2, "relation": "new"}]})
+    seen = {}
+    real = advise._json
+
+    async def scripted(prompt, timeout=40.0):
+        if "could really apply for or open on that screen" in prompt:
+            seen["openable_prompt"] = prompt
+            return {"openable": [2, 9, True, 2]}        # one real number, junk and a repeat ignored
+        return await real(prompt, timeout)
+
+    monkeypatch.setattr(advise, "_json", scripted)
+    need = advise.Need(False, True, kinds=("credit card", "debit card"))
+    picks = run(advise.pick_products(need, "card", {}, CARDS, "Apply for a card: debit, prepaid or virtual"))
+    assert "Apply for a card: debit, prepaid or virtual" in seen["openable_prompt"]
+    # only the second candidate (the debit card) was left to choose from; the pick prompt listed just that one
+    assert [p.card.name for p in picks] == ["Everyday Debit"]
+    pick_prompt = [p for p in model.prompts if "which product suits them" in p][-1]
+    assert "Everyday Debit" in pick_prompt and "Gold Credit" not in pick_prompt
+
+
+def test_when_the_model_cannot_say_what_the_screen_opens_nothing_is_offered(monkeypatch):
+    Model(monkeypatch, fail=True)
+    need = advise.Need(False, True, kinds=("credit card",))
+    assert run(advise.pick_products(need, "card", {}, CARDS, "Apply for a card")) == []

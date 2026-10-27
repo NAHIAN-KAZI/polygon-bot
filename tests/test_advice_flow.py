@@ -172,7 +172,7 @@ def apply_flow(advice, monkeypatch):
         products=[{"name": "Platinum Debit", "group": "Cards", "strength": "info"},
                   {"name": "Gold Debit", "group": "Cards", "strength": "info"}],
         choices=["Platinum Debit", "Gold Debit"], used="recommend")
-    advice["need"] = advise_module.Need(False, True, "a debit card", "", ("debit card",), named=False)
+    advice["need"] = advise_module.Need(False, True, "a debit card", "", ("debit card",))
 
     async def classify(message, recent_turns=None, app_notes=None):
         state["classify_calls"] += 1
@@ -203,11 +203,14 @@ def test_wanting_to_apply_without_naming_a_product_suggests_first_and_does_not_o
     assert advice["calls"][-1] == "advise"
 
 
-def test_naming_a_product_in_the_first_message_opens_the_form_at_once(client, apply_flow, advice):
-    advice["need"] = advise_module.Need(False, True, "Platinum Debit", "", ("debit card",), named=True)
-    _, result = say(client, "I want to apply for the Platinum Debit card")
+def test_a_first_message_that_picks_a_product_opens_the_form_with_it_chosen_and_suggests_nothing(client, apply_flow, advice, monkeypatch):
+    monkeypatch.setattr(chat_module.product_cards, "all_cards",
+                        lambda: [ProductCard("Platinum Debit", "Cards", "debit card"), ProductCard("Gold Debit", "Cards", "debit card")])
+    apply_flow["picked"] = 0
+    reply, result = say(client, "I want to apply for the Platinum Debit card")
     assert result["type"] == "APP_ACTION" and result["payload"]["ui"]["route"] == "/card_product_catalog"
-    assert "snapshot" not in advice["calls"]
+    assert result["payload"]["products"] == [{"name": "Platinum Debit", "group": "Cards", "strength": "apply"}]
+    assert "snapshot" not in advice["calls"] and "Platinum Debit" in reply
 
 
 def test_with_the_product_suggestions_switched_off_the_form_opens_at_once(client, apply_flow, advice):

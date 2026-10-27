@@ -33,7 +33,6 @@ class Need:
     focus: str = ""                     # what they want advice on, in English
     goal: str = ""                      # their goal when they state one
     kinds: tuple[str, ...] = ()         # product kinds that could answer (from the cards' own kinds)
-    named: bool = False                 # the customer already names one specific product (a brand or product name)
 
 
 @dataclass
@@ -115,10 +114,7 @@ def read_need_prompt(message: str, recent: list[str], kinds: list[str], applying
         '- "goal": the goal they state (saving for something, paying off a loan...), or "".\n'
         '- "kinds": when "product" is true, the numbers of every kind above that could answer them (a question '
         "about a deposit lists every kind that is a deposit); otherwise [].\n"
-        '- "named": true when they already name one specific product (a product or brand name), not just a kind '
-        "of product.\n"
-        'Respond only with JSON: {"spending": false, "product": false, "focus": "", "goal": "", "kinds": [], '
-        '"named": false}'
+        'Respond only with JSON: {"spending": false, "product": false, "focus": "", "goal": "", "kinds": []}'
     )
 
 
@@ -129,8 +125,7 @@ def parse_need(raw: dict | None, kinds: list[str]) -> Need:
     chosen = tuple(kinds[n - 1] for n in _numbers(raw.get("kinds"), len(kinds)))
     product = raw.get("product") is True and bool(chosen)
     return Need(spending=raw.get("spending") is True or not product, product=product,
-                focus=_clean(raw.get("focus"), 120), goal=_clean(raw.get("goal"), 160), kinds=chosen,
-                named=raw.get("named") is True)
+                focus=_clean(raw.get("focus"), 120), goal=_clean(raw.get("goal"), 160), kinds=chosen)
 
 
 async def read_need(message: str, recent: list[str], cards: list[ProductCard], applying_to: str | None = None) -> Need:
@@ -224,9 +219,29 @@ def requirement_checks(card: ProductCard, income_per_month: int | None, balance:
     return notes
 
 
+def openable_prompt(applying_to: str, cards: list[ProductCard]) -> str:
+    listing = "\n".join(f"{i}. {_clean(c.name, 80)} | {c.kind} | {_clean(c.summary, 90)}" for i, c in enumerate(cards, start=1))
+    return (
+        "A bank app has a screen for this: " + json.dumps(_clean(applying_to, 220), ensure_ascii=False) + "\n\n"
+        f"Products of the bank:\n{listing}\n\n"
+        "List the numbers of the products a customer could really apply for or open on that screen. A product of a "
+        "different kind from what the screen is for, or one that is not opened through that kind of screen, is not "
+        'included. Respond only with JSON: {"openable": [<n>, ...]}'
+    )
+
+
+async def only_openable(applying_to: str, cards: list[ProductCard]) -> list[ProductCard]:
+    """The cards the application screen can open, by the model's reading of the screen's description. When the model
+    cannot be asked nothing is offered (the caller opens the screen itself), never a guess."""
+    raw = await _json(openable_prompt(applying_to, cards), 25.0)
+    return [cards[n - 1] for n in _numbers((raw or {}).get("openable"), len(cards))]
+
+
 async def pick_products(need: Need, message: str, profile: dict, cards: list[ProductCard],
                         applying_to: str | None = None) -> list[Pick]:
     cands = candidates(cards, need)
+    if cands and applying_to:
+        cands = await only_openable(applying_to, cands)
     return parse_picks(await _json(pick_prompt(need, message, profile, cands, applying_to)), cands) if cands else []
 
 

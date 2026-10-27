@@ -2835,9 +2835,10 @@ async def _advice_stream(req: ChatRequest, request_id: str, customer_identity, t
 
 
 async def _suggest_before_applying(action, req: ChatRequest, recent_turns: list[ChatTurn]):
-    """The customer's need when this is an apply-for request that names no product and the bank wants suggestions
-    first (so the application opens only after they choose); None when the form should open at once: another
-    action, a product already named, the suggestions switched off, no product cards, or nothing to suggest."""
+    """What to do with an apply-for request when the bank wants suggestions first: ("suggest", need) to suggest the
+    best fits, ("open", product) when the customer's message already picks one product (the application opens with
+    it chosen), or None to open the screen as usual: another action, the suggestions switched off, no product
+    cards, or no kinds of product to suggest from."""
     if action.id not in _SUGGEST_BEFORE_APPLYING or use_cases.ADVISOR_RECOMMEND in (req.disabled_use_cases or []):
         return None
     cards = product_cards.all_cards()
@@ -2845,9 +2846,14 @@ async def _suggest_before_applying(action, req: ChatRequest, recent_turns: list[
         return None
     need = await advisor_advise.read_need(req.message, _recent_customer_messages(recent_turns), cards,
                                           _applying_to(action))
-    if need.named or not need.kinds:
+    if not need.kinds:
         return None
-    return dataclasses.replace(need, spending=False, product=True)
+    candidates = advisor_advise.candidates(cards, need)
+    if candidates:   # a message that already picks one product needs no suggestion
+        index = await _llm_pick_name(req.message, [c.name for c in candidates])
+        if index is not None:
+            return "open", {"name": candidates[index].name, "group": candidates[index].group}
+    return "suggest", dataclasses.replace(need, spending=False, product=True)
 
 
 def _applying_to(action) -> str:
@@ -3802,14 +3808,15 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                     )
                 elif category == ui_actions.CATEGORY and ui_actions.get(service) is not None:
                     suggestion = await _suggest_before_applying(ui_actions.get(service), req, recent_turns)
-                    if suggestion is not None:
+                    if suggestion is not None and suggestion[0] == "suggest":
                         async for chunk in _advice_stream(req, request_id, customer_identity, token, recent_turns,
                                                           composer_message, history, turn_started_at, stored_message,
-                                                          need=suggestion, applying_for=ui_actions.get(service)):
+                                                          need=suggestion[1], applying_for=ui_actions.get(service)):
                             yield chunk
                         return
                     app_outcome = _ui_action_outcome(ui_actions.get(service), payload, req.message,
-                                                     customer_identity.customer_id if customer_identity else None)
+                                                     customer_identity.customer_id if customer_identity else None,
+                                                     suggestion[1] if suggestion is not None else None)
                     async for chunk in _emit_outcome(app_outcome, request_id, customer_identity, turn_started_at, message=composer_message, history=history):
                         yield chunk
                     turn_classification = app_outcome.classification()
