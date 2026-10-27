@@ -14,3 +14,6 @@ experiments/_prompt.py
 
 # retrieval-eval embedding cache
 experiments/kb_eval/.cache/
+
+# built APKs copied here by hand
+app_apk/

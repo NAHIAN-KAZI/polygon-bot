@@ -2650,6 +2650,11 @@ def _trim_beneficiary(beneficiary: dict) -> dict:
     }
 
 
+# Services that list what the bank sells, not anything about the customer: no login is needed to learn the answer.
+# Signed in, the live catalogue is read from the bank; signed out, the knowledge base answers instead.
+_PUBLIC_CATALOGUE_SERVICES = frozenset({("card_info", "card_products")})
+
+
 async def _find_knowledge(message: str, recent: list[str], top_k: int | None) -> knowledge_retrieve.Retrieval:
     """The passages that answer the message: plan, search and rerank (app/knowledge/retrieve.py), or, with
     KB_QUERY_PLANNING=false, the plain search of the message as typed (the behaviour before T-124)."""
@@ -3282,6 +3287,12 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
             result.subservice,
             result.payload,
         )
+
+        if customer_identity is None and (category, service) in _PUBLIC_CATALOGUE_SERVICES:
+            # What the bank offers is not the customer's own data: signed out, the knowledge base answers it.
+            async for chunk in _kb_stream(req, request_id):
+                yield chunk
+            return
 
         if customer_identity is None:
             auth_required_token = ""

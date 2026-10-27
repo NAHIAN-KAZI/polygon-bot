@@ -102,3 +102,33 @@ def test_the_log_line_carries_counts_not_the_planned_query_text(client, monkeypa
     line = next(r.getMessage() for r in caplog.records if '"planned_queries"' in r.getMessage())
     assert '"planned_queries": 2' in line and '"planned_products": 1' in line
     assert "1234567890123" not in line
+
+
+def _chat_as(client, monkeypatch, classified, headers=None):
+    async def classify(*a, **k):
+        return classified
+
+    async def find(message, recent, top_k):
+        return retrieve.Retrieval([{"score": 0.8, "filename": "kb.md", "text": "we offer cards", "product": "Visa",
+                                    "group": "Cards"}], True, query_plan.QueryPlan([message]), True)
+
+    async def stream(prompt):
+        yield "answer"
+
+    monkeypatch.setattr(chat_module, "classify", classify)
+    monkeypatch.setattr(chat_module, "_find_knowledge", find)
+    monkeypatch.setattr(chat_module, "stream_generate", stream)
+    resp = client.post("/chat", json={"message": "which credit cards do you offer?"}, headers=headers or AUTH_HEADERS)
+    return [json.loads(b.split("data: ", 1)[1]) for b in resp.text.strip("\n").split("\n\n") if b.startswith("event: result")]
+
+
+def test_signed_out_a_question_about_what_the_bank_offers_is_answered_from_the_knowledge_base(client, monkeypatch):
+    from app.banking.routing import BankingService
+    results = _chat_as(client, monkeypatch, BankingService("card_info", "card_products", None, {}))
+    assert [r["type"] for r in results] == ["KB_ANSWER"] and results[0]["payload"]["grounded"] is True
+
+
+def test_signed_out_a_service_with_personal_data_still_asks_for_login(client, monkeypatch):
+    from app.banking.routing import BankingService
+    results = _chat_as(client, monkeypatch, BankingService("account_info", "balance", None, {}))
+    assert [r["type"] for r in results] == ["AUTH_REQUIRED"]
