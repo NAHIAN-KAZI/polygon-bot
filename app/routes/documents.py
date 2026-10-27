@@ -36,6 +36,14 @@ def _schedule_product_cards(doc_id: str, filename: str, chunks: list[dict]) -> N
 MAX_UPLOAD_BYTES = settings.MAX_UPLOAD_MB * 1024 * 1024
 
 
+class _Cancelled(Exception):
+    """The document was deleted while it was being indexed: stop, and leave nothing behind."""
+
+
+def _listed(doc_id: str) -> bool:
+    return any(d["doc_id"] == doc_id for d in list_documents())
+
+
 def _embedding_error(e: Exception) -> HTTPException:
     """What went wrong while indexing, as the HTTP error the caller sees (or the reason a background job failed)."""
     if isinstance(e, httpx.HTTPStatusError):
@@ -45,12 +53,15 @@ def _embedding_error(e: Exception) -> HTTPException:
     return HTTPException(status_code=502, detail="Vector store (Qdrant) is unreachable")
 
 
-async def _index(doc_id: str, filename: str, chunks: list, progress=None) -> list[dict]:
-    """Embed the chunks (in batches, reporting progress) and store them. Raises HTTPException."""
+async def _index(doc_id: str, filename: str, chunks: list, progress=None, wanted=None) -> list[dict]:
+    """Embed the chunks (in batches, reporting progress) and store them. `wanted()` is asked before every batch
+    and before storing: when it says no, `_Cancelled` is raised and nothing is stored. Raises HTTPException."""
     texts = [c.text for c in chunks]
     try:
         vectors: list = []
         for start in range(0, len(texts), settings.EMBED_BATCH):
+            if wanted and not wanted():
+                raise _Cancelled()
             vectors.extend(await embed_texts(texts[start:start + settings.EMBED_BATCH]))
             if progress:
                 progress(len(vectors), len(texts))
@@ -60,7 +71,11 @@ async def _index(doc_id: str, filename: str, chunks: list, progress=None) -> lis
              "product": c.product, "group": c.group}
             for c, v in zip(chunks, vectors)
         ]
+        if wanted and not wanted():
+            raise _Cancelled()
         upsert_chunks(doc_id, filename, embedded_chunks)
+    except _Cancelled:
+        raise
     except Exception as e:  # noqa: BLE001
         raise _embedding_error(e) from e
     return embedded_chunks
@@ -69,7 +84,14 @@ async def _index(doc_id: str, filename: str, chunks: list, progress=None) -> lis
 def _publish(doc_id: str, filename: str, embedded_chunks: list[dict], already_listed: bool = False) -> None:
     """Make a stored document the current one. A re-upload of the same file replaces the old copy (only now that
     the new one is stored, so a failed upload never leaves the knowledge base without it); otherwise every chunk
-    would be answered twice. A copy still being indexed is never replaced."""
+    would be answered twice. A copy still being indexed is never replaced. A document deleted while it was
+    being indexed is not published: what was stored for it is removed and nothing is replaced."""
+    if already_listed and not _listed(doc_id):
+        try:
+            delete_by_doc_id(doc_id)
+        except Exception:
+            logger.warning("deleted document %s: its chunks could not be removed from the vector store", doc_id)
+        return
     replaced = [d["doc_id"] for d in list_documents()
                 if d.get("filename") == filename and d["doc_id"] != doc_id and d.get("status") != "indexing"]
     if already_listed:
@@ -94,7 +116,10 @@ def _index_in_background(doc_id: str, filename: str, chunks: list) -> None:
             def progress(done: int, total: int) -> None:
                 update_document(doc_id, progress={"done": done, "total": total})
 
-            _publish(doc_id, filename, await _index(doc_id, filename, chunks, progress), already_listed=True)
+            embedded = await _index(doc_id, filename, chunks, progress, wanted=lambda: _listed(doc_id))
+            _publish(doc_id, filename, embedded, already_listed=True)
+        except _Cancelled:
+            logger.info("indexing %s stopped: the document was deleted", filename)
         except HTTPException as e:
             logger.warning("indexing %s failed: %s", filename, e.detail)
             update_document(doc_id, status="failed", error=str(e.detail))

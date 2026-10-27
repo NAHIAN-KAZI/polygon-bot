@@ -111,3 +111,49 @@ def test_entries_stored_before_statuses_existed_are_listed_as_ready(isolated_cat
     with open(documents_module.settings.DOCS_METADATA_PATH, "w") as f:
         json.dump({"x": {"doc_id": "x", "filename": "old.md", "chunk_count": 2, "uploaded_at": "2026-01-01"}}, f)
     assert catalog.list_documents()[0]["status"] == "ready"
+
+
+def test_a_document_deleted_while_it_is_being_indexed_stores_nothing_and_replaces_nothing(stored, monkeypatch):
+    catalog.add_document("old", "kb.md", 3)
+    monkeypatch.setattr(documents_module.settings, "EMBED_BATCH", 1)
+    data = b"# A\n\n## B\n\n### One\n\n" + b"x " * 200 + b"\n\n### Two\n\n" + b"y " * 200 + b"\n"
+    batches = []
+
+    async def embed_then_delete(texts):
+        batches.append(len(texts))
+        catalog.remove_document("new")           # the admin deletes it while the first batch is being embedded
+        return [[0.1] * 384 for _ in texts]
+
+    monkeypatch.setattr(documents_module, "embed_texts", embed_then_delete)
+    chunks = chunk_document("kb.md", data)
+    assert len(chunks) > 1
+    catalog.add_document("new", "kb.md", len(chunks), status="indexing")
+
+    async def go():
+        documents_module._index_in_background("new", "kb.md", chunks)
+        await asyncio.gather(*documents_module._background)
+
+    asyncio.run(go())
+    assert batches == [1]                          # stopped before the second batch
+    assert stored["upserts"] == [] and stored["deleted"] == []
+    assert {d["doc_id"] for d in catalog.list_documents()} == {"old"}   # the old copy was not replaced
+
+
+def test_a_document_deleted_after_its_chunks_were_stored_has_them_removed_and_replaces_nothing(stored, monkeypatch):
+    catalog.add_document("old", "kb.md", 3)
+    chunks = chunk_document("kb.md", MD)
+    catalog.add_document("new", "kb.md", len(chunks), status="indexing")
+
+    def upsert_then_delete(doc_id, filename, chunk_list):
+        stored["upserts"].append(doc_id)
+        catalog.remove_document("new")             # deleted between the store and the publish
+
+    monkeypatch.setattr(documents_module, "upsert_chunks", upsert_then_delete)
+
+    async def go():
+        documents_module._index_in_background("new", "kb.md", chunks)
+        await asyncio.gather(*documents_module._background)
+
+    asyncio.run(go())
+    assert stored["upserts"] == ["new"] and stored["deleted"] == ["new"]   # its chunks were taken out again
+    assert {d["doc_id"] for d in catalog.list_documents()} == {"old"}
