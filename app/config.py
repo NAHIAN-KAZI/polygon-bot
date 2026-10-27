@@ -37,6 +37,11 @@ class Settings:
     # titu_stt_bn_fastconformer on NeMo), e.g. http://spark:8791. Empty = mode not offered.
     STT_URL: str = os.environ.get("STT_URL", "").rstrip("/")
     STT_API_KEY: str = os.environ.get("STT_API_KEY", "")
+    # One model pass over the STT transcript before anything acts on it (conversation/
+    # transcript_fix.py): fixes misheard words, writes amounts said in words as digits, and asks
+    # which was meant when two readings would do different things. Off = the transcript as heard.
+    STT_CORRECTION: bool = os.environ.get("STT_CORRECTION", "true").lower() not in ("0", "false", "no")
+    STT_CORRECTION_TIMEOUT: float = float(os.environ.get("STT_CORRECTION_TIMEOUT", "15"))
     # "Read aloud" button on replies (POST /tts, Microsoft's Edge neural voices via edge-tts).
     # The reply text is sent to Microsoft and replies can hold account details, so it's off
     # unless switched on. The Bangla voice is used whenever the reply has Bangla script.

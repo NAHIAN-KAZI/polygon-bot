@@ -65,6 +65,18 @@ Through the gateway they are `message`, `sessionKey`, `topK`, `category`, `servi
   text sent with the recording is kept in front of the transcript.
 - Titu is trained on Bangla. English words come out transliterated into Bangla script, so mixed English–Bangla speech is
   read less well than by the language-model modes.
+- **Correction pass (T-136).** In `nemo` mode Titu's text gets one language-model pass before anything acts on it
+  (`app/conversation/transcript_fix.py`). It fixes misheard words (banking terms such as NPSB, bKash, DPS; names; spelling)
+  and writes amounts said in words as digits with Bangladeshi grouping (`দেড় হাজার` → `1,500`, `আড়াই লাখ` → `2,50,000`).
+  Every step after it runs on the corrected text. Guards: every number Titu already wrote as digits must come through
+  unchanged, and a model error, timeout, blank or over-long answer falls back to Titu's own text. A transcript with no
+  letters (a spoken code, a bare number) is never sent to the model. Settings: `STT_CORRECTION` (default on),
+  `STT_CORRECTION_TIMEOUT` (seconds, default 15).
+- **Unclear words are asked about, not guessed.** When a word could be two things and the choice changes what the bank
+  would do (500 or 5,000; Rahim or Rahima), the chatbot does not act. It asks which was meant (composer kind `clarify`)
+  and ends the turn with `result` `CLARIFICATION_REQUIRED`, `payload: {"heard_options": ["<reading>", …]}` (two or three
+  full readings). Nothing is written to the session, so a step already under way (a yes/no, a missing field) is still
+  waiting when the customer's pick arrives as ordinary typed text. Never offered during a code (OTP/PIN) step.
 - The mode exists only where the STT server is set up. Without it the chatbot does not list `nemo` in `voice_modes`
   (section 4) and the app must not show the mic; sending `nemo` anyway answers an error.
 
@@ -84,12 +96,16 @@ and one optional event before `done`.
 
 | Event | `data` | When | What the app does |
 |---|---|---|---|
-| `transcript` | `{"text": "<what was said>"}` | Every voice turn except `audio_mode` `audio` | Show it in the customer's own voice bubble, replacing the `🎤 Voice message` placeholder, so they can see whether they were understood. |
+| `transcript` | `{"text": "<what was said>", "heard": "<Titu's own text>"}` | Every voice turn except `audio_mode` `audio` | Show `text` in the customer's own voice bubble, replacing the `🎤 Voice message` placeholder, so they can see whether they were understood. `heard` is present only in `nemo` mode when the correction pass changed something: mark the bubble as corrected and show `heard` when the customer taps it. |
 | `image` | `{"text": "<what the image shows>"}` | Image read | Show it as a small caption under the customer's bubble, so they can check it. |
 | `stats` | `{"server_ms", "llm_ms", "llm_calls", "prompt_tokens", "completion_tokens", "context_tokens", "context_window", "model"}` | Only with `include_stats` | Ignore. |
 
 Sequence for a voice turn in the app's `nemo` mode: `transcript` → `token`… → `result` → `done`. A parser that ignores unknown event names (the
 Polygon AI parser does) stays safe if it does not handle them yet.
+
+When the voice message was unclear the `token`s are the "which did you mean?" question and the `result` is
+`CLARIFICATION_REQUIRED` with `payload.heard_options`. Show each option as a tappable chip under the question; a tap
+sends that option as an ordinary typed message.
 
 ### Errors
 

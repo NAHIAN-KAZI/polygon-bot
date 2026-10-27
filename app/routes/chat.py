@@ -48,6 +48,7 @@ from app import llm_backend
 from app.config import settings
 import app.banking.routing as routing_module
 from app.conversation.speech import AudioInputError, decode_audio, transcribe, transcribe_nemo
+from app.conversation.transcript_fix import correct_transcript
 from app.conversation.vision import ImageInputError, read_image, with_image_text
 from app.conversation.composer import (
     _FOREIGN_CURRENCY, ascii_digits, build_messages, check_reply, compose, compose_stream, facts_listing, generate_chat,
@@ -2819,7 +2820,9 @@ def _session_safe_classification(classification: dict | None) -> dict | None:
     return _strip_secrets(classification)
 
 
-async def _chat_stream(req: ChatRequest, authorization: str | None):
+async def _chat_stream(req: ChatRequest, authorization: str | None, heard_readings: tuple[str, ...] = ()):
+    """`heard_readings`: a voice message that reads two or three ways asking for different
+    things (transcript_fix) -- the customer is asked which was meant before anything acts."""
     request_id = uuid.uuid4().hex
     token = extract_jwt(authorization)
     turn_started_at = time.monotonic()
@@ -2872,6 +2875,21 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                 pending_otp.get("question"), req.message, req.payload)
             if pending_reading == "other":
                 pending_otp = None
+
+    if heard_readings and pending_otp is None:
+        # Ask which reading was meant instead of acting on a guess. Nothing is recorded in the
+        # session, so a step already under way (a yes/no, a missing field) is still waiting when
+        # the pick arrives as typed text. Never during a code step: a code is not offered back.
+        async for _piece in say_stream(_say(
+                "clarify", what_is_unclear="which of these the customer's voice message said",
+                could_mean=list(heard_readings))):
+            yield _sse("token", {"token": _piece})
+        yield _result_event("CLARIFICATION_REQUIRED", None, None, None,
+                            payload={"heard_options": list(heard_readings)})
+        logger.info(json.dumps({"request_id": request_id, "type": "CLARIFICATION_REQUIRED",
+                                "heard_options": len(heard_readings)}))
+        yield _sse("done", {})
+        return
 
     logger.info(json.dumps({
         "request_id": request_id,
@@ -3946,6 +3964,7 @@ async def chat_use_cases():
 async def _chat_with_media(req: ChatRequest, authorization: str | None):
     """Turn a voice message into text first, then handle any image, then answer as text."""
     heard_token = None
+    heard_readings: tuple[str, ...] = ()
     if req.audio:
         try:
             if req.audio_mode == "nemo":
@@ -3968,8 +3987,14 @@ async def _chat_with_media(req: ChatRequest, authorization: str | None):
             yield _sse("error", {"detail": "The voice message couldn't be heard right now.",
                                  "customer_safe": True, "retryable": True})
             return
+        heard = spoken
+        if req.audio_mode == "nemo":
+            # Titu mishears: corrected before anything acts on it (numbers said in words become
+            # digits), and the customer can still see what it heard.
+            fix = await correct_transcript(spoken)
+            spoken, heard_readings = fix.text, fix.readings
         if req.audio_mode != "audio":  # the mobile app never shows the customer a transcript
-            yield _sse("transcript", {"text": spoken})
+            yield _sse("transcript", {"text": spoken, **({"heard": heard} if heard != spoken else {})})
         message = f"{req.message}\n\n{spoken}" if req.message else spoken
         if heard_audio:
             heard_token = routing_module.heard_audio.set(heard_audio)
@@ -3979,7 +4004,7 @@ async def _chat_with_media(req: ChatRequest, authorization: str | None):
             async for event in _chat_with_image(req, authorization):
                 yield event
             return
-        async for event in _chat_stream(req, authorization):
+        async for event in _chat_stream(req, authorization, heard_readings=heard_readings):
             yield event
     finally:
         if heard_token is not None:
