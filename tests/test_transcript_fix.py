@@ -67,6 +67,18 @@ def test_a_changed_heard_number_keeps_titus_text(model_says, corrected):
     assert _fix("রহিমকে ৫০০ টাকা পাঠাও") == TranscriptFix("রহিমকে ৫০০ টাকা পাঠাও")
 
 
+@pytest.mark.parametrize("botched", ["রহিমকে 50, 50 টাকা পাঠাও", "রহিমকে 50 50 টাকা পাঠাও"])
+def test_numbers_side_by_side_keep_titus_text(model_says, botched):
+    # Live, gemma4 turned "পাঁচ পঞ্চাশ" into "50, 50": a botched conversion, not a correction.
+    model_says({"text": botched, "readings": []})
+    assert _fix("রহিমকে পাঁচ পঞ্চাশ টাকা পাঠাও") == TranscriptFix("রহিমকে পাঁচ পঞ্চাশ টাকা পাঠাও")
+
+
+def test_numbers_titu_heard_side_by_side_may_stay(model_says):
+    model_says({"text": "01711 234567 নাম্বারে 100 টাকা রিচার্জ করো", "readings": []})
+    assert _fix("০১৭১১ ২৩৪৫৬৭ নাম্বারে একশো টাকা রিচার্জ করো").text == "01711 234567 নাম্বারে 100 টাকা রিচার্জ করো"
+
+
 def test_heard_digits_may_be_regrouped(model_says):
     model_says({"text": "send 2,50,000 to rahim", "readings": []})
     assert _fix("send ২৫০০০০ to rahim").text == "send 2,50,000 to rahim"
