@@ -59,7 +59,7 @@ def advice(monkeypatch):
             raise state["snapshot_error"]
         return snapshot_module.Snapshot(as_of=date(2026, 10, 27))
 
-    async def advise(message, recent, snap, need, cards):
+    async def advise(message, recent, snap, need, cards, applying=False):
         state["calls"].append("advise")
         state["need_used"] = need
         return state["advice"]
@@ -149,3 +149,126 @@ def test_a_spending_only_answer_has_no_lead_tags(client, advice):
 def test_the_result_is_not_a_knowledge_answer_so_the_back_office_stores_a_placeholder(client, advice):
     _, result, _ = ask(client)
     assert result["type"] != "KB_ANSWER"   # ChatTurnPolicy keeps full text only for KB_ANSWER
+
+
+# ---- apply: suggest first, then open the application (T-140) --------------------------------------------------------
+
+from datetime import datetime, timezone
+
+from app.banking import ui_actions
+from app.banking.routing import BankingService
+from app.banking.session import ChatTurn, record_turn
+from app.banking import session as session_module
+
+
+@pytest.fixture
+def apply_flow(advice, monkeypatch):
+    """A signed-in customer who says they want to apply for a card; the model's need and the picker are scripted."""
+    state = {"picked": None, "classify_calls": 0}
+    advice["advice"] = advise_module.Advice(
+        {"suggested products": [{"name": "Platinum Debit"}, {"name": "Gold Debit"}]},
+        must={"suggested product 1": "Platinum Debit", "suggested product 2": "Gold Debit"},
+        products=[{"name": "Platinum Debit", "group": "Cards", "strength": "info"},
+                  {"name": "Gold Debit", "group": "Cards", "strength": "info"}],
+        choices=["Platinum Debit", "Gold Debit"], used="recommend")
+    advice["need"] = advise_module.Need(False, True, "a debit card", "", ("debit card",), named=False)
+
+    async def classify(message, recent_turns=None, app_notes=None):
+        state["classify_calls"] += 1
+        return BankingService("app_actions", "card_apply", None, {})
+
+    async def pick(message, names):
+        state["names"] = names
+        return state["picked"]
+
+    monkeypatch.setattr(chat_module, "classify", classify)
+    monkeypatch.setattr(chat_module, "_llm_pick_name", pick)
+    monkeypatch.setattr(chat_module, "is_valid_path", lambda *a, **k: True)
+    session_module._sessions.clear() if hasattr(session_module, "_sessions") else None
+    return state
+
+
+def say(client, message, **body):
+    resp = client.post("/chat", json={"message": message, **body}, headers=JWT_HEADERS)
+    events = parse(resp.text)
+    return ("".join(d.get("token", "") for n, d in events if n == "token"),
+            next((d for n, d in events if n == "result"), {}))
+
+
+def test_wanting_to_apply_without_naming_a_product_suggests_first_and_does_not_open_the_form(client, apply_flow, advice):
+    reply, result = say(client, "I want to apply for a debit card")
+    assert result["type"] == "ADVICE_ANSWER" and "ui" not in (result.get("payload") or {})
+    assert [p["name"] for p in result["payload"]["products"]] == ["Platinum Debit", "Gold Debit"]
+    assert advice["calls"][-1] == "advise"
+
+
+def test_naming_a_product_in_the_first_message_opens_the_form_at_once(client, apply_flow, advice):
+    advice["need"] = advise_module.Need(False, True, "Platinum Debit", "", ("debit card",), named=True)
+    _, result = say(client, "I want to apply for the Platinum Debit card")
+    assert result["type"] == "APP_ACTION" and result["payload"]["ui"]["route"] == "/card_product_catalog"
+    assert "snapshot" not in advice["calls"]
+
+
+def test_with_the_product_suggestions_switched_off_the_form_opens_at_once(client, apply_flow, advice):
+    _, result = say(client, "I want to apply for a debit card", disabled_use_cases=["advisor.recommend"])
+    assert result["type"] == "APP_ACTION" and "read_need" not in advice["calls"]
+
+
+def test_nothing_to_suggest_still_opens_the_form(client, apply_flow, advice):
+    advice["advice"] = advise_module.Advice({"suggested products": []}, used="insights")
+    _, result = say(client, "I want to apply for a debit card")
+    assert result["type"] == "APP_ACTION" and result["payload"]["ui"]["route"] == "/card_product_catalog"
+
+
+def test_the_bank_being_down_still_opens_the_form(client, apply_flow, advice):
+    advice["snapshot_error"] = RuntimeError("bank down")
+    _, result = say(client, "I want to apply for a debit card")
+    assert result["type"] == "APP_ACTION"
+
+
+def test_no_kinds_found_means_no_suggestion_and_the_form_opens(client, apply_flow, advice):
+    advice["need"] = advise_module.Need(True, False)
+    _, result = say(client, "I want to apply for a debit card")
+    assert result["type"] == "APP_ACTION" and "snapshot" not in advice["calls"]
+
+
+def test_choosing_one_of_the_suggestions_opens_the_form_and_the_chosen_product_is_the_lead(client, apply_flow, advice):
+    say(client, "I want to apply for a debit card")                   # the suggestion turn is remembered
+    apply_flow["picked"] = 1                                           # "the second one"
+    classify_before = apply_flow["classify_calls"]
+    reply, result = say(client, "the second one")
+    assert apply_flow["names"] == ["Platinum Debit", "Gold Debit"]
+    assert result["type"] == "APP_ACTION" and result["payload"]["ui"]["route"] == "/card_product_catalog"
+    assert result["payload"]["products"] == [{"name": "Gold Debit", "group": "Cards", "strength": "apply"}]
+    assert "Gold Debit" in reply and apply_flow["classify_calls"] == classify_before   # no new classification needed
+
+
+def test_a_reply_that_picks_none_of_them_goes_through_normal_routing(client, apply_flow, advice):
+    say(client, "I want to apply for a debit card")
+    apply_flow["picked"] = None
+    before = apply_flow["classify_calls"]
+    say(client, "actually what is the fee for a transfer?")
+    assert apply_flow["classify_calls"] == before + 1
+
+
+def test_the_choice_is_ignored_when_the_apply_use_case_has_been_switched_off_meanwhile(client, apply_flow, advice):
+    say(client, "I want to apply for a debit card")
+    apply_flow["picked"] = 0
+    _, result = say(client, "the first", disabled_use_cases=["app_actions.card_apply"])
+    assert result["type"] in ("USE_CASE_DISABLED", "APP_ACTION") and result["payload"].get("useCaseDisabled") is True
+
+
+def test_the_picker_accepts_only_a_valid_number_and_treats_the_reply_as_data(monkeypatch):
+    import asyncio
+
+    seen = {}
+
+    async def post(path, body, timeout=None):
+        seen["prompt"] = body["prompt"]
+        return {"response": json.dumps({"choice": seen["answer"]})}
+
+    monkeypatch.setattr(chat_module.llm_backend, "post", post)
+    for answer, expected in ((2, 1), (0, None), (3, None), (True, None), ("1", None), (-1, None)):
+        seen["answer"] = answer
+        assert asyncio.run(chat_module._llm_pick_name("the gold one", ["Platinum Debit", "Gold Debit"])) == expected
+    assert "ignore them" in seen["prompt"] and "1. Platinum Debit" in seen["prompt"]

@@ -117,7 +117,7 @@ _APP_ACTION_INTENT = {"replacement_cancel": "CARD_REPLACEMENT", "quick_view_star
 # Platform services the chat hands over to an app action (see chat.py `_PLATFORM_TO_APP_ACTION`): one use case.
 _PLATFORM_ALIAS = {"mobile_recharge": (("payments", "mobile_recharge"),)}
 _DOMAIN_INTENT = {"cards": "CARD_MANAGEMENT", "transfers": "TRANSFER", "profile": "EDIT_PERSONAL_DETAILS",
-                  "accounts": "ACCOUNT_INFO", "fees": "FEES", "other": "TRANSFER"}
+                  "accounts": "ACCOUNT_INFO", "deposits_loans": "ACCOUNT_INFO", "fees": "FEES", "other": "TRANSFER"}
 
 
 def _app_action_use_cases() -> tuple[UseCase, ...]:

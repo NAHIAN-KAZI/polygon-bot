@@ -33,11 +33,13 @@ class Need:
     focus: str = ""                     # what they want advice on, in English
     goal: str = ""                      # their goal when they state one
     kinds: tuple[str, ...] = ()         # product kinds that could answer (from the cards' own kinds)
+    named: bool = False                 # the customer already names one specific product (a brand or product name)
 
 
 @dataclass
 class Advice:
     facts: dict                         # for the composer
+    choices: list[str] = field(default_factory=list)   # names of the products suggested, in order
     must: dict = field(default_factory=dict)
     products: list[dict] = field(default_factory=list)   # lead tags: {name, group, strength}
     insight: dict | None = None         # numbers for the app to draw, never stored by the back office
@@ -111,7 +113,10 @@ def read_need_prompt(message: str, recent: list[str], kinds: list[str]) -> str:
         '- "goal": the goal they state (saving for something, paying off a loan...), or "".\n'
         '- "kinds": when "product" is true, the numbers of every kind above that could answer them (a question '
         "about a deposit lists every kind that is a deposit); otherwise [].\n"
-        'Respond only with JSON: {"spending": false, "product": false, "focus": "", "goal": "", "kinds": []}'
+        '- "named": true when they already name one specific product (a product or brand name), not just a kind '
+        "of product.\n"
+        'Respond only with JSON: {"spending": false, "product": false, "focus": "", "goal": "", "kinds": [], '
+        '"named": false}'
     )
 
 
@@ -122,7 +127,8 @@ def parse_need(raw: dict | None, kinds: list[str]) -> Need:
     chosen = tuple(kinds[n - 1] for n in _numbers(raw.get("kinds"), len(kinds)))
     product = raw.get("product") is True and bool(chosen)
     return Need(spending=raw.get("spending") is True or not product, product=product,
-                focus=_clean(raw.get("focus"), 120), goal=_clean(raw.get("goal"), 160), kinds=chosen)
+                focus=_clean(raw.get("focus"), 120), goal=_clean(raw.get("goal"), 160), kinds=chosen,
+                named=raw.get("named") is True)
 
 
 async def read_need(message: str, recent: list[str], cards: list[ProductCard]) -> Need:
@@ -310,8 +316,10 @@ def coaching_facts(plan: dict, categories: list[dict], facts: dict) -> dict:
 
 
 async def advise(message: str, recent: list[str], snap: snap_mod.Snapshot, need: Need,
-                 cards: list[ProductCard]) -> Advice:
-    """The facts for one advice reply. `snap` is the customer's snapshot; `need` comes from `read_need`."""
+                 cards: list[ProductCard], applying: bool = False) -> Advice:
+    """The facts for one advice reply. `snap` is the customer's snapshot; `need` comes from `read_need`. With
+    `applying` the customer asked to apply for something without naming it: the reply ends by asking which of the
+    suggestions they want, and the application opens once they choose."""
     facts = snap_mod.facts(snap)
     if "monthly" not in facts and "balance" not in facts and not need.product:
         return Advice(plain_keys({"nothing_to_go_on": "there is not enough history in the account yet to base advice on",
@@ -344,11 +352,15 @@ async def advise(message: str, recent: list[str], snap: snap_mod.Snapshot, need:
                                                                "extra": "they already hold one of this kind and this would be another",
                                                                "upgrade": "they hold one of this kind and this would be a better one"}.get(p.relation)})
             advice.must[f"suggested product {i}"] = c.name
+            advice.choices.append(c.name)
             advice.products.append({"name": c.name, "group": c.group, "strength": "info"})
         out["their_situation"] = situation(facts, averages["balance"])
         out["suggested_products"] = suggested
         out["no_product_fits"] = None if suggested else "nothing in the bank's products fits these figures well"
         out["history_covered"] = history_note(facts)
+        if applying and suggested:
+            out["next step"] = ("ask which of these they would like to apply for; the application opens as soon "
+                                "as they choose")
         advice.used = "recommend" if suggested else advice.used
     advice.facts = plain_keys(advice.facts)
     return advice

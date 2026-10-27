@@ -94,6 +94,9 @@ included).
 | 1.6 My loans | ✅ Done (T-58, live `loan_services`/`my_loans`) |
 | 1.7 FD profit history | ✅ Done (T-58) — this test customer's FD record 404s platform-side; surfaces as `SERVICE_UNAVAILABLE` (left as-is per user) |
 | 1.8 DPS profit history | ✅ Done (T-58) |
+| 1.9 Apply for a loan or financing | ✅ App action (T-140): the bot suggests the best fits for the customer first, then returns `APP_ACTION` `loan_apply` (app screen `LoanRequestScreen`, `/loan_request`) |
+| 1.10 Open a fixed deposit | ✅ App action (T-140): suggests first, then `APP_ACTION` `fd_open` (`OpenFixedDepositScreen`, `/products/open_fixed_deposit`) |
+| 1.11 Open a DPS | ✅ App action (T-140): suggests first, then `APP_ACTION` `dps_open` (`OpenDpsScreen`, `/products/open_dps`) |
 | — Cards list | ✅ Done (T-57, `account_info`/`cards`) ➕ |
 | — Account transactions | ✅ Done (T-64, `account_info`/`account_transactions`) ➕ |
 
