@@ -160,10 +160,10 @@ def test_spending_guidance_end_to_end(monkeypatch):
     model = Model(monkeypatch, coaching={"biggest": [1], "grew": [3], "cuts": [{"number": 3, "percent": 20, "how": "fewer outings"}]})
     result = run(advise.advise("where does my money go?", [], snap(), advise.Need(True, False, focus="spending"), CARDS))
     assert result.products == [] and result.used == "insights" and result.must == {}
-    assert result.facts["where_the_money_goes"][0]["name"] == "Food"
-    assert result.facts["ways_to_save"] == [{"category": "Fun", "cut_by_percent": 20, "how": "fewer outings",
-                                             "would_save_per_month": "Tk 1,200"}]     # 20% of Tk 6,000 a month
-    assert result.facts["total_possible_saving_per_month"] == "Tk 1,200"
+    assert result.facts["where the money goes"][0]["name"] == "Food"
+    assert result.facts["ways to save"] == [{"category": "Fun", "cut by percent": 20, "how": "fewer outings",
+                                             "would save per month": "Tk 1,200"}]     # 20% of Tk 6,000 a month
+    assert result.facts["total possible saving per month"] == "Tk 1,200"
     assert [c["name"] for c in result.insight["categories"]] == ["Food", "Rent", "Fun"] and len(model.prompts) == 1
 
 
@@ -171,15 +171,15 @@ def test_a_recommendation_end_to_end_with_lead_tags_must_names_and_code_side_che
     Model(monkeypatch, picks={"picks": [{"number": 1, "reasons": ["saves Tk 18,875 a month"], "keep_in_mind": "annual fee"}]})
     need = advise.Need(False, True, focus="a deposit", goal="save", kinds=("savings account", "fixed deposit"))
     result = run(advise.advise("which deposit?", [], snap(), need, CARDS))
-    product = result.facts["suggested_products"][0]
-    assert product["name"] == "Smart Saver" and product["why_it_fits"] == ["saves Tk 18,875 a month"]
-    assert product["requirements_against_their_figures"] == ["asks for Tk 1,000 to open; their balance is Tk 69,000 (enough today)"]
-    assert product["rates"] == ["Up to 6%"] and product["keep_in_mind"] == "annual fee"
+    product = result.facts["suggested products"][0]
+    assert product["name"] == "Smart Saver" and product["why it fits"] == ["saves Tk 18,875 a month"]
+    assert product["requirements against their figures"] == ["asks for Tk 1,000 to open; their balance is Tk 69,000 (enough today)"]
+    assert product["rates"] == ["Up to 6%"] and product["keep in mind"] == "annual fee"
     assert result.must == {"suggested product 1": "Smart Saver"}
     assert result.products == [{"name": "Smart Saver", "group": "Deposit accounts", "strength": "info"}]
-    assert result.used == "recommend" and result.facts["no_product_fits"] is None
+    assert result.used == "recommend" and result.facts["no product fits"] is None
     # income and spending carry unmistakable labels so a reply cannot swap them
-    assert result.facts["their_situation"] == {"average income per month": "Tk 90,000",
+    assert result.facts["their situation"] == {"average income per month": "Tk 90,000",
                                                "average spending per month": "Tk 68,000",
                                                "share of income left unspent (percent)": 24.4,
                                                "balance now": "Tk 69,000"}
@@ -189,26 +189,26 @@ def test_when_nothing_fits_that_is_said_and_no_lead_is_made(monkeypatch):
     Model(monkeypatch, picks={"picks": []})
     need = advise.Need(False, True, kinds=("credit card",))
     result = run(advise.advise("which card?", [], snap(), need, CARDS))
-    assert result.facts["suggested_products"] == [] and result.facts["no_product_fits"] and result.products == [] and result.must == {}
+    assert result.facts["suggested products"] == [] and result.facts["no product fits"] and result.products == [] and result.must == {}
 
 
 def test_both_wanted_gives_both_parts(monkeypatch):
     Model(monkeypatch, coaching={"cuts": [{"number": 1, "percent": 10, "how": "x"}]}, picks={"picks": [{"number": 1}]})
     need = advise.Need(True, True, kinds=("debit card",))
     facts = run(advise.advise("help me", [], snap(), need, CARDS)).facts
-    assert "ways_to_save" in facts and facts["suggested_products"][0]["name"] == "Everyday Debit"
+    assert "ways to save" in facts and facts["suggested products"][0]["name"] == "Everyday Debit"
 
 
 def test_with_no_money_data_and_no_product_asked_there_is_nothing_to_go_on(monkeypatch):
     Model(monkeypatch)
     result = run(advise.advise("where does my money go?", [], snap(history=False), advise.Need(True, False), CARDS))
-    assert "nothing_to_go_on" in result.facts and result.products == []
+    assert "nothing to go on" in result.facts and result.products == []
 
 
 def test_a_down_model_never_invents_anything(monkeypatch):
     Model(monkeypatch, fail=True)
     result = run(advise.advise("which card?", [], snap(), advise.Need(True, True, kinds=("credit card",)), CARDS))
-    assert result.facts["ways_to_save"] == [] and result.facts["suggested_products"] == [] and result.products == []
+    assert result.facts["ways to save"] == [] and result.facts["suggested products"] == [] and result.products == []
     assert run(advise.read_need("hi", [], CARDS)) == advise.Need(True, False)
 
 
