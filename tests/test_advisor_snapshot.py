@@ -207,3 +207,24 @@ def test_no_trend_is_reported_from_fewer_than_four_complete_months(bank):
     assert f["spending"]["change_against_previous_three_months_percent"] is None
     assert all(c["change_percent"] is None for c in f["spending_by_category"])
     assert f["income"]["trend_percent"] is None and f["coverage"]["complete_months"] == 2
+
+
+def test_what_the_customer_already_has_is_listed_so_advice_does_not_offer_it_again(bank):
+    f = snapshot.facts(build())
+    assert f["already has"] == {"account types": ["SAVINGS"], "cards": {"debit": 0, "credit": 1},
+                                "loans": ["PERSONAL"], "fixed deposits": 1, "DPS accounts": 0}
+
+
+def test_a_credit_card_is_still_held_when_its_summary_cannot_be_read(bank):
+    bank["fail"] = {"credit summary"}
+    snap = build()
+    assert snap.credit == [] and len(snap.credit_cards) == 1
+    assert snapshot.facts(snap)["already has"]["cards"]["credit"] == 1
+
+
+def test_embedded_debit_cards_and_loan_types_count(bank):
+    snap = build()
+    snap.accounts = [{"accountNumber": "1", "accountType": "SAVINGS",
+                      "cards": [{"cardType": "DEBIT"}, {"cardCategory": "CREDIT"}, "junk"]}]
+    held = snapshot.holdings(snap)
+    assert held["cards"] == {"debit": 1, "credit": 1} and held["loans"] == ["PERSONAL"]

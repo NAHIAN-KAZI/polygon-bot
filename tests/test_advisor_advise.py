@@ -217,3 +217,18 @@ def test_read_need_asks_the_model_with_the_card_kinds(monkeypatch):
     need = run(advise.read_need("which deposit?", ["earlier"], CARDS))
     assert need.product and need.kinds == ("fixed deposit", "savings account")   # numbers 3 and 4 of the sorted kinds
     assert "credit card" in model.prompts[0] and "debit card" in model.prompts[0]
+
+
+def test_each_pick_states_how_it_relates_to_what_the_customer_already_holds():
+    raw = {"picks": [{"number": 1, "relation": "upgrade"}, {"number": 2, "relation": "extra"},
+                     {"number": 3, "relation": "sideways"}]}
+    picks = advise.parse_picks(raw, CARDS)
+    assert [p.relation for p in picks] == ["upgrade", "extra", ""]       # an unknown word is no relation at all
+
+
+def test_the_relation_reaches_the_reply_facts_as_a_plain_sentence(monkeypatch):
+    Model(monkeypatch, picks={"picks": [{"number": 1, "reasons": ["x"], "relation": "extra"}]})
+    need = advise.Need(False, True, kinds=("savings account",))
+    facts = run(advise.advise("which?", [], snap(), need, CARDS)).facts
+    assert facts["suggested products"][0]["compared with what they hold"] == \
+        "they already hold one of this kind and this would be another"

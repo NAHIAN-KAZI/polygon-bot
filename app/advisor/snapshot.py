@@ -37,6 +37,7 @@ class Snapshot:
     fixed_deposits: list[dict] = field(default_factory=list)
     dps: list[dict] = field(default_factory=list)
     credit: list[dict] = field(default_factory=list)      # one summary per credit card that could be read
+    credit_cards: list[dict] = field(default_factory=list)  # the customer's credit cards (held, whatever the summaries)
     catalogue: list[dict] = field(default_factory=list)   # the bank's product catalogue (rates, minimums, tenures)
     missing: list[str] = field(default_factory=list)
 
@@ -52,9 +53,11 @@ async def _soft(name: str, awaitable, missing: list[str], default=None):
         return default
 
 
-async def _credit(jwt: str | None, missing: list[str], limit: int = 3) -> list[dict]:
-    """A summary for each credit card (at most `limit`); a card whose summary cannot be read is named as missing."""
-    cards = [c for c in await sources.credit_cards(jwt) if c.get("id")][:limit]
+async def _credit(jwt: str | None, missing: list[str], held: list[dict], limit: int = 3) -> list[dict]:
+    """A summary for each credit card (at most `limit`); a card whose summary cannot be read is named as missing.
+    The cards themselves go into `held`: owning one is known even when its summary is not."""
+    held.extend(await sources.credit_cards(jwt))
+    cards = [c for c in held if c.get("id")][:limit]
     results = await asyncio.gather(*(sources.credit_summary(jwt, str(c["id"])) for c in cards), return_exceptions=True)
     summaries = []
     for result in results:
@@ -90,7 +93,7 @@ async def build(identity: CustomerIdentity, jwt: str | None, today: date | None 
         _soft("loans", sources.loans(jwt), snap.missing, []),
         _soft("fixed deposits", sources.deposits(jwt, "/product/v1/fixed-deposit"), snap.missing, []),
         _soft("DPS accounts", sources.deposits(jwt, "/product/v1/dps"), snap.missing, []),
-        _soft("credit cards", _credit(jwt, snap.missing), snap.missing, []),
+        _soft("credit cards", _credit(jwt, snap.missing, snap.credit_cards), snap.missing, []),
         _soft("product catalogue", sources.products(jwt), snap.missing, []),
     )
     for number, rows, cut in row_sets:
@@ -268,6 +271,9 @@ def facts(snap: Snapshot, limit_months: int = 12, limit_categories: int = 8) -> 
     accounts = _held_accounts(snap)
     if accounts:
         out["accounts"] = accounts
+    held = holdings(snap)
+    if held:
+        out["already has"] = held
     if snap.loans:
         out["loans"] = [{"type": l.get("loanType"), "monthly_instalment": tk(to_poisha(l.get("emiAmountPoisha"))),
                          "still_owed": tk(to_poisha(l.get("outstandingPrincipalPoisha"))),
@@ -282,6 +288,25 @@ def facts(snap: Snapshot, limit_months: int = 12, limit_categories: int = 8) -> 
             cards.append({"limit": tk(limit_), "owed": tk(used), "used_percent": percent(used or 0, limit_ or 0),
                           "overdue": bool(card.get("isOverdue"))})
         out["credit_cards"] = cards
+    return out
+
+
+def holdings(snap: Snapshot) -> dict:
+    """What the customer already has with the bank, so advice does not offer it again: account types, the number
+    of debit and credit cards, loan types, fixed deposits and DPS accounts. Only what is known is listed."""
+    out: dict = {}
+    types = sorted({str(a.get("accountType") or a.get("accountName")) for a in snap.accounts if a.get("accountType") or a.get("accountName")})
+    if types:
+        out["account types"] = types
+    debit = sum(1 for a in snap.accounts for c in (a.get("cards") or []) if isinstance(c, dict)
+                and "CREDIT" not in str(c.get("cardType") or c.get("cardCategory") or "").upper())
+    credit = len(snap.credit_cards)
+    if debit or credit:
+        out["cards"] = {"debit": debit, "credit": credit}
+    if snap.loans:
+        out["loans"] = sorted({str(l.get("loanType")) for l in snap.loans if l.get("loanType")})
+    if snap.fixed_deposits or snap.dps:
+        out["fixed deposits"], out["DPS accounts"] = len(snap.fixed_deposits), len(snap.dps)
     return out
 
 
