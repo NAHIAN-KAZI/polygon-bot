@@ -80,11 +80,11 @@ _LIST = [
        "open the pending limit-change request and confirm the cancellation",
        ["4.9"], "CardLimitChangeScreen", "/card_limit_change_request"),
     _a("card_apply", "Apply for a card", "cards", "screen",
-       "apply for, request, get or take a new card (debit, prepaid or virtual card), including naming the card product "
-       "they want; not viewing existing requests",
+       "apply for, request, get or take a new card (debit, credit, prepaid or virtual card), including naming the card "
+       "product they want; not viewing existing requests",
        "choose a card product and the account to link, enter the name for the card and confirm with a one-time code and PIN",
        ["4.11", "4.13", "4.15"], "CardProductCatalogScreen", "/card_product_catalog",
-       [("cardType", "debit, prepaid or virtual")]),
+       [("cardType", "debit, credit, prepaid or virtual")]),
     _a("loan_apply", "Apply for a loan", "deposits_loans", "screen",
        "apply for, request or take a new loan or financing (personal, home, car, business...); not viewing existing loans",
        "choose the kind of financing, enter the amount and how long to repay, and submit the request with the documents it asks for",
