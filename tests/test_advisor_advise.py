@@ -232,3 +232,17 @@ def test_the_relation_reaches_the_reply_facts_as_a_plain_sentence(monkeypatch):
     facts = run(advise.advise("which?", [], snap(), need, CARDS)).facts
     assert facts["suggested products"][0]["compared with what they hold"] == \
         "they already hold one of this kind and this would be another"
+
+
+def test_when_applying_the_facts_are_a_short_list_and_a_question_without_the_financial_summary(monkeypatch):
+    Model(monkeypatch, picks={"picks": [{"number": 1, "reasons": ["one", "two", "three"], "keep_in_mind": "fee",
+                                          "relation": "new"}]})
+    need = advise.Need(False, True, kinds=("savings account",))
+    facts = run(advise.advise("which?", [], snap(), need, CARDS, applying=True)).facts
+    product = facts["suggested products"][0]
+    assert "their situation" not in facts and product["why it fits"] == ["one", "two"]
+    assert product["fees"] == [] and product["rates"] == [] and product["keep in mind"] is None
+    assert facts["next step"].startswith("ask which of these")
+    # without applying the full picture is given
+    full = run(advise.advise("which?", [], snap(), need, CARDS)).facts
+    assert "their situation" in full and "next step" not in full

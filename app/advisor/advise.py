@@ -343,18 +343,20 @@ async def advise(message: str, recent: list[str], snap: snap_mod.Snapshot, need:
         suggested = []
         for i, p in enumerate(picks, start=1):
             c = p.card
-            suggested.append({"name": c.name, "kind": c.kind, "why_it_fits": list(p.reasons),
+            suggested.append({"name": c.name, "kind": c.kind, "why_it_fits": list(p.reasons[:2] if applying else p.reasons),
                               "requirements_against_their_figures": requirement_checks(
                                   c, averages["income"], averages["balance"]),
-                              "minimum": c.minimum, "fees": c.fees[:2], "rates": c.rates[:2],
-                              "keep_in_mind": p.keep_in_mind or None,
+                              "minimum": c.minimum, "fees": [] if applying else c.fees[:2],
+                              "rates": [] if applying else c.rates[:2],
+                              "keep_in_mind": None if applying else (p.keep_in_mind or None),
                               "compared_with_what_they_hold": {"new": "they hold nothing of this kind",
                                                                "extra": "they already hold one of this kind and this would be another",
                                                                "upgrade": "they hold one of this kind and this would be a better one"}.get(p.relation)})
             advice.must[f"suggested product {i}"] = c.name
             advice.choices.append(c.name)
             advice.products.append({"name": c.name, "group": c.group, "strength": "info"})
-        out["their_situation"] = situation(facts, averages["balance"])
+        if not applying:    # someone applying wants a short list and a question, not their financial summary
+            out["their_situation"] = situation(facts, averages["balance"])
         out["suggested_products"] = suggested
         out["no_product_fits"] = None if suggested else "nothing in the bank's products fits these figures well"
         out["history_covered"] = history_note(facts)
