@@ -30,8 +30,14 @@ What the app has to know:
 - The text bubble must render Bengali script. Flutter falls back to the platform font for glyphs the app font lacks
   (Noto Sans Bengali on Android, Kohinoor Bangla on iOS); check a Bangla reply on a real Android and iOS device and add
   a `fontFamilyFallback` only if glyphs are missing.
-- The app's own text (box labels, buttons, banners, the greeting) follows the app's language, not the bot's. A Bangla
-  bubble next to an English box is expected.
+- The app's own text in the chat (box labels, buttons, cards, chips, banners, snackbars, the greeting) follows the
+  **conversation's** language, not the app's language setting (changed 2026-10-27). The app takes it from the script of
+  the bot's reply (Bengali script → Bangla, English letters → English), falling back to the customer's message, so it
+  matches what the bot decided, Banglish included; a message in Bengali script turns the chat to Bangla before the reply
+  arrives. Each message keeps the language it was written in, and the chat turns back to English as soon as the bot
+  answers in English. The app setting only picks the language of a fresh chat. Nothing extra is sent either way.
+- The fixed customer-safe error sentences (voice, image, gateway) are written once in English; the app shows the known
+  ones in Bangla in a Bangla chat (`user_app/.../i18n/ai_server_text.dart`). A new such sentence needs a line there.
 - The single fixed text, shown when the model is unreachable, is bilingual:
   `Sorry, I'm having trouble right now. Please try again in a moment.` and
   `দুঃখিত, এখন একটু সমস্যা হচ্ছে। অনুগ্রহ করে কিছুক্ষণ পরে আবার চেষ্টা করুন।`
