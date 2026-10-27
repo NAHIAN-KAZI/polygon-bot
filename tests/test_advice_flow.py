@@ -49,7 +49,7 @@ def advice(monkeypatch):
     async def verify_jwt(token):
         return CustomerIdentity(customer_id="cust-advice")
 
-    async def read_need(message, recent, cards):
+    async def read_need(message, recent, cards, applying_to=None):
         state["calls"].append("read_need")
         return state["need"]
 
@@ -59,7 +59,8 @@ def advice(monkeypatch):
             raise state["snapshot_error"]
         return snapshot_module.Snapshot(as_of=date(2026, 10, 27))
 
-    async def advise(message, recent, snap, need, cards, applying=False):
+    async def advise(message, recent, snap, need, cards, applying=False, applying_to=None):
+        state["applying_to"] = applying_to
         state["calls"].append("advise")
         state["need_used"] = need
         return state["advice"]

@@ -2812,7 +2812,8 @@ async def _advice_stream(req: ChatRequest, request_id: str, customer_identity, t
         return
 
     advice = await advisor_advise.advise(req.message, _recent_customer_messages(recent_turns), snap, need, cards,
-                                         applying=applying_for is not None)
+                                         applying=applying_for is not None,
+                                         applying_to=_applying_to(applying_for) if applying_for is not None else None)
     if applying_for is not None and not advice.choices:   # nothing to suggest: open the form as they asked
         async for chunk in finish(_ui_action_outcome(applying_for, None, req.message, customer_identity.customer_id)):
             yield chunk
@@ -2842,10 +2843,16 @@ async def _suggest_before_applying(action, req: ChatRequest, recent_turns: list[
     cards = product_cards.all_cards()
     if not cards:
         return None
-    need = await advisor_advise.read_need(req.message, _recent_customer_messages(recent_turns), cards)
+    need = await advisor_advise.read_need(req.message, _recent_customer_messages(recent_turns), cards,
+                                          _applying_to(action))
     if need.named or not need.kinds:
         return None
     return dataclasses.replace(need, spending=False, product=True)
+
+
+def _applying_to(action) -> str:
+    """What this application can open, in the registry's own words: it bounds which products may be suggested."""
+    return f"{action.name}: {action.description}"
 
 
 async def _llm_pick_name(message: str, names: list[str]) -> int | None:
