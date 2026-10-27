@@ -34,7 +34,7 @@ class Settings:
     # its last sentence, no error), so longer messages are refused instead of half-heard.
     MAX_AUDIO_SECONDS: int = int(os.environ.get("MAX_AUDIO_SECONDS", "30"))
     # Separate speech-to-text server for the "nemo" voice mode (stt_service/, hishab's
-    # titu_stt_bn_fastconformer on NeMo), e.g. http://spark:8791. Empty = mode not offered.
+    # titu_stt_bn_conformer_large on NeMo), e.g. http://spark:8791. Empty = mode not offered.
     STT_URL: str = os.environ.get("STT_URL", "").rstrip("/")
     STT_API_KEY: str = os.environ.get("STT_API_KEY", "")
     # One model pass over the STT transcript before anything acts on it (conversation/

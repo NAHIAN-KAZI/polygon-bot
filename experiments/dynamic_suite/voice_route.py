@@ -4,9 +4,10 @@ transcriber (app.conversation.speech) and routed by classify() alone -- no bank,
 It measures whether a spoken request reaches the right service, and how close the
 transcript is to what was said.
 
-  python -m experiments.dynamic_suite.voice_route [--only 1.6,4.8] [--styles bangla_sentence,mixed] [--stt nemo]
+  python -m experiments.dynamic_suite.voice_route [--only 1.6,4.8] [--styles bangla_sentence,mixed] [--stt nemo] [--tag NAME]
 
 --stt nemo transcribes with the speech-to-text server (STT_URL, Titu STT) instead of the model.
+--tag names the run in the report file and records (e.g. which Titu model STT_URL serves).
 
 Spoken styles: bangla_sentence and mixed (questions_multilingual.json), sentence (questions.json).
 Banglish is not spoken: people who type Banglish speak Bangla.
@@ -64,7 +65,8 @@ async def main():
     arg = lambda name: set(sys.argv[sys.argv.index(name) + 1].split(",")) if name in sys.argv else set()
     only, styles = arg("--only"), arg("--styles")
     stt = "nemo" if "nemo" in arg("--stt") else "model"
-    hear = transcribe_nemo if stt == "nemo" else transcribe
+    stt = "-".join([stt, *arg("--tag")])
+    hear = transcribe_nemo if stt.startswith("nemo") else transcribe
     cached = json.loads(SNAPSHOT.read_text())
     if not any(c["id"] == ui_actions.CATEGORY for c in cached["categories"]):
         cached["categories"].append(ui_actions.catalog_category())

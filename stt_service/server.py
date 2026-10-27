@@ -1,6 +1,6 @@
-"""Speech-to-text server for the chat app's "nemo" voice mode: hishab's Bangla
-titu_stt_bn_fastconformer on NeMo. POST /transcribe takes a WAV body and returns
-{"text": ...}. Runs on the GPU box (see README.md); the app calls it at STT_URL."""
+"""Speech-to-text server for the chat app's "nemo" voice mode: a Bangla Titu STT model on
+NeMo (STT_MODEL, default hishab's titu_stt_bn_conformer_large). POST /transcribe takes a WAV
+body and returns {"text": ...}. Runs on the GPU box (see README.md); the app calls it at STT_URL."""
 import hmac
 import io
 import os
@@ -13,14 +13,22 @@ import soundfile as sf
 import torch
 import nemo.collections.asr as nemo_asr
 from fastapi import FastAPI, Header, HTTPException, Request
+from huggingface_hub import hf_hub_download
 from omegaconf import open_dict
 
-MODEL = os.environ.get("STT_MODEL", "hishab/titu_stt_bn_fastconformer")
+MODEL = os.environ.get("STT_MODEL", "hishab/titu_stt_bn_conformer_large")
+# The .nemo file inside the repo, for repos where it isn't named after the repo (which
+# from_pretrained expects), e.g. teamvillagers/titu-stt-bn-conformer-large-finetuned.
+MODEL_FILE = os.environ.get("STT_MODEL_FILE", "")
 API_KEY = os.environ.get("STT_API_KEY", "")
 MAX_BYTES = int(os.environ.get("STT_MAX_MB", "10")) * 1024 * 1024
 RATE = 16000  # what the model was trained on
 
-model = nemo_asr.models.ASRModel.from_pretrained(MODEL).cuda().eval()
+if MODEL_FILE:
+    model = nemo_asr.models.ASRModel.restore_from(hf_hub_download(MODEL, MODEL_FILE))
+else:
+    model = nemo_asr.models.ASRModel.from_pretrained(MODEL)
+model = model.cuda().eval()
 decoding = model.cfg.decoding
 with open_dict(decoding):
     decoding.strategy = "greedy_batch"  # same output as "greedy", faster
