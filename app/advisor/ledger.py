@@ -17,7 +17,13 @@ from app.advisor.money import percent, to_poisha
 from app.banking.dates import BANK_TZ
 from app.config import settings
 
-_DIGIT_RUN = re.compile(r"\d{6,}")
+# Six or more digits in a row, even when spaces, dashes or dots split them into groups (a phone number written
+# "0171 234 5678" or "+880-17-1234-5678"); Bangla digits count as digits.
+_DIGIT_RUN = re.compile(r"\d(?:[ .\-]?\d){5,}")
+# Anything but letters, digits and a few harmless marks becomes a space: no quotes, brackets, colons or newlines, so
+# text written by another person cannot imitate a label or break out of the quoting it is shown in.
+_UNSAFE = re.compile(r"[^\w .,&'()/@_-]", re.UNICODE)
+_WHO_LIMIT = 40
 
 
 @dataclass(frozen=True)
@@ -40,13 +46,16 @@ class Txn:
 
 
 def _mask(match: re.Match) -> str:
-    digits = match.group()
+    digits = re.sub(r"\D", "", match.group())
     return "•" * (len(digits) - 4) + digits[-4:]
 
 
 def _who(row: dict) -> str:
-    text = " ".join(str(row.get("fromToAccount") or row.get("description") or row.get("note") or "").split())
-    return _DIGIT_RUN.sub(_mask, text)[:60]
+    """Who the money went to or came from, as short data: the bank's own counterparty field first, then the
+    description and note (free text written by whoever sent or took the money, so it is cut and stripped)."""
+    raw = next((str(row[k]) for k in ("fromToAccount", "description", "note") if str(row.get(k) or "").strip()), "")
+    text = " ".join(_UNSAFE.sub(" ", _DIGIT_RUN.sub(_mask, raw)).split())
+    return text[:_WHO_LIMIT]
 
 
 def parse_rows(rows: list, account: str) -> tuple[list[Txn], int]:
