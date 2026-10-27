@@ -2688,7 +2688,7 @@ async def _kb_stream(req: ChatRequest, request_id: str, recent: list[str] | None
         "request_id": request_id,
         "hit_count": len(hits),
         "top_score": hits[0]["score"] if hits else None,
-        "queries": found.plan.queries,
+        "planned_queries": len(found.plan.queries),   # counts only: the text is derived from what the customer typed
         "planned_products": len(found.plan.products),
         "reranked": found.reranked,
     }))

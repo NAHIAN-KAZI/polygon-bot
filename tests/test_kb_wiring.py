@@ -91,3 +91,14 @@ def test_the_switch_on_uses_the_planned_path(monkeypatch):
     monkeypatch.setattr(chat_module.settings, "KB_QUERY_PLANNING", True)
     monkeypatch.setattr(chat_module.knowledge_retrieve, "retrieve", planned)
     assert asyncio.run(chat_module._find_knowledge("hello", [], 3)).reranked is True
+
+
+def test_the_log_line_carries_counts_not_the_planned_query_text(client, monkeypatch, caplog):
+    import logging
+    secret = "account 1234567890123"
+    found = retrieve.Retrieval([], False, query_plan.QueryPlan([secret, "more"], ["P"]), True)
+    with caplog.at_level(logging.INFO):
+        _chat(client, monkeypatch, found, [])
+    line = next(r.getMessage() for r in caplog.records if '"planned_queries"' in r.getMessage())
+    assert '"planned_queries": 2' in line and '"planned_products": 1' in line
+    assert "1234567890123" not in line
