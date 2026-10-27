@@ -156,6 +156,21 @@ def _month_totals(snap: Snapshot) -> list[dict]:
     return out
 
 
+def averages(snap: Snapshot) -> dict:
+    """The figures other code compares with a product's stated requirements, in poisha: average income and
+    spending per complete month (None when there is no month at all) and the balance now (None when unknown)."""
+    this_month = snap.as_of.strftime("%Y-%m")
+    months = _month_totals(snap)
+    complete = [m for m in months if m["month"] < this_month] or months
+    live = [to_poisha(l.get("balance")) for l in snap.ledgers if l.get("identifier") in
+            {str(a.get("accountNumber")) for a in snap.accounts}]
+    live = [b for b in live if b is not None]
+    stats = ledger.balance_stats(ledger.daily_balance(snap.txns, snap.as_of)) if snap.txns else None
+    return {"income": round(sum(m["in"] for m in complete) / len(complete)) if complete else None,
+            "spending": round(sum(m["out"] for m in complete) / len(complete)) if complete else None,
+            "balance": sum(live) if live else (stats["latest"] if stats else None)}
+
+
 def categories(history: list[dict], complete_before: str) -> list[dict]:
     """Spending per category over the complete months of the history: total, share of all spending, average per
     month, the last complete month, and how that month compares with the three before it (percent; None when

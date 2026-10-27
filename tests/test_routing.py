@@ -138,12 +138,12 @@ def fake_taxonomy(monkeypatch):
 # --- build_tools --------------------------------------------------------------
 
 
-def test_build_tools_returns_three_tools_with_expected_names():
+def test_build_tools_returns_the_four_tools_with_expected_names():
     tools = build_tools()
 
-    assert len(tools) == 3
+    assert len(tools) == 4
     names = [t["function"]["name"] for t in tools]
-    assert names == ["answer_kb_question", "route_banking_service", "ask_clarification"]
+    assert names == ["answer_kb_question", "route_banking_service", "give_personal_advice", "ask_clarification"]
 
 
 def test_build_tools_route_banking_service_schema():
@@ -1193,3 +1193,23 @@ def test_classify_account_selection_required_genuine_answer_resolves_to_same_ser
         subservice=None,
         payload={"accountType": "savings"},
     )
+
+
+def test_the_advice_tool_describes_what_it_is_for_and_takes_no_arguments():
+    tool = next(t for t in build_tools() if t["function"]["name"] == "give_personal_advice")
+    assert tool["function"]["parameters"] == {"type": "object", "properties": {}, "required": []}
+    assert "own money" in tool["function"]["description"]
+    assert "give_personal_advice" in routing.build_system_prompt({"categories": []})
+
+
+def test_classify_returns_the_advice_question_for_that_tool_and_never_asks_the_model_twice(monkeypatch):
+    import asyncio
+    calls = []
+
+    async def post(messages, **kw):
+        calls.append(messages)
+        return [{"function": {"name": "give_personal_advice", "arguments": {}}}]
+
+    monkeypatch.setattr(routing, "_post_classification", post)
+    result = asyncio.run(routing._classify_scoped("which card is best for me?", None, None, True))
+    assert isinstance(result, routing.AdviceQuestion) and len(calls) == 1

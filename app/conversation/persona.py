@@ -92,6 +92,13 @@ KIND_PURPOSE = {
                          "facts: say plainly what happened and, where they ask, which item it "
                          "concerned. If the list doesn't say, tell them you can't see that and "
                          "offer to help another way. Never claim more than the list says.",
+    "advice": "The customer asked for advice drawn from their own money. Say what their figures show that "
+              "matters for the question, then give what the facts suggest, in plain words: the ways to "
+              "save with how much each would save, or the suggested products, each named exactly with why "
+              "it fits them and what to check (the requirements set against their own figures). Say the "
+              "bank decides on an application, as a natural remark and not a disclaimer. Use only numbers "
+              "from the facts and work out no new ones. When the history is short, say what it rests on. "
+              "If the facts say nothing fits or there is too little history, say so plainly. Keep it short.",
     "greet": "Greet the customer back (by first name if given) and say briefly what you "
              "can help with, from the services in the facts.",
     "smalltalk": "Respond briefly and kindly to their message, then offer help with their "
@@ -156,6 +163,12 @@ KIND_EXAMPLE = {
     "recall_app_action": ("Customer: did that go through?\nFacts: what the customer did in the app: "
                           "[\"Remove saved item -- Item removed -- Blue notebook\"]\n"
                           "Reply: Yes, the Blue notebook was removed. Anything else I can do?"),
+    "advice": ("Customer: which plan suits me?\nFacts: their situation: {\"average use\": \"12 units a month\"}; "
+               "suggested products: [{\"name\": \"Plan Basic\", \"why it fits\": [\"they use 12 units a month\"], "
+               "\"requirements against their figures\": [\"asks for 10 units a month; theirs averages 12 units "
+               "(meets it)\"]}]\n"
+               "Reply: Plan Basic suits you: you use about 12 units a month and it asks for 10, so you meet it. "
+               "The final decision on an application is the company's."),
     "greet": ("Customer: hi\nFacts: first name: Sam; can help with: orders, payments, profile\n"
               "Reply: Hi Sam! I can help with your orders, payments or profile — what do you need?"),
     "smalltalk": ("Customer: thanks!\nFacts: tone: friendly\n"

@@ -1,4 +1,5 @@
 import copy
+import dataclasses
 import json
 from typing import Literal
 import logging
@@ -27,6 +28,7 @@ from app.banking.routing import (
     AMOUNT_GUIDANCE,
     DOMAINS,
     SERVICE_DESCRIPTIONS,
+    AdviceQuestion,
     AppActionsQuestion,
     BankingService,
     Clarification,
@@ -55,7 +57,9 @@ from app.conversation.composer import (
 )
 from app.embeddings import embed_text
 from app.llm import build_prompt, stream_generate
-from app.knowledge import query_plan
+from app.advisor import advise as advisor_advise
+from app.advisor import snapshot as advisor_snapshot
+from app.knowledge import product_cards, query_plan
 from app.knowledge import retrieve as knowledge_retrieve
 from app.vectorstore import search
 
@@ -2698,7 +2702,7 @@ async def _kb_stream(req: ChatRequest, request_id: str, recent: list[str] | None
         "reranked": found.reranked,
     }))
 
-    prompt = build_prompt(req.message, hits)
+    prompt = build_prompt(req.message, hits, found.nearest)
     answer_parts: list[str] = []
     try:
         async for token in stream_generate(prompt):
@@ -2727,6 +2731,79 @@ async def _kb_stream(req: ChatRequest, request_id: str, recent: list[str] | None
     yield _result_event("KB_ANSWER", None, None, None, payload=kb_payload)
 
     yield _sse("done", {})
+
+
+async def _advice_stream(req: ChatRequest, request_id: str, customer_identity, token: str | None,
+                         recent_turns: list[ChatTurn], message: str, history: list[tuple[str, str]],
+                         turn_started_at: float, stored_message: str):
+    """Personal advice from the customer's own money and the bank's products (app/advisor), or, signed out, a note
+    that it needs a login. The use-case switches are checked before any bank call; the reply is composed from
+    facts the code computed, and the figures are never stored by the back office (the result type is not a
+    knowledge answer)."""
+    async def finish(outcome: _TurnOutcome):
+        async for chunk in _emit_outcome(outcome, request_id, customer_identity, turn_started_at,
+                                         message=message, history=history):
+            yield chunk
+        if customer_identity is not None:
+            record_turn(customer_identity.customer_id,
+                        ChatTurn(timestamp=datetime.now(timezone.utc), message=stored_message, classification=None))
+        yield _sse("done", {})
+
+    disabled = set(req.disabled_use_cases or [])
+    ids = (use_cases.ADVISOR_INSIGHTS, use_cases.ADVISOR_RECOMMEND)
+    if customer_identity is None:
+        async for chunk in finish(_TurnOutcome(
+                "AUTH_REQUIRED", _say("login_needed", request="advice based on their own account"),
+                "advisor", "advice", None)):
+            yield chunk
+        return
+    if all(i in disabled for i in ids):
+        async for chunk in finish(_switched_off_outcome(use_cases.ADVISOR_RECOMMEND, "advisor", "advice", None)):
+            yield chunk
+        return
+
+    cards = product_cards.all_cards()
+    need = await advisor_advise.read_need(req.message, _recent_customer_messages(recent_turns), cards)
+    wanted_product = need.product
+    if use_cases.ADVISOR_INSIGHTS in disabled:
+        need = dataclasses.replace(need, spending=False)
+    if use_cases.ADVISOR_RECOMMEND in disabled:
+        need = dataclasses.replace(need, product=False, kinds=())
+    if not need.spending and not need.product:
+        off = use_cases.ADVISOR_RECOMMEND if wanted_product else use_cases.ADVISOR_INSIGHTS
+        async for chunk in finish(_switched_off_outcome(off, "advisor", "advice", None)):
+            yield chunk
+        return
+
+    try:
+        snap = await advisor_snapshot.get(customer_identity, token)
+    except AdapterAuthError:
+        async for chunk in finish(_TurnOutcome(
+                "AUTH_REQUIRED", _say("login_needed", request="advice based on their own account"),
+                "advisor", "advice", None)):
+            yield chunk
+        return
+    except Exception:  # noqa: BLE001 -- the bank being slow or down must not become a stack trace
+        logger.exception(json.dumps({"request_id": request_id, "stage": "advice_snapshot"}))
+        async for chunk in finish(_TurnOutcome(
+                "SERVICE_UNAVAILABLE", _say("unavailable", service="advice based on your account"),
+                "advisor", "advice", None)):
+            yield chunk
+        return
+
+    advice = await advisor_advise.advise(req.message, _recent_customer_messages(recent_turns), snap, need, cards)
+    logger.info(json.dumps({"request_id": request_id, "stage": "advice", "spending": need.spending,
+                            "product": need.product, "suggested": len(advice.products),
+                            "unreadable_sources": len(snap.missing)}))
+    payload: dict = {"mode": advice.used}
+    if advice.products:
+        payload["products"] = advice.products   # the back office lists these as leads
+    if advice.insight:
+        payload["insight"] = advice.insight
+    async for chunk in finish(_TurnOutcome(
+            "ADVICE_ANSWER", _say("advice", advice.must, **advice.facts), "advisor", advice.used, None,
+            result_payload=payload)):
+        yield chunk
 
 
 _REDACTED_SUBMISSION = "[redacted: verification submission]"
@@ -3211,6 +3288,12 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
                 customer_identity.customer_id,
                 ChatTurn(timestamp=datetime.now(timezone.utc), message=stored_message, classification=None),
             )
+        return
+
+    if isinstance(result, AdviceQuestion):
+        async for chunk in _advice_stream(req, request_id, customer_identity, token, recent_turns, composer_message,
+                                          history, turn_started_at, stored_message):
+            yield chunk
         return
 
     if isinstance(result, AppActionsQuestion):

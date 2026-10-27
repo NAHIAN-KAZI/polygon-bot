@@ -53,3 +53,19 @@ def test_build_prompt_picks_the_prompt_by_whether_knowledge_was_found():
     found = build_prompt("what is a DPS", [{"filename": "dps.pdf", "text": "A DPS is a savings scheme.", "page": 2}])
     assert found.startswith(SYSTEM_PROMPT_WITH_CONTEXT)
     assert "[source: dps.pdf, page 2]\nA DPS is a savings scheme." in found
+
+
+def test_with_no_answer_but_related_passages_the_prompt_says_they_are_not_the_answer():
+    from app.llm import build_prompt
+    related = [{"filename": "kb.md", "text": "Visa Infinite eligibility: residents."}]
+    prompt = build_prompt("what limit does the gold card have?", [], related)
+    assert "Visa Infinite eligibility" in prompt and "does not answer it directly" in prompt
+    assert "ask one short question" in prompt and "Question: what limit does the gold card have?" in prompt
+
+
+def test_the_prompt_forms_are_unchanged_when_there_are_answering_passages_or_nothing_at_all():
+    from app.llm import SYSTEM_PROMPT_NO_CONTEXT, SYSTEM_PROMPT_WITH_CONTEXT, build_prompt
+    chunk = [{"filename": "kb.md", "text": "Fees are low."}]
+    assert build_prompt("q", chunk, [{"filename": "x", "text": "other"}]).startswith(SYSTEM_PROMPT_WITH_CONTEXT)
+    assert build_prompt("q", []).startswith(SYSTEM_PROMPT_NO_CONTEXT)
+    assert build_prompt("q", [], []).startswith(SYSTEM_PROMPT_NO_CONTEXT)

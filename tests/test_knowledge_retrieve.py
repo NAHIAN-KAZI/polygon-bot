@@ -107,3 +107,16 @@ def test_embedding_or_store_errors_reach_the_caller(wired, monkeypatch):
     monkeypatch.setattr(retrieve.vectorstore, "search_in", boom)
     with pytest.raises(RuntimeError):
         asyncio.run(retrieve.retrieve("hello", [], None))
+
+
+def test_when_nothing_answers_the_three_nearest_passages_are_kept_for_a_related_reply(wired):
+    wired["picked"] = []
+    found = asyncio.run(retrieve.retrieve("hello", [], None))
+    assert found.hits == [] and found.grounded is False
+    assert [h["id"] for h in found.nearest] == [h["id"] for h in wired["pool"][:retrieve.NEAREST_SHOWN]]
+
+
+def test_an_answered_question_or_a_model_that_could_not_be_asked_has_no_nearest(wired):
+    assert asyncio.run(retrieve.retrieve("hello", [], None)).nearest == []
+    wired["picked"] = None
+    assert asyncio.run(retrieve.retrieve("hello", [], None)).nearest == []

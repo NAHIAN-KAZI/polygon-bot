@@ -27,6 +27,7 @@ SEARCH_DEPTH = 60
 OWN_KEPT = 10
 POOL_SIZE = 30
 DEFAULT_KEEP = 6
+NEAREST_SHOWN = 3
 
 
 @dataclass
@@ -35,6 +36,7 @@ class Retrieval:
     grounded: bool
     plan: query_plan.QueryPlan = field(default_factory=lambda: query_plan.QueryPlan([]))
     reranked: bool = False  # false when the model could not be asked and the vector order was used
+    nearest: list[dict] = field(default_factory=list)  # related passages, when none answers the question directly
 
 
 def _votes(ranked: list[list[dict]], weights: list[float], by_id: dict[str, dict]) -> dict[str, float]:
@@ -89,4 +91,6 @@ async def retrieve(message: str, recent: list[str], keep: int | None = None) -> 
     if picked is None:  # the model could not be asked: the plain search, as before
         floor = [h for h in own if h["score"] >= settings.MIN_RELEVANCE_SCORE][:keep]
         return Retrieval(floor, bool(floor), plan, False)
-    return Retrieval([pool[i] for i in picked], bool(picked), plan, True)
+    if not picked:   # nothing answers it, but the closest passages tell the customer what the bank does have
+        return Retrieval([], False, plan, True, pool[:NEAREST_SHOWN])
+    return Retrieval([pool[i] for i in picked], True, plan, True)

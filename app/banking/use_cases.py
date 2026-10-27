@@ -25,6 +25,7 @@ INTENTS: tuple[tuple[str, str], ...] = (
     ("CARD_ISSUE", "Disputes and complaints"),
     ("EDIT_PERSONAL_DETAILS", "Profile and personal details"),
     ("GENERAL", "General questions and greetings"),
+    ("ADVICE", "Personal advice"),
     ("NOT_IN_CHAT", "Not available in chat"),
 )
 NOT_IN_CHAT = "NOT_IN_CHAT"
@@ -101,6 +102,15 @@ _GENERAL: tuple[UseCase, ...] = (
     UseCase("general.greetings", "Greetings and small talk", "GENERAL", "answer", switchable=False),
 )
 
+# Advice drawn from the customer's own money and the bank's products (app/advisor): two switches, because a bank may
+# want spending guidance on while product suggestions wait for a compliance sign-off, or the other way round.
+ADVISOR_INSIGHTS = "advisor.insights"
+ADVISOR_RECOMMEND = "advisor.recommend"
+_ADVICE: tuple[UseCase, ...] = (
+    UseCase(ADVISOR_INSIGHTS, "Spending insight and ways to save", "ADVICE", "answer"),
+    UseCase(ADVISOR_RECOMMEND, "Suggest the products that fit the customer", "ADVICE", "answer"),
+)
+
 # App actions follow their routing domain unless named here.
 _APP_ACTION_INTENT = {"replacement_cancel": "CARD_REPLACEMENT", "quick_view_star": "ACCOUNT_INFO",
                       "qr_payment_cards": "CARD_MANAGEMENT"}
@@ -123,7 +133,7 @@ def _app_action_use_cases() -> tuple[UseCase, ...]:
     return tuple(out)
 
 
-EXPLICIT: tuple[UseCase, ...] = _PLATFORM + _GENERAL + _app_action_use_cases()
+EXPLICIT: tuple[UseCase, ...] = _PLATFORM + _GENERAL + _ADVICE + _app_action_use_cases()
 _BY_ID = {u.id: u for u in EXPLICIT}
 _BY_KEY = {key: u.id for u in EXPLICIT for key in u.keys}
 

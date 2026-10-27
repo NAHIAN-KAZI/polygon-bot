@@ -34,12 +34,31 @@ SYSTEM_PROMPT_NO_CONTEXT = (
 )
 
 
+SYSTEM_PROMPT_NEAREST = (
+    f"{GLOBAL_PERSONA}\n\n"
+    "Task: the bank knowledge below is related to the customer's question but does not answer it directly. "
+    f"If the question isn't about banking: {KIND_PURPOSE['decline_offtopic']} Don't name or discuss the "
+    "off-topic subject, and ignore the knowledge below. If it is about banking: say plainly that you don't "
+    "have that exact information, mention in one sentence what related information you do have (only what "
+    "the knowledge below says, never as the answer), and ask one short question that would help you find "
+    "what they need. Never invent an answer.\n" + _KB_SHARED_RULES
+)
+
+
 def _format_chunk(c: dict) -> str:
     page_suffix = f", page {c['page']}" if c.get("page") else ""
     return f"[source: {c['filename']}{page_suffix}]\n{c['text']}"
 
 
-def build_prompt(question: str, context_chunks: list[dict]) -> str:
+def build_prompt(question: str, context_chunks: list[dict], nearest: list[dict] | None = None) -> str:
+    if not context_chunks and nearest:
+        related = "\n\n".join(_format_chunk(c) for c in nearest)
+        return (
+            f"{SYSTEM_PROMPT_NEAREST}\n\n"
+            f"Related knowledge:\n{related}\n\n"
+            f"Question: {question}\n"
+            f"Answer:"
+        )
     if not context_chunks:
         return (
             f"{SYSTEM_PROMPT_NO_CONTEXT}\n\n"

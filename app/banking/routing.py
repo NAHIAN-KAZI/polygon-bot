@@ -50,13 +50,20 @@ class AppActionsQuestion:
 
 
 @dataclass(frozen=True)
+class AdviceQuestion:
+    """The customer wants guidance drawn from their own money: where it goes, whether they overspend and how to
+    spend less, or which product (card, deposit, loan, account) suits them. Answered from their own history and
+    the bank's product details, never from the knowledge base alone."""
+
+
+@dataclass(frozen=True)
 class UnknownService:
     category: str
     service: str
     subservice: str | None = None
 
 
-ClassificationResult = KbQuestion | BankingService | Clarification | AppActionsQuestion | UnknownService
+ClassificationResult = KbQuestion | BankingService | Clarification | AppActionsQuestion | AdviceQuestion | UnknownService
 
 
 _INVALID_PATH_CORRECTION = (
@@ -431,7 +438,13 @@ def build_system_prompt(
         "they already have or submitted stays a lookup. Something no service below covers at "
         "all -> ask_clarification, saying in your own words that this can be done in the app "
         "and asking what else they need; never pick the nearest-looking lookup for it.\n"
-        "7. General banking knowledge (other than fees), non-banking topics and abuse with no "
+        "7. The customer asks for guidance drawn from THEIR OWN money rather than for a fact or a "
+        "lookup: where their money goes, whether they overspend and how to spend or save more, or "
+        "which product of the bank (card, deposit, loan, account) suits or is best for them -> "
+        "give_personal_advice. Plain facts about a product (what it is, its fee, who may apply) are "
+        "knowledge questions, and a lookup of a balance, a statement or what they spent in a "
+        "period is a service.\n"
+        "8. General banking knowledge (other than fees), non-banking topics and abuse with no "
         "request -> answer_kb_question. A greeting, or a message with nothing to act on -> "
         "ask_clarification.\n\n"
         "HOW TO FILL THE CALL\n"
@@ -511,6 +524,19 @@ def build_tools(app_actions: bool = False) -> list[dict]:
         {
             "type": "function",
             "function": {
+                "name": "give_personal_advice",
+                "description": (
+                    "The customer wants advice based on their own money and behaviour: where their "
+                    "money goes, whether they overspend and how to cut back or save, or which card, "
+                    "deposit, loan or account would suit or be best for them. Not for general facts "
+                    "about a product, and not for a plain lookup of a balance or transactions."
+                ),
+                "parameters": {"type": "object", "properties": {}, "required": []},
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "ask_clarification",
                 "description": (
                     "Ask the customer a short clarifying question, written for this message, "
@@ -568,7 +594,8 @@ async def _post_classification(messages: list[dict], app_actions: bool = False) 
     return message.get("tool_calls") or _tool_call_from_text(message.get("content"))
 
 
-_TOOL_NAMES = ("route_banking_service", "ask_clarification", "answer_kb_question", "answer_from_app_actions")
+_TOOL_NAMES = ("route_banking_service", "ask_clarification", "answer_kb_question", "answer_from_app_actions",
+               "give_personal_advice")
 
 
 def _tool_call_from_text(content: str | None) -> list[dict]:
@@ -993,6 +1020,8 @@ async def _classify_scoped(
 
         if retry_name == "answer_kb_question":
             return KbQuestion()
+        if retry_name == "give_personal_advice":
+            return AdviceQuestion()
         if retry_name == "answer_from_app_actions" and app_notes:
             return AppActionsQuestion()
         if retry_name == "ask_clarification":
@@ -1026,6 +1055,8 @@ async def _classify_scoped(
 
     if name == "answer_kb_question":
         return KbQuestion()
+    if name == "give_personal_advice":
+        return AdviceQuestion()
     if name == "answer_from_app_actions" and app_notes:
         return AppActionsQuestion()
     if name == "ask_clarification":
@@ -1065,6 +1096,8 @@ async def _classify_scoped(
 
         if retry_name == "answer_kb_question":
             return KbQuestion()
+        if retry_name == "give_personal_advice":
+            return AdviceQuestion()
         if retry_name == "answer_from_app_actions" and app_notes:
             return AppActionsQuestion()
         if retry_name == "ask_clarification":
