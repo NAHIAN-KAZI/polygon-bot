@@ -232,9 +232,10 @@ def savings_rate(months: list[dict]) -> float | None:
 
 
 def change_against_earlier(values: list[int], earlier: int = 3) -> dict | None:
-    """The latest value against the average of up to `earlier` before it: {'latest', 'earlier_average', 'change'}
-    with change in percent (None when the earlier average is zero). None with fewer than two values."""
-    if len(values) < 2:
+    """The latest value against the average of the `earlier` values before it: {'latest', 'earlier_average',
+    'change'} with change in percent (None when the earlier average is zero). None unless there are `earlier`
+    values before the latest: a single earlier month is not a trend, and a jump from a tiny base is noise."""
+    if len(values) < earlier + 1:
         return None
     before = values[-1 - earlier:-1]
     base = mean(before)

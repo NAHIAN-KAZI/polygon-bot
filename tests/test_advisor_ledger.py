@@ -117,7 +117,10 @@ def test_spread_savings_rate_and_change_against_earlier_months():
     months = [{"in": 1000, "net": 200}, {"in": 1000, "net": -100}]
     assert ledger.savings_rate(months) == 5.0 and ledger.savings_rate([{"in": 0, "net": -5}]) is None
     assert ledger.change_against_earlier([100, 100, 100, 150]) == {"latest": 150, "earlier_average": 100, "change": 50.0}
-    assert ledger.change_against_earlier([0, 0, 40])["change"] is None and ledger.change_against_earlier([5]) is None
+    assert ledger.change_against_earlier([0, 0, 0, 40])["change"] is None     # nothing before to compare with
+    # fewer than three earlier values is not a trend, however large the jump
+    assert ledger.change_against_earlier([5]) is None and ledger.change_against_earlier([1, 100]) is None
+    assert ledger.change_against_earlier([10, 10, 100]) is None
 
 
 def test_phone_numbers_are_masked_to_their_last_four_however_they_are_written():

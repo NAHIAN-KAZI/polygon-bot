@@ -24,6 +24,20 @@ Response `200`:
 Errors: `400` bad/empty/unparseable file or embedding model rejected a chunk (rare, auto-retried
 internally first), `413` too large, `502` backend model/DB actually unreachable, `401` bad key.
 
+Large documents (more than `ASYNC_UPLOAD_CHUNKS`, default 400, chunks) and any upload with `?async=true` answer `202`
+at once and are indexed in the background, because embedding takes about 50 ms a chunk, longer than a gateway waits:
+```json
+{"doc_id": "e8c3...", "filename": "kb.md", "chunk_count": 2121, "status": "indexing"}
+```
+`GET /documents` lists every document with `status` (`indexing`, `ready` or `failed`; entries from before statuses
+existed are `ready`), `progress` (`{"done", "total"}` while indexing) and `error` (when `failed`). A document is
+searchable once `ready`. Re-uploading a file with the same name replaces the old copy only after the new one is
+`ready`, never while another copy of that name is still `indexing`. A restart marks unfinished indexing `failed`.
+
+Product cards (what the personal-advice feature compares customers with) are built from a document's product pages by
+the chat model after every upload: `GET /documents/product-cards` lists them per document;
+`POST /documents/{doc_id}/product-cards` (`202`) rebuilds them.
+
 Other document endpoints: `GET /documents` (list), `DELETE /documents/{doc_id}` (remove).
 
 ## Chat

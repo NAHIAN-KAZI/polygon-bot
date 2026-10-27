@@ -83,6 +83,7 @@ Always handle both `done` and `error`, because a stream is not guaranteed to rea
 | `KB_ANSWER` | Product/policy answer from the bank's knowledge base, or a polite off-topic decline | Bubble. `payload`: `{"grounded", "hitCount", "sources"}` (`sources` may be `null`); `grounded` is true only when a passage that answers the question was found, so `false` means a knowledge gap (T-127) |
 | `APP_ACTIONS_ANSWER` | Answer about what the customer just did in an app box (from `payload.uiContext`) | Bubble only. `payload`: `{}` |
 | `USE_CASE_DISABLED` | The bank switched this use case off and the app has no screen for it | Bubble only. `payload`: `{"useCase": "<id>", "useCaseDisabled": true}` |
+| `ADVICE_ANSWER` | Personal advice from the customer's own money and the bank's products (see "Personal advice" below) | Bubble. `category` `advisor`, `service` `recommend` or `insights`. `payload`: `{"mode", "products"?, "insight"?}` |
 | `UNKNOWN_SERVICE` | A direct route named a `category`/`service`/`subservice` that doesn't exist | Bubble. Check the ids you sent |
 | `SERVICE_UNAVAILABLE` | The bank's service failed or isn't available for this customer. `payload` is `null` | Bubble plus **Retry** (resend the customer's last request) |
 | `AUTH_REQUIRED` | JWT missing, expired or rejected. `payload` is `null` | Refresh the token or send the customer to log in, then offer **Retry** |
@@ -600,3 +601,27 @@ U8 Complaint box (when pending.service == submit_complaint)
 
 1. **Showing the complaint or dispute box at the right moment (built).** Every missing-field `CLARIFICATION_REQUIRED` now carries `payload.pending = {"category", "service", "subservice", "missingFields": [...]}` (field names only, never values). Show the complaint box when `pending.service == "submit_complaint"` (missing `description`) and the dispute box when `pending.service == "raise_dispute"` (missing `remarks`). When `payload` is `null` (a plain question) or `pending` is absent, show nothing extra: the customer just types. The box sends a direct request: `support`/`submit_complaint` with `{"description", "category"}`, or `service_requests`/`raise_dispute` with `{"remarks"}`; the bot answers with the Yes/No card or the dispute summary.
 2. **The result of an inline action.** The app does not tell the bot whether a box succeeded, so the bot's next reply does not mention it. If that is wanted, the app can send a short message after success (for example "Done"); nothing in the backend needs to change for that.
+
+## Personal advice
+
+The customer can ask what suits them or how to spend less: "which card is best for me", "which deposit should I open",
+"where does my money go", "am I overspending", "how can I save more". The classifier decides (a tool, no keywords);
+plain facts about a product ("what is the annual fee") stay knowledge answers, and lookups ("how much did I spend last
+month") stay lookups.
+
+- Signed out: `AUTH_REQUIRED` (`category` `advisor`) with a message that advice needs the customer's own account.
+- Signed in: the bot reads the customer's accounts, balances, transactions (recent months in detail, up to 36 months as
+  the bank's monthly totals), loans, deposits and credit cards, computes the figures in code, and the model picks from
+  the bank's product cards (built from the knowledge base) and from the customer's own spending categories. Every
+  figure in the reply was computed by code; the model never calculates.
+- `result.type = ADVICE_ANSWER`. `payload.mode` is `recommend` when products were suggested, else `insights`.
+  `payload.products` is `[{"name", "group", "strength": "info"}]` (the back office lists them as leads);
+  `payload.insight` is `{"monthly": [{"month", "in", "out", "net"}], "categories": [{"name", "per_month",
+  "share_of_spending_percent", "last_complete_month", "change_percent"}]}` with amounts already formatted as "Tk ..." text,
+  for a chart; both keys may be absent. The app can ignore `insight`: the reply text carries the same information.
+- Two switches in the back office: `advisor.insights` (spending guidance) and `advisor.recommend` (product suggestions),
+  sent in `disabled_use_cases` like any other. If everything the customer asked for is off the answer is
+  `USE_CASE_DISABLED`; if only one half is off the other half is still answered.
+- The back office never stores the reply (only knowledge answers are stored in full); it stores a placeholder, the
+  result type and the lead tags.
+- Reads the customer's data with the customer's own login; nothing leaves the bank's servers (the model is self-hosted).

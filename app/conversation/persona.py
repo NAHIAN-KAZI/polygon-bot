@@ -167,8 +167,7 @@ KIND_EXAMPLE = {
                "suggested products: [{\"name\": \"Plan Basic\", \"why it fits\": [\"they use 12 units a month\"], "
                "\"requirements against their figures\": [\"asks for 10 units a month; theirs averages 12 units "
                "(meets it)\"]}]\n"
-               "Reply: Plan Basic suits you: you use about 12 units a month and it asks for 10, so you meet it. "
-               "The final decision on an application is the company's."),
+               "Reply: Plan Basic suits you: you use about 12 units a month and it asks for 10, so you meet it."),
     "greet": ("Customer: hi\nFacts: first name: Sam; can help with: orders, payments, profile\n"
               "Reply: Hi Sam! I can help with your orders, payments or profile — what do you need?"),
     "smalltalk": ("Customer: thanks!\nFacts: tone: friendly\n"

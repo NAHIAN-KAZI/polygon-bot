@@ -78,6 +78,10 @@ class Settings:
     PRODUCT_CARD_CONCURRENCY: int = int(os.environ.get("PRODUCT_CARD_CONCURRENCY", "4"))
     DOCS_METADATA_PATH: str = os.environ.get("DOCS_METADATA_PATH", "/app/data/documents.json")
 
+    # A document with more chunks than this is indexed in the background (the upload answers 202 at once): embedding
+    # takes about 50 ms a chunk, longer than a gateway waits for a reply.
+    ASYNC_UPLOAD_CHUNKS: int = int(os.environ.get("ASYNC_UPLOAD_CHUNKS", "400"))
+    EMBED_BATCH: int = int(os.environ.get("EMBED_BATCH", "64"))
     MAX_UPLOAD_MB: int = int(os.environ.get("MAX_UPLOAD_MB", "25"))
 
     ALLOWED_ORIGINS: list[str] = [

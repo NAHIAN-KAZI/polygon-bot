@@ -224,7 +224,7 @@ def facts(snap: Snapshot, limit_months: int = 12, limit_categories: int = 8) -> 
                           for m in recent]
         out["income"] = {"average_per_month": tk(round(sum(incomes) / len(incomes))),
                          "steadiness": ledger.spread(incomes),  # 0 = identical every month
-                         "trend_percent": (ledger.change_against_earlier(incomes, 6) or {}).get("change")}
+                         "trend_percent": (ledger.change_against_earlier(incomes) or {}).get("change")}
         moved = ledger.change_against_earlier(spends)
         out["spending"] = {
             "average_per_month": tk(round(sum(spends) / len(spends))),

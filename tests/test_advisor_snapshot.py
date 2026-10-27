@@ -197,3 +197,13 @@ def test_months_before_the_customers_first_activity_do_not_dilute_averages_but_q
 
 def test_with_no_activity_anywhere_there_are_no_totals():
     assert snapshot.active_history([summary("2026-05", 0, 0, {}), summary("2026-06", 0, 0, {})]) == []
+
+
+def test_no_trend_is_reported_from_fewer_than_four_complete_months(bank):
+    snap = build()
+    snap.history = HISTORY[2:]          # August, September, and the open October: two complete months
+    snap.txns = []                      # the rows would add June and July
+    f = snapshot.facts(snap)
+    assert f["spending"]["change_against_previous_three_months_percent"] is None
+    assert all(c["change_percent"] is None for c in f["spending_by_category"])
+    assert f["income"]["trend_percent"] is None and f["coverage"]["complete_months"] == 2

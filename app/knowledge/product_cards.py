@@ -63,7 +63,8 @@ def build_prompt(name: str, group: str, text: str) -> str:
         "Answer with JSON:\n"
         '- "is_product": true when this is something a customer can get, open, apply for or buy from the bank (an '
         "account, card, deposit, loan, insurance plan or service); false for general information such as help, "
-        "contact details, an overview or a list of other pages.\n"
+        "contact details, and false for any page that only introduces, lists or compares several products "
+        "(an overview of a whole family of products is not itself a product).\n"
         '- "kind": what sort of product it is, in two to four lower-case words.\n'
         '- "summary": one sentence on what it is.\n'
         '- "eligibility": who may have it (age, income, residency, profession, anything else the text requires), '
