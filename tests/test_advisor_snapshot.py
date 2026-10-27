@@ -64,8 +64,12 @@ def bank(monkeypatch):
         guard(path)
         return [{"id": 1}] if "fixed" in path else []
 
-    async def credit(identity, jwt):
+    async def credit_cards(jwt):
         guard("credit")
+        return [{"id": 59, "cardCategory": "CREDIT"}]
+
+    async def credit_summary(jwt, card_id):
+        guard("credit summary")
         return {"creditLimit": 10_000_000, "totalOutstanding": 2_500_000, "isOverdue": False}
 
     async def products(jwt):
@@ -77,7 +81,8 @@ def bank(monkeypatch):
     monkeypatch.setattr(snapshot.sources, "monthly_summaries", monthly_summaries)
     monkeypatch.setattr(snapshot.sources, "loans", loans)
     monkeypatch.setattr(snapshot.sources, "deposits", deposits)
-    monkeypatch.setattr(snapshot, "_credit", credit)
+    monkeypatch.setattr(snapshot.sources, "credit_cards", credit_cards)
+    monkeypatch.setattr(snapshot.sources, "credit_summary", credit_summary)
     monkeypatch.setattr(snapshot.sources, "products", products)
     snapshot._cache.clear()
     return state
@@ -121,7 +126,7 @@ def test_holdings_loans_deposits_and_the_credit_card_are_reported(bank):
     f = snapshot.facts(build())
     assert f["loans"][0]["monthly_instalment"] == "Tk 5,000" and f["loans"][0]["still_owed"] == "Tk 90,000"
     assert f["deposit_products_held"] == {"fixed_deposits": 1, "dps": 0}
-    assert f["credit_card"] == {"limit": "Tk 100,000", "owed": "Tk 25,000", "used_percent": 25.0, "overdue": False}
+    assert f["credit_cards"] == [{"limit": "Tk 100,000", "owed": "Tk 25,000", "used_percent": 25.0, "overdue": False}]
 
 
 def test_coverage_says_what_period_was_read(bank):
@@ -168,3 +173,27 @@ def test_snapshots_are_cached_per_customer_until_forgotten(bank):
 def test_month_keys_walk_back_across_a_year_end():
     assert sources.month_keys(date(2026, 2, 10), 4) == ["2026-02", "2026-01", "2025-12", "2025-11"]
     assert sources.window(date(2026, 2, 10), 3) == (date(2025, 12, 1), date(2026, 2, 10))
+
+
+def test_a_credit_card_whose_summary_the_bank_cannot_give_is_named_and_the_rest_still_works(bank):
+    bank["fail"] = {"credit summary"}
+    snap = build()
+    assert snap.missing == ["credit card summary"] and snap.credit == []
+    assert "credit_cards" not in snapshot.facts(snap) and snapshot.facts(snap)["income"]
+
+
+def test_months_before_the_customers_first_activity_do_not_dilute_averages_but_quiet_months_after_it_count(bank):
+    quiet = summary("2026-07", 0, 0, {})
+    before = [summary("2026-04", 0, 0, {}), summary("2026-05", 0, 0, {})]
+    bank_history = before + [HISTORY[0], quiet] + HISTORY[2:]   # June active, July quiet, August on
+    snap = build()
+    snap.history = bank_history
+    f = snapshot.facts(snap)
+    assert f["coverage"]["monthly_totals_from"] == "2026-06" and f["coverage"]["months_of_totals"] == 5
+    assert [m["month"] for m in f["monthly"]][:2] == ["2026-06", "2026-07"]
+    assert f["monthly"][1] == {"month": "2026-07", "in": "Tk 0", "out": "Tk 0", "net": "Tk 0"}
+    assert f["income"]["average_per_month"] == "Tk 67,500"    # Tk 90,000 + 0 + 90,000 + 90,000 over the 4 complete months
+
+
+def test_with_no_activity_anywhere_there_are_no_totals():
+    assert snapshot.active_history([summary("2026-05", 0, 0, {}), summary("2026-06", 0, 0, {})]) == []

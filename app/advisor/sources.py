@@ -11,7 +11,7 @@ import asyncio
 from datetime import date
 
 from app.banking.adapters.base import AdapterAuthError
-from app.banking.adapters.real import _call, _is_card_row
+from app.banking.adapters.real import _call, _is_card_row, _is_credit_card
 from app.config import settings
 
 
@@ -95,6 +95,13 @@ async def deposits(jwt: str | None, path: str) -> list[dict]:
     body = _unwrap(await _call("GET", path, jwt))
     rows = body if isinstance(body, list) else (body.get("content") or body.get("items") or [] if isinstance(body, dict) else [])
     return [r for r in rows if isinstance(r, dict)]
+
+
+async def credit_cards(jwt: str | None) -> list[dict]:
+    """The customer's credit cards (id and status only matter here); debit and prepaid cards are left out."""
+    body = _unwrap(await _call("GET", "/card/v1/cards", jwt))
+    cards = body.get("cards") if isinstance(body, dict) else body
+    return [c for c in cards or [] if isinstance(c, dict) and _is_credit_card(c)]
 
 
 async def credit_summary(jwt: str | None, card_id: str) -> dict:

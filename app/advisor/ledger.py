@@ -23,7 +23,6 @@ _DIGIT_RUN = re.compile(r"\d(?:[ .\-]?\d){5,}")
 # Anything but letters, digits and a few harmless marks becomes a space: no quotes, brackets, colons or newlines, so
 # text written by another person cannot imitate a label or break out of the quoting it is shown in.
 _UNSAFE = re.compile(r"[^\w .,&'()/@•_-]", re.UNICODE)
-_WHO_LIMIT = 40
 
 
 @dataclass(frozen=True)
@@ -50,19 +49,37 @@ def _mask(match: re.Match) -> str:
     return "•" * (len(digits) - 4) + digits[-4:]
 
 
-def _who(row: dict) -> str:
-    """Who the money went to or came from, as short data: the bank's own counterparty field first, then the
-    description and note (free text written by whoever sent or took the money, so it is cut and stripped)."""
-    raw = next((str(row[k]) for k in ("fromToAccount", "description", "note") if str(row.get(k) or "").strip()), "")
+_WHO_FIELDS = ("fromToAccount", "description", "note")
+
+
+def who_field(rows: list) -> str:
+    """The row field that tells payees apart: the first of the counterparty field, the description and the note
+    that takes more than one value across these rows. (On some accounts the counterparty field is always the
+    customer's own account, and the description carries the real detail.) Counterparty field when none varies."""
+    dicts = [r for r in rows if isinstance(r, dict)]
+    for field in _WHO_FIELDS:
+        if len({str(r.get(field) or "").strip() for r in dicts} - {""}) > 1:
+            return field
+    return _WHO_FIELDS[0]
+
+
+def _who(row: dict, field: str) -> str:
+    """Who the money went to or came from, as short data: the chosen field, else the next one that has text.
+    Description and note are free text written by whoever sent or took the money, so everything is cut to
+    ADVISOR_PAYEE_CHARS characters and stripped of quotes, brackets, colons and newlines."""
+    order = [field] + [f for f in _WHO_FIELDS if f != field]
+    raw = next((str(row[k]) for k in order if str(row.get(k) or "").strip()), "")
     text = " ".join(_UNSAFE.sub(" ", _DIGIT_RUN.sub(_mask, raw)).split())
-    return text[:_WHO_LIMIT]
+    return text[:settings.ADVISOR_PAYEE_CHARS]
 
 
 def parse_rows(rows: list, account: str) -> tuple[list[Txn], int]:
     """(readable rows, how many were skipped) for one account."""
     out: list[Txn] = []
     skipped = 0
-    for row in rows if isinstance(rows, list) else []:
+    rows = rows if isinstance(rows, list) else []
+    field = who_field(rows)
+    for row in rows:
         if not isinstance(row, dict):
             skipped += 1
             continue
@@ -80,7 +97,7 @@ def parse_rows(rows: list, account: str) -> tuple[list[Txn], int]:
         if when.tzinfo is None:
             when = when.replace(tzinfo=timezone.utc)
         out.append(Txn(when.astimezone(BANK_TZ), abs(amount), direction == "DEBIT", to_poisha(row.get("balance")),
-                       account, _who(row), str(row.get("transactionType") or "").strip()))
+                       account, _who(row, field), str(row.get("transactionType") or "").strip()))
     return out, skipped
 
 

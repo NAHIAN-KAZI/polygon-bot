@@ -64,6 +64,7 @@ class Settings:
     ADVISOR_HISTORY_MONTHS: int = int(os.environ.get("ADVISOR_HISTORY_MONTHS", "36"))    # months of monthly totals
     ADVISOR_PAGE_SIZE: int = int(os.environ.get("ADVISOR_PAGE_SIZE", "50"))
     ADVISOR_MAX_PAGES: int = int(os.environ.get("ADVISOR_MAX_PAGES", "20"))              # per account
+    ADVISOR_PAYEE_CHARS: int = int(os.environ.get("ADVISOR_PAYEE_CHARS", "64"))          # longest payee text kept
     ADVISOR_CACHE_SECONDS: int = int(os.environ.get("ADVISOR_CACHE_SECONDS", "600"))
     ADVISOR_RECURRING_MIN_OCCURRENCES: int = int(os.environ.get("ADVISOR_RECURRING_MIN_OCCURRENCES", "3"))
     ADVISOR_RECURRING_INTERVAL_SPREAD: float = float(os.environ.get("ADVISOR_RECURRING_INTERVAL_SPREAD", "0.35"))
