@@ -1,0 +1,170 @@
+import asyncio
+from datetime import date
+
+import pytest
+
+from app.advisor import snapshot, sources
+from app.banking.adapters.base import AdapterAuthError, AdapterUnavailableError
+from app.banking.identity import CustomerIdentity
+
+TODAY = date(2026, 10, 27)
+IDENTITY = CustomerIdentity(customer_id="01711000000")
+
+
+def tx(day, amount, kind="CREDIT", balance=None, who="X", ttype="TRANSFER"):
+    return {"type": kind, "amount": amount, "balance": balance, "txnTime": f"{day}T10:00:00+06:00",
+            "fromToAccount": who, "transactionType": ttype}
+
+
+def summary(month, income, expense, cats):
+    return {"month": month, "totalIncome": income, "totalExpense": expense,
+            "expenseByCategory": [{"categoryName": n, "amount": a} for n, a in cats.items()]}
+
+
+HISTORY = [
+    summary("2026-06", 9_000_000, 6_000_000, {"Food": 2_000_000, "Rent": 2_500_000, "Transport": 500_000}),
+    summary("2026-07", 9_000_000, 6_200_000, {"Food": 2_100_000, "Rent": 2_500_000, "Transport": 600_000}),
+    summary("2026-08", 9_000_000, 6_100_000, {"Food": 2_000_000, "Rent": 2_500_000, "Transport": 550_000}),
+    summary("2026-09", 9_000_000, 7_500_000, {"Food": 3_500_000, "Rent": 2_500_000, "Transport": 560_000}),
+    summary("2026-10", 4_000_000, 1_000_000, {"Food": 600_000}),   # this month, not complete
+]
+ROWS = [tx(f"2026-{m:02d}-01", 9_000_000, who="EMPLOYER", balance=9_500_000 + m) for m in (6, 7, 8, 9, 10)] + \
+       [tx(f"2026-{m:02d}-05", 2_500_000, "DEBIT", who="LANDLORD", balance=7_000_000) for m in (6, 7, 8, 9, 10)] + \
+       [tx("2026-10-20", 90_000, "DEBIT", who="Sent to 01799887766 Rahim", ttype="BKASH", balance=6_900_000)]
+
+
+@pytest.fixture
+def bank(monkeypatch):
+    state = {"calls": 0, "fail": set(), "cut": False}
+
+    def guard(name):
+        state["calls"] += 1
+        if name in state["fail"]:
+            raise AdapterUnavailableError(f"{name} down")
+
+    async def accounts(jwt):
+        guard("accounts")
+        return ([{"accountNumber": "1234567890", "accountType": "SAVINGS"}],
+                [{"identifier": "1234567890", "balance": 6_900_000}])
+
+    async def transactions(jwt, number, start, end):
+        guard("transactions")
+        return ROWS, state["cut"]
+
+    async def monthly_summaries(jwt, months, concurrency=6):
+        guard("monthly")
+        return HISTORY, 0
+
+    async def loans(jwt):
+        guard("loans")
+        return [{"loanType": "PERSONAL", "emiAmountPoisha": 500_000, "outstandingPrincipalPoisha": 9_000_000,
+                 "annualInterestRatePercent": 14, "status": "ACTIVE", "nextDueDate": "2026-11-05"}]
+
+    async def deposits(jwt, path):
+        guard(path)
+        return [{"id": 1}] if "fixed" in path else []
+
+    async def credit(identity, jwt):
+        guard("credit")
+        return {"creditLimit": 10_000_000, "totalOutstanding": 2_500_000, "isOverdue": False}
+
+    async def products(jwt):
+        guard("products")
+        return []
+
+    monkeypatch.setattr(snapshot.sources, "accounts", accounts)
+    monkeypatch.setattr(snapshot.sources, "transactions", transactions)
+    monkeypatch.setattr(snapshot.sources, "monthly_summaries", monthly_summaries)
+    monkeypatch.setattr(snapshot.sources, "loans", loans)
+    monkeypatch.setattr(snapshot.sources, "deposits", deposits)
+    monkeypatch.setattr(snapshot, "_credit", credit)
+    monkeypatch.setattr(snapshot.sources, "products", products)
+    snapshot._cache.clear()
+    return state
+
+
+def build(**kw):
+    return asyncio.run(snapshot.build(IDENTITY, "jwt", TODAY, **kw))
+
+
+def test_facts_report_income_spending_saving_and_the_change_against_earlier_months(bank):
+    f = snapshot.facts(build())
+    assert f["income"]["average_per_month"] == "Tk 90,000" and f["income"]["steadiness"] == 0.0
+    # complete months only: June to September; the unfinished October is reported as month-to-date
+    assert f["spending"]["last_complete_month"] == "Tk 75,000"
+    assert f["spending"]["change_against_previous_three_months_percent"] == 23.0   # 75,000 against about 61,000
+    assert f["spending"]["so_far_this_month"] == "Tk 10,000"
+    assert f["saving"]["rate_percent"] == 28.3          # (3.0 + 2.8 + 2.9 + 1.5) of 36.0 lakh poisha
+    assert [m["month"] for m in f["monthly"]] == ["2026-06", "2026-07", "2026-08", "2026-09"]
+
+
+def test_the_category_that_grew_is_visible_with_its_share_and_change(bank):
+    cats = {c["name"]: c for c in snapshot.facts(build())["spending_by_category"]}
+    assert list(cats)[:2] == ["Rent", "Food"]                       # biggest total first
+    assert cats["Food"]["last_complete_month"] == "Tk 35,000" and cats["Food"]["change_percent"] == 72.1
+    assert cats["Rent"]["change_percent"] == 0.0 and cats["Rent"]["per_month"] == "Tk 25,000"
+    assert cats["Food"]["so_far_this_month"] == "Tk 6,000" and cats["Rent"]["so_far_this_month"] is None
+    assert cats["Food"]["per_month"] == "Tk 24,000"                    # June to September only, not the open month
+
+
+def test_recent_rows_give_payees_rhythm_balances_and_masked_numbers(bank):
+    f = snapshot.facts(build())
+    assert {r["who"] for r in f["recurring"]} == {"EMPLOYER", "LANDLORD"}
+    assert f["main_income_sources"][0]["who"] == "EMPLOYER"
+    assert "01799887766" not in str(f)
+    assert f["balance"]["latest"] == "Tk 69,000" and f["balance"]["lowest"] and f["balance"]["month_end"]
+    assert f["accounts"] == [{"type": "SAVINGS", "ending": "7890", "balance": "Tk 69,000"}]
+    assert "1234567890" not in str(f)
+
+
+def test_holdings_loans_deposits_and_the_credit_card_are_reported(bank):
+    f = snapshot.facts(build())
+    assert f["loans"][0]["monthly_instalment"] == "Tk 5,000" and f["loans"][0]["still_owed"] == "Tk 90,000"
+    assert f["deposit_products_held"] == {"fixed_deposits": 1, "dps": 0}
+    assert f["credit_card"] == {"limit": "Tk 100,000", "owed": "Tk 25,000", "used_percent": 25.0, "overdue": False}
+
+
+def test_coverage_says_what_period_was_read(bank):
+    f = snapshot.facts(build())
+    assert f["coverage"]["monthly_totals_from"] == "2026-06" and f["coverage"]["months_of_totals"] == 5
+    assert f["coverage"]["transactions_from"] == "2026-05-01" and f["coverage"]["could_not_read"] == []
+    bank["cut"] = True
+    assert snapshot.facts(build())["coverage"]["some_accounts_cut_short"] is True
+
+
+def test_a_failing_source_loses_only_itself_and_is_named(bank):
+    bank["fail"] = {"loans", "monthly"}
+    snap = build()
+    f = snapshot.facts(snap)
+    assert set(snap.missing) == {"loans", "monthly totals"} and "loans" not in f
+    assert "spending_by_category" not in f
+    assert f["income"]["average_per_month"] == "Tk 90,000"          # still known from the transaction rows
+    assert set(f["coverage"]["could_not_read"]) == {"loans", "monthly totals"}
+
+
+def test_with_no_data_at_all_the_facts_are_just_the_coverage(bank):
+    bank["fail"] = {"accounts", "monthly", "loans", "credit", "products", "/product/v1/fixed-deposit", "/product/v1/dps"}
+    f = snapshot.facts(build())
+    assert set(f) == {"as_of", "coverage"} and "accounts" in f["coverage"]["could_not_read"]
+
+
+def test_a_lost_login_is_not_swallowed(bank, monkeypatch):
+    async def expired(jwt):
+        raise AdapterAuthError("expired")
+
+    monkeypatch.setattr(snapshot.sources, "loans", expired)
+    with pytest.raises(AdapterAuthError):
+        build()
+
+
+def test_snapshots_are_cached_per_customer_until_forgotten(bank):
+    first = asyncio.run(snapshot.get(IDENTITY, "jwt", TODAY))
+    calls = bank["calls"]
+    assert asyncio.run(snapshot.get(IDENTITY, "jwt", TODAY)) is first and bank["calls"] == calls
+    snapshot.forget(IDENTITY)
+    assert asyncio.run(snapshot.get(IDENTITY, "jwt", TODAY)) is not first
+
+
+def test_month_keys_walk_back_across_a_year_end():
+    assert sources.month_keys(date(2026, 2, 10), 4) == ["2026-02", "2026-01", "2025-12", "2025-11"]
+    assert sources.window(date(2026, 2, 10), 3) == (date(2025, 12, 1), date(2026, 2, 10))

@@ -59,6 +59,15 @@ class Settings:
     MIN_RELEVANCE_SCORE: float = float(os.environ.get("MIN_RELEVANCE_SCORE", "0.3"))
     # Knowledge answers: the model plans the search and picks the passages that answer (app/knowledge). "false"
     # goes back to searching the message as typed.
+    # Personal advice (app/advisor): how much of the customer's history is read and when a pattern counts as one.
+    ADVISOR_DETAIL_MONTHS: int = int(os.environ.get("ADVISOR_DETAIL_MONTHS", "6"))       # months of transaction rows
+    ADVISOR_HISTORY_MONTHS: int = int(os.environ.get("ADVISOR_HISTORY_MONTHS", "36"))    # months of monthly totals
+    ADVISOR_PAGE_SIZE: int = int(os.environ.get("ADVISOR_PAGE_SIZE", "50"))
+    ADVISOR_MAX_PAGES: int = int(os.environ.get("ADVISOR_MAX_PAGES", "20"))              # per account
+    ADVISOR_CACHE_SECONDS: int = int(os.environ.get("ADVISOR_CACHE_SECONDS", "600"))
+    ADVISOR_RECURRING_MIN_OCCURRENCES: int = int(os.environ.get("ADVISOR_RECURRING_MIN_OCCURRENCES", "3"))
+    ADVISOR_RECURRING_INTERVAL_SPREAD: float = float(os.environ.get("ADVISOR_RECURRING_INTERVAL_SPREAD", "0.35"))
+    ADVISOR_RECURRING_AMOUNT_SPREAD: float = float(os.environ.get("ADVISOR_RECURRING_AMOUNT_SPREAD", "0.2"))
     KB_QUERY_PLANNING: bool = os.environ.get("KB_QUERY_PLANNING", "true").lower() not in ("0", "false", "no")
     OLLAMA_THINK: bool = os.environ.get("OLLAMA_THINK", "false").lower() == "true"
 
