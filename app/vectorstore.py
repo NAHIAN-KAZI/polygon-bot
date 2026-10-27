@@ -76,12 +76,14 @@ def search_in(query_vector: list[float], limit: int, products: list[str] | None 
     return [{**_hit_dict(h), "id": str(h.id)} for h in hits]
 
 
-def iter_payloads(fields: list[str]):
-    """Every stored point's payload, limited to `fields` (no vectors): for building small summaries of the index."""
+def iter_payloads(fields: list[str], doc_id: str | None = None):
+    """Every stored point's payload (of one document when `doc_id` is given), limited to `fields` and without
+    vectors: for building small summaries of the index."""
     offset = None
+    only = qm.Filter(must=[qm.FieldCondition(key="doc_id", match=qm.MatchValue(value=doc_id))]) if doc_id else None
     while True:
         points, offset = _client.scroll(collection_name=settings.QDRANT_COLLECTION, limit=500, offset=offset,
-                                        with_payload=fields, with_vectors=False)
+                                        scroll_filter=only, with_payload=fields, with_vectors=False)
         for point in points:
             yield point.payload or {}
         if offset is None:

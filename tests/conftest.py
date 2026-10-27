@@ -87,6 +87,10 @@ def _no_generated_clarifications(monkeypatch):
     # message runs, which the tests fake); tests of the planned path switch it on and fake its pieces.
     monkeypatch.setattr(chat_module.settings, "KB_QUERY_PLANNING", False)
 
+    # Product cards are built by the model in the background after an upload: off by default in tests.
+    import app.routes.documents as documents_module
+    monkeypatch.setattr(documents_module, "_schedule_product_cards", lambda doc_id, filename, chunks: None)
+
     # Freeze grounding check (an extra LLM call): pass the classification through
     # unchanged in tests; tests of the check itself capture the real function.
     async def _as_classified(result, message, recent_turns):
@@ -152,4 +156,5 @@ def isolated_catalog(monkeypatch, tmp_path):
     the real /app/data/documents.json and don't leak state between tests."""
     catalog_path = tmp_path / "documents.json"
     monkeypatch.setattr(settings, "DOCS_METADATA_PATH", str(catalog_path))
+    monkeypatch.setattr(settings, "PRODUCT_CARDS_PATH", str(tmp_path / "product_cards.json"))
     return catalog_path

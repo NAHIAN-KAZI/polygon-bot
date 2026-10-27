@@ -72,6 +72,10 @@ class Settings:
     KB_QUERY_PLANNING: bool = os.environ.get("KB_QUERY_PLANNING", "true").lower() not in ("0", "false", "no")
     OLLAMA_THINK: bool = os.environ.get("OLLAMA_THINK", "false").lower() == "true"
 
+    # Product cards (app/knowledge/product_cards.py): built from the knowledge base by the chat model.
+    PRODUCT_CARDS_PATH: str = os.environ.get("PRODUCT_CARDS_PATH", "/app/data/product_cards.json")
+    PRODUCT_CARD_TEXT_CHARS: int = int(os.environ.get("PRODUCT_CARD_TEXT_CHARS", "6000"))   # product text the model reads
+    PRODUCT_CARD_CONCURRENCY: int = int(os.environ.get("PRODUCT_CARD_CONCURRENCY", "4"))
     DOCS_METADATA_PATH: str = os.environ.get("DOCS_METADATA_PATH", "/app/data/documents.json")
 
     MAX_UPLOAD_MB: int = int(os.environ.get("MAX_UPLOAD_MB", "25"))
