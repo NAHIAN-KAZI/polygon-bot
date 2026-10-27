@@ -11,3 +11,6 @@ experiments/results/
 # local debug scratch scripts
 experiments/_dbg*.py
 experiments/_prompt.py
+
+# retrieval-eval embedding cache
+experiments/kb_eval/.cache/
