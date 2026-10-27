@@ -254,6 +254,20 @@ def history_note(facts: dict) -> str:
     return f"{months} complete month(s) of history, from {since}" if months else f"history from {since}, no complete month yet"
 
 
+def situation(facts: dict, balance: int | None) -> dict:
+    """The customer's headline figures under unmistakable labels, so a reply cannot mix up income and spending.
+    `balance` is the live balance in poisha (None when unknown)."""
+    out = {}
+    if "income" in facts:
+        out["average income per month"] = facts["income"].get("average_per_month")
+    if "spending" in facts:
+        out["average spending per month"] = facts["spending"].get("average_per_month")
+    if (facts.get("saving") or {}).get("rate_percent") is not None:
+        out["share of income left unspent (percent)"] = facts["saving"]["rate_percent"]
+    out["balance now"] = tk(balance)
+    return {k: v for k, v in out.items() if v is not None}
+
+
 def _category_row(c: dict) -> dict:
     return {"name": c["name"], "per_month": tk(c["per_month"]), "share_of_spending_percent": c["share"],
             "last_complete_month": tk(c.get("last_complete_month")), "change_percent": c.get("change_percent")}
@@ -305,6 +319,7 @@ async def advise(message: str, recent: list[str], snap: snap_mod.Snapshot, need:
                               "keep_in_mind": p.keep_in_mind or None})
             advice.must[f"suggested product {i}"] = c.name
             advice.products.append({"name": c.name, "group": c.group, "strength": "info"})
+        out["their_situation"] = situation(facts, averages["balance"])
         out["suggested_products"] = suggested
         out["no_product_fits"] = None if suggested else "nothing in the bank's products fits these figures well"
         out["history_covered"] = history_note(facts)

@@ -178,6 +178,11 @@ def test_a_recommendation_end_to_end_with_lead_tags_must_names_and_code_side_che
     assert result.must == {"suggested product 1": "Smart Saver"}
     assert result.products == [{"name": "Smart Saver", "group": "Deposit accounts", "strength": "info"}]
     assert result.used == "recommend" and result.facts["no_product_fits"] is None
+    # income and spending carry unmistakable labels so a reply cannot swap them
+    assert result.facts["their_situation"] == {"average income per month": "Tk 90,000",
+                                               "average spending per month": "Tk 68,000",
+                                               "share of income left unspent (percent)": 24.4,
+                                               "balance now": "Tk 69,000"}
 
 
 def test_when_nothing_fits_that_is_said_and_no_lead_is_made(monkeypatch):
