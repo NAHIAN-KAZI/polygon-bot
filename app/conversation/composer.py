@@ -162,6 +162,42 @@ def _history_block(history: Sequence[tuple[str, str]] | None) -> str:
 _MENTION_ALL = {"confirm", "verify", "caution", "summary", "done", "refused_by_bank", "choose", "ask", "switched_off"}
 
 
+# Bangla words as people type them in English letters (Banglish). Rule 7 tells the model to answer
+# Banglish in Bangla, but on a phone a Banglish request full of English banking words ("Amar own
+# account e 5000 taka transfer korte chai") was answered in English; this list lets code decide.
+_BANGLISH_WORDS = frozenset("""
+amar ami amake amader apnar apni apnake tumi tomar tomake ache achhe ase nai nei koto ki kivabe
+kibhabe kibabe keno kothay kokhon kon kono korte kore korbo korben koren korun koro kori korchi
+korechi korechen kora korar korbe chai chaai chacchi din den dao dekhao dekhau dekhan dekhaen dekha
+dekhte dekhbo dekhaben deben diben dite theke jonno hobe hoy hoye holo lagbe pathate pathabo pathao
+pathan pathiye pathale gula gulo ekta ta er na hoyeche gese geche gechhe gelo jacche jache bolen
+bolun bolo paro parbo parben pari pabo pai jabe jai bebohar haraye hariye churi shesh lenden hisab
+hishab khulte khulbo khule bondho chalu valo bhalo kemon dhonnobad shathe sathe onno anno
+kichu kicu korle dekhaon dekhai
+""".split())
+_BENGALI_LETTER_RE = re.compile(r"[\u0980-\u09E5\u09F0-\u09FF]")
+_ENGLISH_LETTER_RE = re.compile(r"[A-Za-z]")
+
+
+def reply_language(message: str) -> str | None:
+    """The language a reply to `message` must be in, decided in code, or None to leave it to rule 7
+    (a message with no language of its own: a number, a name, yes/no)."""
+    bengali = len(_BENGALI_LETTER_RE.findall(message or ""))
+    english = len(_ENGLISH_LETTER_RE.findall(message or ""))
+    if bengali == 0 and english == 0:
+        return None
+    # Two Bangla words in Bengali script make it Bangla, however many English words sit between
+    # them ("আমার account balance কত জানি কি?").
+    bengali_words = sum(bool(_BENGALI_LETTER_RE.search(w)) for w in (message or "").split())
+    if bengali >= english or bengali_words >= 2:
+        return "Bangla, in Bengali script"
+    words = re.findall(r"[a-z]+", (message or "").lower())
+    hits = sum(w in _BANGLISH_WORDS for w in words)
+    if hits >= 2 or (hits and (bengali_words or hits / len(words) >= 0.25)):
+        return "Bangla, in Bengali script -- the message is Bangla typed in English letters"
+    return "English"
+
+
 def build_messages(kind: str, facts: Mapping, message: str,
                    history: Sequence[tuple[str, str]] | None,
                    must_include: Mapping[str, str], retry_reason: str | None = None) -> list[dict]:
@@ -188,8 +224,10 @@ def build_messages(kind: str, facts: Mapping, message: str,
         f"Facts (JSON): {json.dumps(facts, ensure_ascii=False, default=str)}\n\n"
         f"{retry}"
         f"Your task: {purpose}\n"
-        "Write the reply in the language of the customer's latest message above (rule 7), "
-        "whatever language earlier messages used; the example only shows the shape.\n"
+        + (f"Write the reply in {language} (rule 7), whatever language earlier messages or the facts "
+           "use; the example only shows the shape.\n" if (language := reply_language(message)) else
+           "Write the reply in the language of the customer's latest message above (rule 7), "
+           "whatever language earlier messages used; the example only shows the shape.\n")
         + ("Include, in your own words but with exact values:\n" + "\n".join(checklist) + "\n" if checklist else "")
         + "Reply:"
     )

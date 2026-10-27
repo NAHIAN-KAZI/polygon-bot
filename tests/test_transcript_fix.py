@@ -123,6 +123,23 @@ def test_readings_are_deduplicated_capped_and_checked(model_says):
     assert fix.readings == ("send 500 to Rahim", "send 500 to Rahima", "send 500 to Karim")
 
 
+def test_a_swap_that_does_not_sound_like_what_was_heard_is_asked(model_says):
+    # Live: Titu wrote KYC as "কিক" and the model "corrected" it to কার্ড.
+    model_says({"text": "আমার কার্ড আপডেট করতে চাই", "readings": []})
+    fix = _fix("আমার কিক আপডেট করতে চাই")
+    assert fix.readings == ("আমার কার্ড আপডেট করতে চাই", "আমার কিক আপডেট করতে চাই")
+
+
+def test_a_misspelled_banking_word_is_fixed_without_asking(model_says):
+    model_says({"text": "আমার কার্ডটা ব্লক করে দিন", "readings": []})
+    assert _fix("আমার খড়টা ব্লক করে দিন") == TranscriptFix("আমার কার্ডটা ব্লক করে দিন")
+
+
+def test_an_english_word_written_in_english_letters_is_not_judged_by_sound(model_says):
+    model_says({"text": "আমার NPSB transfer status", "readings": []})
+    assert _fix("আমার এনপিএসবি ট্রান্সফার স্ট্যাটাস").readings == ()
+
+
 def test_a_single_reading_is_no_choice(model_says):
     model_says({"text": "send 500 to Rahim", "readings": ["send 500 to Rahima"]})
     assert _fix("send 500 to rohim") == TranscriptFix("send 500 to Rahim")
