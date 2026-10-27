@@ -47,13 +47,18 @@ class ProductCard:
     min_age: int | None = None
     max_age: int | None = None
     min_opening_amount: float | None = None   # taka
+    # Which application screen of the bank's app opens this product (an app action id), None when none does (a
+    # credit card, a product applied for at a branch...). Set once, when the card is built, by the model reading the
+    # product's text against the screens' descriptions; the chat then uses it without asking the model again.
+    apply_via: str | None = None
 
 
 def _clean(text: object, limit: int) -> str:
     return " ".join(str(text or "").split())[:limit]
 
 
-def build_prompt(name: str, group: str, text: str) -> str:
+def build_prompt(name: str, group: str, text: str, screens: dict[str, str] | None = None) -> str:
+    screen_lines = "\n".join(f"- {sid}: {desc}" for sid, desc in (screens or {}).items())
     return (
         "Below is text from a bank's website about one page, " + json.dumps(_clean(name, 90), ensure_ascii=False) +
         " (in the group " + json.dumps(_clean(group, 40), ensure_ascii=False) + "). Extract what the text says; use "
@@ -76,9 +81,12 @@ def build_prompt(name: str, group: str, text: str) -> str:
         '- "minimum": the minimum amount or balance as written, or null.\n'
         '- "min_monthly_income", "min_age", "max_age", "min_opening_amount": numbers the text states, in taka '
         "and years (the lowest income any listed customer group needs); null when the text does not state one.\n"
-        'Respond only with JSON: {"is_product": true, "kind": "", "summary": "", "eligibility": [], "fees": [], '
+        + (f'- "apply_via": the id of the app screen that opens an application for exactly this product, from the '
+           f"list below, or null when none of them does (for example a product applied for at a branch, or a kind of "
+           f"product no screen covers):\n{screen_lines}\n" if screen_lines else "")
+        + 'Respond only with JSON: {"is_product": true, "kind": "", "summary": "", "eligibility": [], "fees": [], '
         '"rates": [], "benefits": [], "best_for": [], "minimum": null, "min_monthly_income": null, "min_age": null, '
-        '"max_age": null, "min_opening_amount": null}'
+        '"max_age": null, "min_opening_amount": null, "apply_via": null}'
     )
 
 
@@ -93,7 +101,8 @@ def _number(value: object, ceiling: float) -> float | None:
     return number if 0 < number <= ceiling else None
 
 
-def parse(raw: object, name: str, group: str, source_url: str | None) -> ProductCard | None:
+def parse(raw: object, name: str, group: str, source_url: str | None,
+          screens: dict[str, str] | None = None) -> ProductCard | None:
     """The card, or None when the model says it is not a product or its answer is unusable."""
     if not isinstance(raw, dict) or raw.get("is_product") is not True:
         return None
@@ -111,19 +120,30 @@ def parse(raw: object, name: str, group: str, source_url: str | None) -> Product
                        summary=_clean(raw.get("summary"), 300), minimum=minimum or None, source_url=source_url,
                        min_monthly_income=_number(raw.get("min_monthly_income"), 100_000_000),
                        min_age=int(min_age) if min_age else None, max_age=int(max_age) if max_age else None,
-                       min_opening_amount=_number(raw.get("min_opening_amount"), 100_000_000_000), **lists)
+                       min_opening_amount=_number(raw.get("min_opening_amount"), 100_000_000_000),
+                       apply_via=raw["apply_via"] if isinstance(raw.get("apply_via"), str) and raw["apply_via"] in (screens or {}) else None,
+                       **lists)
+
+
+def application_screens() -> dict[str, str]:
+    """The app's screens that open an application for a product (the registry's apply-for actions): id to what it
+    is for, in the registry's own words. Read from the registry, never written here."""
+    from app.banking import ui_actions
+    return {a.id: f"{a.name}: {a.description}" for a in ui_actions.UI_ACTIONS.values()
+            if a.id in ui_actions.APPLY_FOR_ACTIONS and a.kind == "screen"}
 
 
 async def extract(name: str, group: str, text: str, source_url: str | None) -> ProductCard | None:
+    screens = application_screens()
     try:
         data = await llm_backend.post(
             "/api/generate",
-            {"model": settings.OLLAMA_MODEL, "prompt": build_prompt(name, group, text), "stream": False,
+            {"model": settings.OLLAMA_MODEL, "prompt": build_prompt(name, group, text, screens), "stream": False,
              "format": "json", "think": settings.OLLAMA_THINK,
              "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0}},
             timeout=60.0,
         )
-        return parse(json.loads(data.get("response") or "{}"), name, group, source_url)
+        return parse(json.loads(data.get("response") or "{}"), name, group, source_url, screens)
     except Exception:  # noqa: BLE001 -- one product failing must not stop the others
         logger.warning("product card extraction failed for %r", name)
         return None

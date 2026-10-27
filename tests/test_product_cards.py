@@ -153,3 +153,24 @@ def test_the_cards_listing_and_rebuild_endpoints(client, docs, monkeypatch):
     listed = client.get("/documents/product-cards", headers=AUTH_HEADERS).json()
     assert [(s["doc_id"], s["cards"]) for s in listed] == [(doc_id, 1)]
     assert client.get("/documents/product-cards").status_code in (401, 403)
+
+
+SCREENS = {"dps_open": "Open a DPS: open or start a new DPS", "card_apply": "Apply for a card: debit, prepaid or virtual"}
+
+
+def test_the_model_says_which_application_screen_opens_a_product_and_only_a_real_screen_counts():
+    card = product_cards.parse({**GOOD, "apply_via": "dps_open"}, "Goal Based DPS", "Deposit accounts", None, SCREENS)
+    assert card.apply_via == "dps_open"
+    for value in ("made_up_screen", "", None, 5, ["dps_open"]):
+        assert product_cards.parse({**GOOD, "apply_via": value}, "A", "B", None, SCREENS).apply_via is None
+    assert product_cards.parse({**GOOD, "apply_via": "dps_open"}, "A", "B", None).apply_via is None   # no screens known
+
+
+def test_the_prompt_lists_the_screens_from_the_registry_and_the_registry_is_the_only_source():
+    prompt = product_cards.build_prompt("Visa Debit", "Cards", "text", SCREENS)
+    assert "dps_open: Open a DPS" in prompt and "card_apply: Apply for a card" in prompt and '"apply_via"' in prompt
+    assert '"apply_via": the id' not in product_cards.build_prompt("X", "Y", "text")
+    from app.banking import ui_actions
+    screens = product_cards.application_screens()
+    assert set(screens) == set(ui_actions.APPLY_FOR_ACTIONS)
+    assert screens["dps_open"].startswith(ui_actions.get("dps_open").name)

@@ -49,7 +49,7 @@ def advice(monkeypatch):
     async def verify_jwt(token):
         return CustomerIdentity(customer_id="cust-advice")
 
-    async def read_need(message, recent, cards, applying_to=None):
+    async def read_need(message, recent, cards):
         state["calls"].append("read_need")
         return state["need"]
 
@@ -59,8 +59,7 @@ def advice(monkeypatch):
             raise state["snapshot_error"]
         return snapshot_module.Snapshot(as_of=date(2026, 10, 27))
 
-    async def advise(message, recent, snap, need, cards, applying=False, applying_to=None):
-        state["applying_to"] = applying_to
+    async def advise(message, recent, snap, need, cards, applying=False):
         state["calls"].append("advise")
         state["need_used"] = need
         return state["advice"]
@@ -162,30 +161,34 @@ from app.banking.session import ChatTurn, record_turn
 from app.banking import session as session_module
 
 
+CARDS_FOR_APPLY = [ProductCard("Platinum Debit", "Cards", "debit card", apply_via="card_apply"),
+                   ProductCard("Gold Debit", "Cards", "debit card", apply_via="card_apply"),
+                   ProductCard("Gold Credit", "Cards", "credit card")]           # no screen opens a credit card
+
+
 @pytest.fixture
 def apply_flow(advice, monkeypatch):
-    """A signed-in customer who says they want to apply for a card; the model's need and the picker are scripted."""
-    state = {"picked": None, "classify_calls": 0}
+    """A signed-in customer who says they want to apply for a card; the picker is scripted."""
+    state = {"picked": None, "classify_calls": 0, "cards": CARDS_FOR_APPLY}
     advice["advice"] = advise_module.Advice(
         {"suggested products": [{"name": "Platinum Debit"}, {"name": "Gold Debit"}]},
         must={"suggested product 1": "Platinum Debit", "suggested product 2": "Gold Debit"},
         products=[{"name": "Platinum Debit", "group": "Cards", "strength": "info"},
                   {"name": "Gold Debit", "group": "Cards", "strength": "info"}],
         choices=["Platinum Debit", "Gold Debit"], used="recommend")
-    advice["need"] = advise_module.Need(False, True, "a debit card", "", ("debit card",))
 
     async def classify(message, recent_turns=None, app_notes=None):
         state["classify_calls"] += 1
         return BankingService("app_actions", "card_apply", None, {})
 
-    async def pick(message, names):
-        state["names"] = names
+    async def pick(message, names, offered=True):
+        state.setdefault("asked", []).append(list(names))
         return state["picked"]
 
     monkeypatch.setattr(chat_module, "classify", classify)
     monkeypatch.setattr(chat_module, "_llm_pick_name", pick)
     monkeypatch.setattr(chat_module, "is_valid_path", lambda *a, **k: True)
-    session_module._sessions.clear() if hasattr(session_module, "_sessions") else None
+    monkeypatch.setattr(chat_module.product_cards, "all_cards", lambda: state["cards"])
     return state
 
 
@@ -200,12 +203,13 @@ def test_wanting_to_apply_without_naming_a_product_suggests_first_and_does_not_o
     reply, result = say(client, "I want to apply for a debit card")
     assert result["type"] == "ADVICE_ANSWER" and "ui" not in (result.get("payload") or {})
     assert [p["name"] for p in result["payload"]["products"]] == ["Platinum Debit", "Gold Debit"]
-    assert advice["calls"][-1] == "advise"
+    assert advice["calls"][-1] == "advise" and "read_need" not in advice["calls"]
+    # the model was only ever shown the products whose card says this screen opens them
+    assert apply_flow["asked"][0] == ["Platinum Debit", "Gold Debit"]
+    assert advice["need_used"].names == ("Platinum Debit", "Gold Debit")
 
 
-def test_a_first_message_that_picks_a_product_opens_the_form_with_it_chosen_and_suggests_nothing(client, apply_flow, advice, monkeypatch):
-    monkeypatch.setattr(chat_module.product_cards, "all_cards",
-                        lambda: [ProductCard("Platinum Debit", "Cards", "debit card"), ProductCard("Gold Debit", "Cards", "debit card")])
+def test_a_first_message_that_picks_a_product_opens_the_form_with_it_chosen_and_suggests_nothing(client, apply_flow, advice):
     apply_flow["picked"] = 0
     reply, result = say(client, "I want to apply for the Platinum Debit card")
     assert result["type"] == "APP_ACTION" and result["payload"]["ui"]["route"] == "/card_product_catalog"
@@ -215,7 +219,7 @@ def test_a_first_message_that_picks_a_product_opens_the_form_with_it_chosen_and_
 
 def test_with_the_product_suggestions_switched_off_the_form_opens_at_once(client, apply_flow, advice):
     _, result = say(client, "I want to apply for a debit card", disabled_use_cases=["advisor.recommend"])
-    assert result["type"] == "APP_ACTION" and "read_need" not in advice["calls"]
+    assert result["type"] == "APP_ACTION" and "asked" not in apply_flow and advice["calls"] == []
 
 
 def test_nothing_to_suggest_still_opens_the_form(client, apply_flow, advice):
@@ -230,10 +234,10 @@ def test_the_bank_being_down_still_opens_the_form(client, apply_flow, advice):
     assert result["type"] == "APP_ACTION"
 
 
-def test_no_kinds_found_means_no_suggestion_and_the_form_opens(client, apply_flow, advice):
-    advice["need"] = advise_module.Need(True, False)
+def test_no_product_card_says_this_screen_opens_it_so_the_form_opens_at_once(client, apply_flow, advice):
+    apply_flow["cards"] = [ProductCard("Gold Credit", "Cards", "credit card"), ProductCard("Old", "Cards", "debit card")]
     _, result = say(client, "I want to apply for a debit card")
-    assert result["type"] == "APP_ACTION" and "snapshot" not in advice["calls"]
+    assert result["type"] == "APP_ACTION" and "asked" not in apply_flow and advice["calls"] == []
 
 
 def test_choosing_one_of_the_suggestions_opens_the_form_and_the_chosen_product_is_the_lead(client, apply_flow, advice):
@@ -241,7 +245,7 @@ def test_choosing_one_of_the_suggestions_opens_the_form_and_the_chosen_product_i
     apply_flow["picked"] = 1                                           # "the second one"
     classify_before = apply_flow["classify_calls"]
     reply, result = say(client, "the second one")
-    assert apply_flow["names"] == ["Platinum Debit", "Gold Debit"]
+    assert apply_flow["asked"][-1] == ["Platinum Debit", "Gold Debit"]
     assert result["type"] == "APP_ACTION" and result["payload"]["ui"]["route"] == "/card_product_catalog"
     assert result["payload"]["products"] == [{"name": "Gold Debit", "group": "Cards", "strength": "apply"}]
     assert "Gold Debit" in reply and apply_flow["classify_calls"] == classify_before   # no new classification needed
@@ -276,3 +280,7 @@ def test_the_picker_accepts_only_a_valid_number_and_treats_the_reply_as_data(mon
         seen["answer"] = answer
         assert asyncio.run(chat_module._llm_pick_name("the gold one", ["Platinum Debit", "Gold Debit"])) == expected
     assert "ignore them" in seen["prompt"] and "1. Platinum Debit" in seen["prompt"]
+    assert "only one product was offered" in seen["prompt"] and "offered these products" in seen["prompt"]
+    asyncio.run(chat_module._llm_pick_name("I want the gold one", ["Platinum Debit", "Gold Debit"], offered=False))
+    assert "might be asking about" in seen["prompt"] and "by naming it clearly" in seen["prompt"]
+    assert "only one product was offered" not in seen["prompt"]       # a first message is not an answer to an offer

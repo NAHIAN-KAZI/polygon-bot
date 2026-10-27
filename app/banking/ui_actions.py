@@ -34,6 +34,11 @@ class UiAction:
     prefill: tuple[tuple[str, str], ...] = ()  # (field, meaning): optional, only what the customer wrote
 
 
+# The actions that start an application for a product the bank sells. A request for one that names no product is
+# first answered with suggestions, and a product card says which of these opens it (`apply_via`).
+APPLY_FOR_ACTIONS = ("card_apply", "loan_apply", "fd_open", "dps_open")
+
+
 def _a(id, name, domain, kind, description, needs, rows, screen=None, route=None, prefill=()):
     return UiAction(id, name, domain, kind, description, needs, tuple(rows), screen, route, tuple(prefill))
 
@@ -75,20 +80,21 @@ _LIST = [
        "open the pending limit-change request and confirm the cancellation",
        ["4.9"], "CardLimitChangeScreen", "/card_limit_change_request"),
     _a("card_apply", "Apply for a card", "cards", "screen",
-       "apply for or request a new card (debit, prepaid or virtual card); not viewing existing requests",
+       "apply for, request, get or take a new card (debit, prepaid or virtual card), including naming the card product "
+       "they want; not viewing existing requests",
        "choose a card product and the account to link, enter the name for the card and confirm with a one-time code and PIN",
        ["4.11", "4.13", "4.15"], "CardProductCatalogScreen", "/card_product_catalog",
        [("cardType", "debit, prepaid or virtual")]),
     _a("loan_apply", "Apply for a loan", "deposits_loans", "screen",
-       "apply for or request a new loan or financing (personal, home, car, business...); not viewing existing loans",
+       "apply for, request or take a new loan or financing (personal, home, car, business...); not viewing existing loans",
        "choose the kind of financing, enter the amount and how long to repay, and submit the request with the documents it asks for",
        ["1.9"], "LoanRequestScreen", "/loan_request"),
     _a("fd_open", "Open a fixed deposit", "deposits_loans", "screen",
-       "open a new fixed deposit (FD/FDR); not viewing existing ones or their profit",
+       "open, start or make a new fixed deposit (FD/FDR), or ask how to; not viewing existing ones or their profit",
        "choose the deposit scheme and how long to keep it, enter the amount and confirm",
        ["1.10"], "OpenFixedDepositScreen", "/products/open_fixed_deposit"),
     _a("dps_open", "Open a DPS", "deposits_loans", "screen",
-       "open a new DPS (monthly savings scheme); not viewing existing ones or their profit",
+       "open or start a new DPS (monthly savings scheme); not viewing existing ones or their profit",
        "choose the scheme, enter the monthly instalment and how long to save, and confirm",
        ["1.11"], "OpenDpsScreen", "/products/open_dps"),
     _a("card_virtual_cancel", "Cancel virtual card", "cards", "info",
