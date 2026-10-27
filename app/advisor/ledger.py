@@ -22,7 +22,7 @@ from app.config import settings
 _DIGIT_RUN = re.compile(r"\d(?:[ .\-]?\d){5,}")
 # Anything but letters, digits and a few harmless marks becomes a space: no quotes, brackets, colons or newlines, so
 # text written by another person cannot imitate a label or break out of the quoting it is shown in.
-_UNSAFE = re.compile(r"[^\w .,&'()/@_-]", re.UNICODE)
+_UNSAFE = re.compile(r"[^\w .,&'()/@•_-]", re.UNICODE)
 _WHO_LIMIT = 40
 
 
