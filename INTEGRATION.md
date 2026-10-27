@@ -292,7 +292,10 @@ data: {}
   banking-only decline instead of a real answer — both are this same type, distinguished only by
   `payload.grounded`). `category`/`service`/`subservice`/`routing` are all `null`. `payload` is
   `{"grounded": bool, "hitCount": int, "sources": [<filenames>] | null}` — `grounded` is true iff
-  at least one knowledge-base chunk was retrieved for the question; `hitCount` is how many;
+  the model found at least one knowledge-base passage that answers the question (it searches with the
+  customer's words plus queries it writes, then keeps only the passages that help; before T-127 this was
+  "any chunk matched", which was almost always true); `hitCount` is how many passages the answer was
+  written from;
   `sources` is a deduplicated, order-preserving list of the source document filenames those chunks
   came from when `grounded` is true, or `null` (never `[]`) when it's false.
 

@@ -55,6 +55,8 @@ from app.conversation.composer import (
 )
 from app.embeddings import embed_text
 from app.llm import build_prompt, stream_generate
+from app.knowledge import query_plan
+from app.knowledge import retrieve as knowledge_retrieve
 from app.vectorstore import search
 
 # OTP send/verify are deliberately unauthenticated, un-routed platform endpoints (no
@@ -2648,11 +2650,24 @@ def _trim_beneficiary(beneficiary: dict) -> dict:
     }
 
 
-async def _kb_stream(req: ChatRequest, request_id: str):
-    top_k = req.top_k or settings.DEFAULT_TOP_K
+async def _find_knowledge(message: str, recent: list[str], top_k: int | None) -> knowledge_retrieve.Retrieval:
+    """The passages that answer the message: plan, search and rerank (app/knowledge/retrieve.py), or, with
+    KB_QUERY_PLANNING=false, the plain search of the message as typed (the behaviour before T-124)."""
+    if settings.KB_QUERY_PLANNING:
+        return await knowledge_retrieve.retrieve(message, recent, top_k)
+    hits = search(await embed_text(message), top_k or settings.DEFAULT_TOP_K)
+    return knowledge_retrieve.Retrieval(hits, len(hits) > 0, query_plan.QueryPlan([message]), False)
+
+
+def _recent_customer_messages(turns: list[ChatTurn] | None) -> list[str]:
+    """What the customer said in the last two turns, oldest first: context for a follow-up question."""
+    return [t.message for t in (turns or [])[-2:] if t.message and not t.message.startswith("[redacted")]
+
+
+async def _kb_stream(req: ChatRequest, request_id: str, recent: list[str] | None = None):
     try:
-        query_vector = await embed_text(req.message)
-        hits = search(query_vector, top_k)
+        found = await _find_knowledge(req.message, recent or [], req.top_k)
+        hits = found.hits
     except httpx.HTTPStatusError as e:
         detail = f"Embedding model rejected the request: {e.response.text.strip()}"
         logger.warning(json.dumps({"request_id": request_id, "stage": "embedding", "detail": detail}))
@@ -2673,6 +2688,9 @@ async def _kb_stream(req: ChatRequest, request_id: str):
         "request_id": request_id,
         "hit_count": len(hits),
         "top_score": hits[0]["score"] if hits else None,
+        "queries": found.plan.queries,
+        "planned_products": len(found.plan.products),
+        "reranked": found.reranked,
     }))
 
     prompt = build_prompt(req.message, hits)
@@ -2689,7 +2707,7 @@ async def _kb_stream(req: ChatRequest, request_id: str):
 
     logger.info(json.dumps({"request_id": request_id, "answer": "".join(answer_parts)}))
 
-    grounded = len(hits) > 0
+    grounded = found.grounded
     sources: list[str] | None = None
     if grounded:
         sources = []
@@ -3181,7 +3199,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None):
     turn_classification: dict | None = None
 
     if isinstance(result, KbQuestion):
-        async for chunk in _kb_stream(req, request_id):
+        async for chunk in _kb_stream(req, request_id, _recent_customer_messages(recent_turns)):
             yield chunk
         if customer_identity is not None:
             record_turn(

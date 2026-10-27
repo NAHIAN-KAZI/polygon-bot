@@ -80,7 +80,7 @@ Always handle both `done` and `error`, because a stream is not guaranteed to rea
 | `OTP_REQUIRED` | A verification code was sent to the customer's registered phone | Open the secure verification form (§7). Never collect codes in the chat box |
 | `BENEFICIARY_MATCH` | "Send money to <name>" matched one saved beneficiary | Beneficiary card plus a "Send" button to the transfer screen (`TRANSFER.md`) |
 | `BENEFICIARY_SELECTION_REQUIRED` | Several beneficiaries match the name | Picker from `payload.beneficiaries` (`TRANSFER.md`) |
-| `KB_ANSWER` | Product/policy answer from the bank's knowledge base, or a polite off-topic decline | Bubble. `payload`: `{"grounded", "hitCount", "sources"}` (`sources` may be `null`) |
+| `KB_ANSWER` | Product/policy answer from the bank's knowledge base, or a polite off-topic decline | Bubble. `payload`: `{"grounded", "hitCount", "sources"}` (`sources` may be `null`); `grounded` is true only when a passage that answers the question was found, so `false` means a knowledge gap (T-127) |
 | `APP_ACTIONS_ANSWER` | Answer about what the customer just did in an app box (from `payload.uiContext`) | Bubble only. `payload`: `{}` |
 | `USE_CASE_DISABLED` | The bank switched this use case off and the app has no screen for it | Bubble only. `payload`: `{"useCase": "<id>", "useCaseDisabled": true}` |
 | `UNKNOWN_SERVICE` | A direct route named a `category`/`service`/`subservice` that doesn't exist | Bubble. Check the ids you sent |

@@ -83,6 +83,10 @@ def _no_generated_clarifications(monkeypatch):
 
     monkeypatch.setattr(chat_module, "_read_product_interest", _no_lead_tags)
 
+    # Planning and reranking knowledge searches are model calls: off by default in tests (the plain search of the
+    # message runs, which the tests fake); tests of the planned path switch it on and fake its pieces.
+    monkeypatch.setattr(chat_module.settings, "KB_QUERY_PLANNING", False)
+
     # Freeze grounding check (an extra LLM call): pass the classification through
     # unchanged in tests; tests of the check itself capture the real function.
     async def _as_classified(result, message, recent_turns):

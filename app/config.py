@@ -57,6 +57,9 @@ class Settings:
     DEFAULT_TOP_K: int = int(os.environ.get("DEFAULT_TOP_K", "5"))
     MAX_TOP_K: int = int(os.environ.get("MAX_TOP_K", "20"))
     MIN_RELEVANCE_SCORE: float = float(os.environ.get("MIN_RELEVANCE_SCORE", "0.3"))
+    # Knowledge answers: the model plans the search and picks the passages that answer (app/knowledge). "false"
+    # goes back to searching the message as typed.
+    KB_QUERY_PLANNING: bool = os.environ.get("KB_QUERY_PLANNING", "true").lower() not in ("0", "false", "no")
     OLLAMA_THINK: bool = os.environ.get("OLLAMA_THINK", "false").lower() == "true"
 
     DOCS_METADATA_PATH: str = os.environ.get("DOCS_METADATA_PATH", "/app/data/documents.json")

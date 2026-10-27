@@ -4,9 +4,9 @@ File `POLYGON_BANK_KNOWLEDGE_BASE_POLYGON.md`, 2121 chunks, embedding model `all
 
 ### FAQ questions (named product)
 
-| questions | recall@1 | recall@5 | recall@10 | recall@20 | MRR | median rank | not found |
-|---|---|---|---|---|---|---|---|
-| 101 | 78% | 86% | 92% | 93% | 0.828 | 1 | 0 |
+| questions | recall@1 | recall@5 | recall@10 | recall@20 | recall@30 | MRR | median rank | not found |
+|---|---|---|---|---|---|---|---|---|
+| 101 | 78% | 86% | 92% | 93% | 95% | 0.828 | 1 | 0 |
 
 Worst misses (rank of the first correct chunk):
 
@@ -27,9 +27,9 @@ Worst misses (rank of the first correct chunk):
 
 ### Generic questions
 
-| questions | recall@1 | recall@5 | recall@10 | recall@20 | MRR | median rank | not found |
-|---|---|---|---|---|---|---|---|
-| 39 | 44% | 74% | 85% | 92% | 0.561 | 2 | 0 |
+| questions | recall@1 | recall@5 | recall@10 | recall@20 | recall@30 | MRR | median rank | not found |
+|---|---|---|---|---|---|---|---|---|
+| 39 | 44% | 74% | 85% | 92% | 97% | 0.561 | 2 | 0 |
 
 Worst misses (rank of the first correct chunk):
 

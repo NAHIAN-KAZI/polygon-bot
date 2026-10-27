@@ -73,6 +73,7 @@ def summarise(ranks: list[int | None]) -> dict:
         "recall@5": sum(1 for r in found if r <= 5) / n,
         "recall@10": sum(1 for r in found if r <= 10) / n,
         "recall@20": sum(1 for r in found if r <= 20) / n,
+        "recall@30": sum(1 for r in found if r <= 30) / n,
         "mrr": sum(1 / r for r in found) / n,
         "median_rank": statistics.median(found) if found else None,
         "not_found": len(ranks) - len(found),
