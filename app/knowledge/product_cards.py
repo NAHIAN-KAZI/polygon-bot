@@ -57,8 +57,7 @@ def _clean(text: object, limit: int) -> str:
     return " ".join(str(text or "").split())[:limit]
 
 
-def build_prompt(name: str, group: str, text: str, screens: dict[str, str] | None = None) -> str:
-    screen_lines = "\n".join(f"- {sid}: {desc}" for sid, desc in (screens or {}).items())
+def build_prompt(name: str, group: str, text: str) -> str:
     return (
         "Below is text from a bank's website about one page, " + json.dumps(_clean(name, 90), ensure_ascii=False) +
         " (in the group " + json.dumps(_clean(group, 40), ensure_ascii=False) + "). Extract what the text says; use "
@@ -81,12 +80,9 @@ def build_prompt(name: str, group: str, text: str, screens: dict[str, str] | Non
         '- "minimum": the minimum amount or balance as written, or null.\n'
         '- "min_monthly_income", "min_age", "max_age", "min_opening_amount": numbers the text states, in taka '
         "and years (the lowest income any listed customer group needs); null when the text does not state one.\n"
-        + (f'- "apply_via": the id of the app screen that opens an application for exactly this product, from the '
-           f"list below, or null when none of them does (for example a product applied for at a branch, or a kind of "
-           f"product no screen covers):\n{screen_lines}\n" if screen_lines else "")
-        + 'Respond only with JSON: {"is_product": true, "kind": "", "summary": "", "eligibility": [], "fees": [], '
+        'Respond only with JSON: {"is_product": true, "kind": "", "summary": "", "eligibility": [], "fees": [], '
         '"rates": [], "benefits": [], "best_for": [], "minimum": null, "min_monthly_income": null, "min_age": null, '
-        '"max_age": null, "min_opening_amount": null, "apply_via": null}'
+        '"max_age": null, "min_opening_amount": null}'
     )
 
 
@@ -101,8 +97,7 @@ def _number(value: object, ceiling: float) -> float | None:
     return number if 0 < number <= ceiling else None
 
 
-def parse(raw: object, name: str, group: str, source_url: str | None,
-          screens: dict[str, str] | None = None) -> ProductCard | None:
+def parse(raw: object, name: str, group: str, source_url: str | None) -> ProductCard | None:
     """The card, or None when the model says it is not a product or its answer is unusable."""
     if not isinstance(raw, dict) or raw.get("is_product") is not True:
         return None
@@ -121,7 +116,6 @@ def parse(raw: object, name: str, group: str, source_url: str | None,
                        min_monthly_income=_number(raw.get("min_monthly_income"), 100_000_000),
                        min_age=int(min_age) if min_age else None, max_age=int(max_age) if max_age else None,
                        min_opening_amount=_number(raw.get("min_opening_amount"), 100_000_000_000),
-                       apply_via=raw["apply_via"] if isinstance(raw.get("apply_via"), str) and raw["apply_via"] in (screens or {}) else None,
                        **lists)
 
 
@@ -133,17 +127,54 @@ def application_screens() -> dict[str, str]:
             if a.id in ui_actions.APPLY_FOR_ACTIONS and a.kind == "screen"}
 
 
-async def extract(name: str, group: str, text: str, source_url: str | None) -> ProductCard | None:
-    screens = application_screens()
+def screen_prompt(card: "ProductCard", screens: dict[str, str]) -> str:
+    listing = "\n".join(f"- {sid}: {desc}" for sid, desc in screens.items())
+    return (
+        "A bank sells this product:\n"
+        f"name: {json.dumps(card.name, ensure_ascii=False)}\nkind: {json.dumps(card.kind, ensure_ascii=False)}\n"
+        f"what it is: {json.dumps(_clean(card.summary, 200), ensure_ascii=False)}\n\n"
+        f"These are the application screens in the bank's app:\n{listing}\n\n"
+        "Which one of them is where a customer applies for, or opens, this very product? Answer with its id. If "
+        "no screen here is for this product (it is applied for another way, or it is a different kind of product "
+        'than any screen handles), answer null. Respond only with JSON: {"screen": "<id>" | null}'
+    )
+
+
+def parse_screen(raw: object, screens: dict[str, str]) -> str | None:
+    value = raw.get("screen") if isinstance(raw, dict) else None
+    return value if isinstance(value, str) and value in screens else None
+
+
+async def apply_screen(card: "ProductCard", screens: dict[str, str]) -> str | None:
+    """Which application screen opens this product: a small closed-list question of its own, asked once when the
+    card is built. None when the model says none, or cannot be asked."""
+    if not screens:
+        return None
     try:
         data = await llm_backend.post(
             "/api/generate",
-            {"model": settings.OLLAMA_MODEL, "prompt": build_prompt(name, group, text, screens), "stream": False,
+            {"model": settings.OLLAMA_MODEL, "prompt": screen_prompt(card, screens), "stream": False,
+             "format": "json", "think": settings.OLLAMA_THINK,
+             "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0}},
+            timeout=30.0)
+        return parse_screen(json.loads(data.get("response") or "{}"), screens)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+async def extract(name: str, group: str, text: str, source_url: str | None) -> ProductCard | None:
+    try:
+        data = await llm_backend.post(
+            "/api/generate",
+            {"model": settings.OLLAMA_MODEL, "prompt": build_prompt(name, group, text), "stream": False,
              "format": "json", "think": settings.OLLAMA_THINK,
              "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0}},
             timeout=60.0,
         )
-        return parse(json.loads(data.get("response") or "{}"), name, group, source_url, screens)
+        card = parse(json.loads(data.get("response") or "{}"), name, group, source_url)
+        if card is not None:
+            card.apply_via = await apply_screen(card, application_screens())
+        return card
     except Exception:  # noqa: BLE001 -- one product failing must not stop the others
         logger.warning("product card extraction failed for %r", name)
         return None

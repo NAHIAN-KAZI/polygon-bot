@@ -158,19 +158,39 @@ def test_the_cards_listing_and_rebuild_endpoints(client, docs, monkeypatch):
 SCREENS = {"dps_open": "Open a DPS: open or start a new DPS", "card_apply": "Apply for a card: debit, prepaid or virtual"}
 
 
-def test_the_model_says_which_application_screen_opens_a_product_and_only_a_real_screen_counts():
-    card = product_cards.parse({**GOOD, "apply_via": "dps_open"}, "Goal Based DPS", "Deposit accounts", None, SCREENS)
-    assert card.apply_via == "dps_open"
-    for value in ("made_up_screen", "", None, 5, ["dps_open"]):
-        assert product_cards.parse({**GOOD, "apply_via": value}, "A", "B", None, SCREENS).apply_via is None
-    assert product_cards.parse({**GOOD, "apply_via": "dps_open"}, "A", "B", None).apply_via is None   # no screens known
+def test_the_screen_answer_is_a_real_screen_id_or_nothing():
+    assert product_cards.parse_screen({"screen": "dps_open"}, SCREENS) == "dps_open"
+    for raw in ({"screen": "made_up"}, {"screen": None}, {"screen": 5}, {"screen": ["dps_open"]}, {}, None, "dps_open"):
+        assert product_cards.parse_screen(raw, SCREENS) is None
 
 
-def test_the_prompt_lists_the_screens_from_the_registry_and_the_registry_is_the_only_source():
-    prompt = product_cards.build_prompt("Visa Debit", "Cards", "text", SCREENS)
-    assert "dps_open: Open a DPS" in prompt and "card_apply: Apply for a card" in prompt and '"apply_via"' in prompt
-    assert '"apply_via": the id' not in product_cards.build_prompt("X", "Y", "text")
+def test_the_screen_question_is_small_and_lists_the_screens_from_the_registry():
+    card = ProductCard("Goal Based DPS", "Deposit accounts", "deposit account", summary="A monthly savings scheme.")
+    prompt = product_cards.build_prompt("Goal Based DPS", "Deposit accounts", "text")
+    assert "apply_via" not in prompt                                   # the big extraction no longer asks it
+    question = product_cards.screen_prompt(card, SCREENS)
+    assert "Goal Based DPS" in question and "dps_open: Open a DPS" in question and "answer null" in question
     from app.banking import ui_actions
     screens = product_cards.application_screens()
-    assert set(screens) == set(ui_actions.APPLY_FOR_ACTIONS)
-    assert screens["dps_open"].startswith(ui_actions.get("dps_open").name)
+    assert set(screens) == set(ui_actions.APPLY_FOR_ACTIONS) and screens["dps_open"].startswith(ui_actions.get("dps_open").name)
+
+
+def test_extraction_then_one_screen_question_labels_the_card_and_a_failed_question_leaves_it_unlabelled(monkeypatch):
+    calls = []
+
+    async def post(path, body, timeout=None):
+        calls.append(body["prompt"])
+        if "application screens" in body["prompt"]:
+            if screens_fail:
+                raise RuntimeError("down")
+            return {"response": json.dumps({"screen": "dps_open"})}
+        return {"response": json.dumps(GOOD)}
+
+    monkeypatch.setattr(product_cards.llm_backend, "post", post)
+    monkeypatch.setattr(product_cards, "application_screens", lambda: SCREENS)
+    screens_fail = False
+    card = asyncio.run(product_cards.extract("Goal Based DPS", "Deposit accounts", "text", None))
+    assert card.apply_via == "dps_open" and len(calls) == 2
+    screens_fail = True
+    card = asyncio.run(product_cards.extract("Goal Based DPS", "Deposit accounts", "text", None))
+    assert card is not None and card.apply_via is None
