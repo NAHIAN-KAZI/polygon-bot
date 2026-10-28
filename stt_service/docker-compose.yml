@@ -1,11 +1,18 @@
 # Run on the GPU box: docker compose up -d --build
 # Host port: STT_PORT (default 8791; 8000-8002 are Triton/vLLM defaults on GPU boxes).
+# STT_BIND=127.0.0.1 keeps the port off the network (reach it through an SSH tunnel).
+# More models side by side: one compose project each (-p), with its own port and model, e.g.
+#   STT_PORT=8792 STT_BIND=127.0.0.1 STT_MODEL=hishab/titu_stt_bn_conformer_large \
+#     docker compose -p stt-conformer-large up -d
 services:
   stt:
     build: .
+    image: titu-stt
     ports:
-      - "${STT_PORT:-8791}:8001"
+      - "${STT_BIND:-0.0.0.0}:${STT_PORT:-8791}:8001"
     environment:
+      STT_MODEL: ${STT_MODEL:-hishab/titu_stt_bn_conformer_large}
+      STT_MODEL_FILE: ${STT_MODEL_FILE:-}
       STT_API_KEY: ${STT_API_KEY:-}
       HF_TOKEN: ${HF_TOKEN:-}
     volumes:

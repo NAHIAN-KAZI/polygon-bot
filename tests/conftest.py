@@ -39,6 +39,7 @@ def _no_generated_clarifications(monkeypatch):
     never call a live Ollama. Tests of the composer itself import it directly."""
     import app.routes.chat as chat_module
     from app.conversation.composer import facts_listing
+    from app.conversation.transcript_fix import TranscriptFix
 
     def _render(kind, facts, must_include):
         listing = facts_listing({**facts, **(must_include or {})})
@@ -111,6 +112,13 @@ def _no_generated_clarifications(monkeypatch):
         return result
 
     monkeypatch.setattr(chat_module, "_fill_known_from_message", _unchanged)
+
+    # Correcting a voice transcript is a model call too: off by default (the transcript stands
+    # as heard); tests of the correction patch llm_backend or capture the real function.
+    async def _as_heard(heard):
+        return TranscriptFix(heard)
+
+    monkeypatch.setattr(chat_module, "correct_transcript", _as_heard)
 
     # Checking that a transfer's destination was actually written is a model call too: off
     # by default (the classification stands); tests of it capture the real function.

@@ -20,8 +20,7 @@ from app.conversation.composer import (
     compose_stream,
     facts_listing,
     generate_chat,
-    unsupported_numbers,
-)
+    unsupported_numbers, reply_language)
 from app.conversation.persona import GLOBAL_PERSONA, KIND_EXAMPLE, KIND_PURPOSE, LLM_DOWN_MESSAGE
 
 
@@ -525,8 +524,29 @@ def test_persona_tells_the_model_to_follow_the_customers_language():
 def test_every_built_prompt_repeats_the_language_rule_after_the_english_example():
     for kind in KIND_PURPOSE:
         user = build_messages(kind, {"x": "y"}, "amar balance koto", None, {})[1]["content"]
-        assert "language of the customer's latest message above (rule 7)" in user
-        assert user.index("language of the customer's latest message above (rule 7)") > user.index("Customer: amar balance koto")
+        line = "Write the reply in Bangla, in Bengali script"
+        assert line in user
+        assert user.index(line) > user.index("Customer: amar balance koto")
+
+
+@pytest.mark.parametrize("message, language", [
+    ("আমার ব্যালেন্স কত?", "Bangla, in Bengali script"),
+    ("আমার account balance কত জানি কি?", "Bangla, in Bengali script"),
+    # Live: answered in English before the language was decided in code.
+    ("Amar own account e 5000 taka transfer korte chai", "Bangla, in Bengali script -- the message is"),
+    ("cash by code koren", "Bangla, in Bengali script -- the message is"),
+    ("What is my balance?", "English"),
+    ("Please send 500 taka to my brother", "English"),
+    ("e-mail me my statement", "English"),
+])
+def test_the_reply_language_is_decided_in_code(message, language):
+    assert reply_language(message).startswith(language)
+
+
+def test_a_message_with_no_language_of_its_own_is_left_to_rule_7():
+    assert reply_language("500") is None
+    user = build_messages("answer", {"x": "y"}, "500", None, {})[1]["content"]
+    assert "language of the customer's latest message above (rule 7)" in user
 
 
 def test_check_reply_accepts_bangla_replies_with_bengali_digits_for_amounts_in_the_facts():
