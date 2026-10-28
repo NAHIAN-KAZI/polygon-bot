@@ -50,12 +50,32 @@ def _format_chunk(c: dict) -> str:
     return f"[source: {c['filename']}{page_suffix}]\n{c['text']}"
 
 
-def build_prompt(question: str, context_chunks: list[dict], nearest: list[dict] | None = None) -> str:
+def _live_block(live: str | None) -> str:
+    if not live:
+        return ""
+    return (
+        "The bank's own list of cards right now. It is complete: when the customer asks which cards the bank has "
+        "or compares them, name every card in it, spelled as written and split as it is, never replace the cards "
+        "by their networks. Use the knowledge for what each card gives, costs and requires.\n"
+        f"{live}\n\n"
+    )
+
+
+def build_prompt(question: str, context_chunks: list[dict], nearest: list[dict] | None = None,
+                 live: str | None = None) -> str:
     if not context_chunks and nearest:
         related = "\n\n".join(_format_chunk(c) for c in nearest)
         return (
             f"{SYSTEM_PROMPT_NEAREST}\n\n"
+            f"{_live_block(live)}"
             f"Related knowledge:\n{related}\n\n"
+            f"Question: {question}\n"
+            f"Answer:"
+        )
+    if not context_chunks and live:
+        return (
+            f"{SYSTEM_PROMPT_WITH_CONTEXT}\n\n"
+            f"Context:\n{_live_block(live)}"
             f"Question: {question}\n"
             f"Answer:"
         )
@@ -68,7 +88,7 @@ def build_prompt(question: str, context_chunks: list[dict], nearest: list[dict] 
     context = "\n\n".join(_format_chunk(c) for c in context_chunks)
     return (
         f"{SYSTEM_PROMPT_WITH_CONTEXT}\n\n"
-        f"Context:\n{context}\n\n"
+        f"Context:\n{_live_block(live)}{context}\n\n"
         f"Question: {question}\n"
         f"Answer:"
     )

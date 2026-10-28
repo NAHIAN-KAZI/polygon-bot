@@ -57,6 +57,7 @@ from app.conversation.composer import (
     unsupported_numbers,
 )
 from app.embeddings import embed_text
+from app.knowledge import live_cards as live_cards_mod
 from app.llm import build_prompt, stream_generate
 from app.advisor import advise as advisor_advise
 from app.advisor import snapshot as advisor_snapshot
@@ -969,6 +970,7 @@ def _ui_prefill(action: "ui_actions.UiAction", payload: dict | None, message: st
 
 # App actions that start a product the bank sells: the back office counts them as a lead that wants the product.
 _APP_ACTION_PRODUCTS = {"card_apply": ("Card application", "Cards"),
+                        "credit_card_apply": ("Credit card application", "Cards"),
                         "loan_apply": ("Loan application", "Loans and finance"),
                         "fd_open": ("Fixed deposit opening", "Deposit accounts"),
                         "dps_open": ("DPS opening", "Deposit accounts")}
@@ -2687,7 +2689,8 @@ def _recent_customer_messages(turns: list[ChatTurn] | None) -> list[str]:
     return [t.message for t in (turns or [])[-2:] if t.message and not t.message.startswith("[redacted")]
 
 
-async def _kb_stream(req: ChatRequest, request_id: str, recent: list[str] | None = None):
+async def _kb_stream(req: ChatRequest, request_id: str, recent: list[str] | None = None,
+                     live_cards: list[dict] | None = None):
     try:
         found = await _find_knowledge(req.message, recent or [], req.top_k)
         hits = found.hits
@@ -2716,7 +2719,7 @@ async def _kb_stream(req: ChatRequest, request_id: str, recent: list[str] | None
         "reranked": found.reranked,
     }))
 
-    prompt = build_prompt(req.message, hits, found.nearest)
+    prompt = build_prompt(req.message, hits, found.nearest, live_cards_mod.prompt_block(live_cards) if live_cards else None)
     answer_parts: list[str] = []
     try:
         async for token in stream_generate(prompt):
@@ -3505,7 +3508,8 @@ async def _chat_stream(req: ChatRequest, authorization: str | None, heard_readin
                     yield chunk
                 yield _sse("done", {})
                 return
-            async for chunk in _kb_stream(req, request_id, _recent_customer_messages(recent_turns)):
+            live = await live_cards_mod.current(token, customer_identity)
+            async for chunk in _kb_stream(req, request_id, _recent_customer_messages(recent_turns), live_cards=live):
                 yield chunk
             if customer_identity is not None:
                 record_turn(customer_identity.customer_id,

@@ -36,7 +36,7 @@ class UiAction:
 
 # The actions that start an application for a product the bank sells. A request for one that names no product is
 # first answered with suggestions, and a product card says which of these opens it (`apply_via`).
-APPLY_FOR_ACTIONS = ("card_apply", "loan_apply", "fd_open", "dps_open")
+APPLY_FOR_ACTIONS = ("card_apply", "credit_card_apply", "loan_apply", "fd_open", "dps_open")
 
 
 def _a(id, name, domain, kind, description, needs, rows, screen=None, route=None, prefill=()):
@@ -79,12 +79,20 @@ _LIST = [
        "cancel a card limit change request they already submitted",
        "open the pending limit-change request and confirm the cancellation",
        ["4.9"], "CardLimitChangeScreen", "/card_limit_change_request"),
-    _a("card_apply", "Apply for a card", "cards", "screen",
-       "apply for, request, get or take a new card (debit, credit, prepaid or virtual card), including naming the card "
-       "product they want; not viewing existing requests",
-       "choose a card product and the account to link, enter the name for the card and confirm with a one-time code and PIN",
+    _a("card_apply", "Apply for a virtual card", "cards", "screen",
+       "apply for, request, get or take a new debit, prepaid or virtual card (the app requests all three on its virtual "
+       "card screen, so a debit card is applied for there), including naming the card product they want; not a credit "
+       "card, and not viewing existing requests",
+       "choose a card product and the account to link, enter the name for the card and confirm; debit and prepaid cards "
+       "need a one-time code and PIN, a virtual card request goes to the bank for review",
        ["4.11", "4.13", "4.15"], "CardProductCatalogScreen", "/card_product_catalog",
-       [("cardType", "debit, credit, prepaid or virtual")]),
+       [("cardType", "debit, prepaid or virtual")]),
+    _a("credit_card_apply", "Apply for a credit card", "cards", "screen",
+       "apply for, request, get or take a new credit card, or ask for a credit card limit; not a debit, prepaid or "
+       "virtual card, and not viewing existing applications",
+       "enter the credit limit they would like and submit; the bank reviews the application and decides the card and "
+       "the final limit, and an approved card then appears under My Accounts",
+       ["4.24"], "CreditCardApplicationScreen", "/apply_for_credit_card"),
     _a("loan_apply", "Apply for a loan", "deposits_loans", "screen",
        "apply for, request or take a new loan or financing (personal, home, car, business...); not viewing existing loans",
        "choose the kind of financing, enter the amount and how long to repay, and submit the request with the documents it asks for",

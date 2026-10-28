@@ -143,6 +143,7 @@ included).
 | 4.21 Credit card bill payment (bill service) | ✅ App action (T-79): the bot returns `APP_ACTION` `other_card_pay` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
 | 4.22 QR payment cards — list | 🚫 No backend — the bot says so (T-79: `APP_ACTION` `qr_payment_cards`, kind `unavailable`) |
 | 4.23 QR payment card — enable/disable | 🚫 No backend — the bot says so (T-79: `APP_ACTION` `qr_payment_cards`, kind `unavailable`) |
+| 4.24 Apply for credit card | ✅ App action (T-145): the bot returns `APP_ACTION` `credit_card_apply` (opens the credit card application screen: a requested credit limit, the bank decides the card). `card_apply` now covers debit, prepaid and virtual cards only, all requested on the virtual card screen. |
 
 ## CARD_REPLACEMENT — *Done (read-only)*
 | # | Endpoint | Status |

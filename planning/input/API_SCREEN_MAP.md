@@ -110,6 +110,7 @@ Use this to cross-check `routing.action`/screen-redirect hints against real scre
 
 **Card products** — `card/v1/card-products`
 - Card Products catalog (`CardProductCatalogScreen`) — on load / change type tab
+- Apply for Credit Card (`CreditCardApplicationScreen`, route `/apply_for_credit_card`, `POST card/v1/cards/credit/applications`) — tap Apply (a requested credit limit)
 - Apply for Virtual Card (`RequestVirtualCardScreen`) — on selecting category (selectCategory)
 
 **Debit card application** — `card/v1/cards/debit`

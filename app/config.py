@@ -78,6 +78,7 @@ class Settings:
     OLLAMA_THINK: bool = os.environ.get("OLLAMA_THINK", "false").lower() == "true"
 
     # Product cards (app/knowledge/product_cards.py): built from the knowledge base by the chat model.
+    LIVE_CARDS_TTL: int = int(os.environ.get("LIVE_CARDS_TTL", "600"))   # seconds the bank's card list is kept (T-145)
     PRODUCT_CARDS_PATH: str = os.environ.get("PRODUCT_CARDS_PATH", "/app/data/product_cards.json")
     PRODUCT_CARD_TEXT_CHARS: int = int(os.environ.get("PRODUCT_CARD_TEXT_CHARS", "6000"))   # product text the model reads
     PRODUCT_CARD_CONCURRENCY: int = int(os.environ.get("PRODUCT_CARD_CONCURRENCY", "4"))
