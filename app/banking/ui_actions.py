@@ -83,8 +83,9 @@ _LIST = [
        "apply for, request, get or take a new debit, prepaid or virtual card (the app requests all three on its virtual "
        "card screen, so a debit card is applied for there), including naming the card product they want; not a credit "
        "card, and not viewing existing requests",
-       "choose a card product and the account to link, enter the name for the card and confirm; debit and prepaid cards "
-       "need a one-time code and PIN, a virtual card request goes to the bank for review",
+       "debit, prepaid and virtual cards are all requested on this one screen, the app has no separate debit card "
+       "application: choose a card product and the account to link, enter the name for the card and confirm; debit and "
+       "prepaid cards need a one-time code and PIN, a virtual card request goes to the bank for review",
        ["4.11", "4.13", "4.15"], "CardProductCatalogScreen", "/card_product_catalog",
        [("cardType", "debit, prepaid or virtual")]),
     _a("credit_card_apply", "Apply for a credit card", "cards", "screen",

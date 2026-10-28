@@ -284,3 +284,59 @@ def test_the_picker_accepts_only_a_valid_number_and_treats_the_reply_as_data(mon
     asyncio.run(chat_module._llm_pick_name("I want the gold one", ["Platinum Debit", "Gold Debit"], offered=False))
     assert "might be asking about" in seen["prompt"] and "by naming it clearly" in seen["prompt"]
     assert "only one product was offered" not in seen["prompt"]       # a first message is not an answer to an offer
+
+
+def test_a_first_message_picks_a_product_only_when_the_quoted_words_are_in_it(monkeypatch):
+    import asyncio
+
+    answers = {}
+
+    async def post(path, body, timeout=None):
+        return {"response": json.dumps(answers)}
+
+    monkeypatch.setattr(chat_module.llm_backend, "post", post)
+    names = ["Platinum Debit", "Gold Debit"]
+
+    def pick(message, **answer):
+        answers.clear()
+        answers.update(answer)
+        return asyncio.run(chat_module._llm_pick_name(message, names, offered=False))
+
+    assert pick("I want the Gold Debit one", choice=2, quote="gold debit") == 1
+    assert pick("I want a debit card", choice=2, quote="Gold Debit") is None       # words the customer never wrote
+    assert pick("I want a debit card", choice=2) is None                          # no quote
+    assert pick("I want a debit card", choice=2, quote="  ") is None
+    assert pick("I want a debit card", choice=0, quote="debit card") is None
+
+
+def test_a_message_the_classifier_could_not_place_becomes_the_application_it_says_it_wants(monkeypatch):
+    import asyncio
+
+    from app.banking.routing import Clarification
+
+    answers = {}
+
+    async def post(path, body, timeout=None):
+        answers["prompt"] = body["prompt"]
+        return {"response": json.dumps(answers.get("answer", {}))}
+
+    monkeypatch.setattr(chat_module.llm_backend, "post", post)
+    unsure = Clarification(question="what do you mean?", options=())
+    identity = object()
+
+    def look(message, answer, identity=identity, disabled=None, result=unsure):
+        answers["answer"] = answer
+        return asyncio.run(chat_module._second_look_apply.real(result, message, identity, disabled))
+
+    got = look("debit card nite chai", {"action": 1, "quote": "nite chai"})
+    assert got.category == "app_actions" and got.service == "card_apply"
+    assert "Apply for a virtual card" in answers["prompt"] and "Apply for a credit card" in answers["prompt"]
+    assert look("credit card nite chai", {"action": 2, "quote": "credit card nite chai"}).service == "credit_card_apply"
+    assert look("debit card ki", {"action": 1, "quote": "nite chai"}) is unsure          # words not in the message
+    assert look("debit card nite chai", {"action": 0, "quote": "nite chai"}) is unsure   # the model says no
+    assert look("debit card nite chai", {"action": 9, "quote": "nite chai"}) is unsure   # not a listed number
+    assert look("debit card nite chai", {"action": 1, "quote": "nite chai"}, identity=None) is unsure   # signed out
+    off = look("debit card nite chai", {"action": 1, "quote": "nite chai"}, disabled=["app_actions.card_apply"])
+    assert off.service != "card_apply"                                                      # a switched-off screen is not offered
+    kept = BankingService("account_info", "balance", None, {})
+    assert look("debit card nite chai", {"action": 1, "quote": "nite chai"}, result=kept) is kept   # only an unsure result is looked at again

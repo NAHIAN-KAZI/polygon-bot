@@ -84,6 +84,25 @@ def _no_generated_clarifications(monkeypatch):
 
     monkeypatch.setattr(chat_module, "_read_product_interest", _no_lead_tags)
 
+    # A request the classifier could not place gets one more model question about applying (T-145): off by default in
+    # tests; the test of it calls the real function, kept on `.real`.
+    async def _no_second_look(result, message, identity, disabled):
+        return result
+
+    _no_second_look.real = chat_module._second_look_apply
+    monkeypatch.setattr(chat_module, "_second_look_apply", _no_second_look)
+
+    # The bank's live card list needs the bank: none in tests (a test of it sets its own adapter).
+    import app.knowledge.live_cards as live_cards_module
+    from app.banking.adapters.base import AdapterUnavailableError
+
+    class _NoBank:
+        async def fulfill(self, *args):
+            raise AdapterUnavailableError("no bank in tests")
+
+    monkeypatch.setattr(live_cards_module, "CardProductsAdapter", _NoBank)
+    live_cards_module.clear_cache()
+
     # Planning and reranking knowledge searches are model calls: off by default in tests (the plain search of the
     # message runs, which the tests fake); tests of the planned path switch it on and fake its pieces.
     monkeypatch.setattr(chat_module.settings, "KB_QUERY_PLANNING", False)
