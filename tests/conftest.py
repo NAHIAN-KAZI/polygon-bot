@@ -92,6 +92,14 @@ def _no_generated_clarifications(monkeypatch):
     _no_second_look.real = chat_module._second_look_apply
     monkeypatch.setattr(chat_module, "_second_look_apply", _no_second_look)
 
+    # A recharge or transfer that names a saved person gets one more model question (T-147): off by default in tests;
+    # the test of it calls the real function, kept on `.real`.
+    async def _no_name_lookup(result, message, identity):
+        return result
+
+    _no_name_lookup.real = chat_module._named_person_lookup
+    monkeypatch.setattr(chat_module, "_named_person_lookup", _no_name_lookup)
+
     # The older in-chat bank add is what the existing tests exercise; tests of the form switch the new flow on.
     monkeypatch.setattr(chat_module.settings, "BENEFICIARY_ADD_OPENS_FORM", False)
 
