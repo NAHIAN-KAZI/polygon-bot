@@ -691,17 +691,17 @@ def _result_and_text(client, message):
 
 def test_a_beneficiary_with_no_kind_asks_where_and_never_asks_for_bank_details(client, where_flow):
     where_flow["classify"]({})
-    where_flow["answer"] = {"choice": 0}
+    where_flow["answer"] = {"place": None}
     result, text = _result_and_text(client, "ekta beneficiary add korte chai")
     assert result["type"] == "CLARIFICATION_REQUIRED" and result["payload"]["pending"]["missingFields"] == ["where"]
     prompt = where_flow["asked"][-1]
-    assert "Wallet Transfer - Bkash" in prompt and "Bank Transfer - Other Bank" in prompt
+    assert "- Wallet Transfer - Bkash" in prompt and "- Bank Transfer - Other Bank" in prompt
     assert "routing" not in text.lower() and "branch" not in text.lower()
 
 
 def test_a_wallet_named_in_the_message_opens_the_beneficiary_form_on_it(client, where_flow):
     where_flow["classify"]({"nickname": "jahid", "accountNumber": "01712345678"})
-    where_flow["answer"] = {"choice": 3, "quote": "bkash"}
+    where_flow["answer"] = {"place": "Wallet Transfer - Bkash", "quote": "bkash"}
     result, text = _result_and_text(client, "bkash e jahid ke add koro 01712345678")
     assert result["type"] == "APP_ACTION"
     ui = result["payload"]["ui"]
@@ -712,14 +712,14 @@ def test_a_wallet_named_in_the_message_opens_the_beneficiary_form_on_it(client, 
 
 def test_a_kind_the_model_says_without_the_customer_having_written_it_is_not_taken(client, where_flow):
     where_flow["classify"]({"nickname": "jahid"})
-    where_flow["answer"] = {"choice": 1, "quote": "bank account"}          # the customer never wrote that
+    where_flow["answer"] = {"place": "Bank Transfer - Polygon Bank Account", "quote": "bank account"}          # the customer never wrote that
     result, _ = _result_and_text(client, "jahid ke add koro")
     assert result["type"] == "CLARIFICATION_REQUIRED"
 
 
 def test_the_kind_can_come_from_the_earlier_message_when_the_reply_is_short(client, where_flow, monkeypatch):
     where_flow["classify"]({})
-    where_flow["answer"] = {"choice": 3, "quote": "bkash"}
+    where_flow["answer"] = {"place": "Wallet Transfer - Bkash", "quote": "bkash"}
     monkeypatch.setattr(chat_module, "_recent_customer_messages", lambda turns: ["add a beneficiary for bkash"])
     result, _ = _result_and_text(client, "ha")
     assert result["type"] == "APP_ACTION" and result["payload"]["ui"]["prefill"]["leafServiceId"] == "bkash"
