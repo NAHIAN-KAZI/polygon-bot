@@ -2780,7 +2780,7 @@ async def _advice_stream(req: ChatRequest, request_id: str, customer_identity, t
             yield chunk
         return
 
-    cards = product_cards.all_cards()
+    cards = live_cards_mod.merge(product_cards.all_cards(), await live_cards_mod.current(token, customer_identity))
     if need is None:
         need = await advisor_advise.read_need(req.message, _recent_customer_messages(recent_turns), cards)
     wanted_product = need.product
@@ -2836,7 +2836,8 @@ async def _advice_stream(req: ChatRequest, request_id: str, customer_identity, t
         yield chunk
 
 
-async def _suggest_before_applying(action, req: ChatRequest, recent_turns: list[ChatTurn]):
+async def _suggest_before_applying(action, req: ChatRequest, recent_turns: list[ChatTurn], token: str | None = None,
+                                   identity=None):
     """What to do with an apply-for request when the bank wants suggestions first: ("suggest", need) to suggest the
     best fits, ("open", product) when the customer's message already picks one product (the application opens with
     it chosen), or None to open the screen as usual: another action, the suggestions switched off, or no product
@@ -2844,7 +2845,8 @@ async def _suggest_before_applying(action, req: ChatRequest, recent_turns: list[
     when the cards were built), so nothing is guessed about which products a screen can open."""
     if action.id not in ui_actions.APPLY_FOR_ACTIONS or use_cases.ADVISOR_RECOMMEND in (req.disabled_use_cases or []):
         return None
-    pool = [c for c in product_cards.all_cards() if c.apply_via == action.id]
+    cards = live_cards_mod.merge(product_cards.all_cards(), await live_cards_mod.current(token, identity))
+    pool = [c for c in cards if c.apply_via == action.id]
     if not pool:
         return None
     index = await _llm_pick_name(req.message, [c.name for c in pool[:30]], offered=False)
@@ -2897,7 +2899,8 @@ async def _try_apply_selection(session_turns: list[ChatTurn], message: str):
     index = await _llm_pick_name(message, names)
     if index is None:
         return None
-    card = next((c for c in product_cards.all_cards() if c.name == names[index]), None)
+    cards = live_cards_mod.merge(product_cards.all_cards(), await live_cards_mod.current(None))
+    card = next((c for c in cards if c.name == names[index]), None)
     return action, {"name": names[index], "group": card.group if card else None}
 
 
@@ -3823,7 +3826,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None, heard_readin
                         request_id=request_id,
                     )
                 elif category == ui_actions.CATEGORY and ui_actions.get(service) is not None:
-                    suggestion = await _suggest_before_applying(ui_actions.get(service), req, recent_turns)
+                    suggestion = await _suggest_before_applying(ui_actions.get(service), req, recent_turns, token, customer_identity)
                     if suggestion is not None and suggestion[0] == "suggest":
                         async for chunk in _advice_stream(req, request_id, customer_identity, token, recent_turns,
                                                           composer_message, history, turn_started_at, stored_message,

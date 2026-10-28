@@ -9,12 +9,15 @@ up here without a code change.
 The list is the bank's catalogue, not the customer's data, so it is kept for a few minutes and shared: a visitor who
 is not signed in gets the last list a signed-in customer fetched (the endpoint itself needs a login).
 """
+import dataclasses
 import logging
+import re
 import time
 
 from app.banking.adapters.base import AdapterUnavailableError
 from app.banking.adapters.real import CardProductsAdapter
 from app.config import settings
+from app.knowledge.product_cards import ProductCard
 
 logger = logging.getLogger(__name__)
 
@@ -95,3 +98,52 @@ async def current(jwt: str | None, identity=None) -> list[dict]:
 def clear_cache() -> None:
     global _cache
     _cache = None
+
+
+# ---- the cards a customer can actually ask for ------------------------------------------------------------------------
+
+_APPLY_VIA = {"credit": "credit_card_apply"}     # every other category is requested on the virtual card screen
+_CARD_APPLY = "card_apply"
+
+
+def _words(name: str) -> set[str]:
+    return set(re.findall(r"[a-z0-9]+", name.casefold()))
+
+
+def merge(stored: list[ProductCard], live: list[dict]) -> list[ProductCard]:
+    """The product cards with the bank's live card list applied: the cards a customer can request are exactly the
+    live ones, named as the bank names them, each enriched with what the knowledge base says about it (benefits,
+    fees, eligibility, who it suits). A stored card that matches no live card is dropped when it is a card product
+    (it cannot be requested in the app), and every other product is kept as it is. With no live list nothing changes.
+
+    A stored card matches the live card whose words contain all of its own words, the closest one first ("Visa
+    Infinite" is the plain Visa Infinite, not the Islamic one). Words every live name shares (the bank's name, "card")
+    say nothing about which card it is, so they are left out of the comparison."""
+    if not live:
+        return stored
+    names = [_words(c["name"]) for c in live]
+    shared = {w for w in set().union(*names) if sum(w in n for n in names) >= 0.8 * len(names)}
+    live_words = [n - shared for n in names]
+    screens = {_CARD_APPLY, *_APPLY_VIA.values()}
+    matched: dict[int, ProductCard] = {}
+    kept: list[ProductCard] = []
+    for card in stored:
+        if card.apply_via not in screens:
+            kept.append(card)
+            continue
+        mine = _words(card.name) - shared
+        fits = [i for i, w in enumerate(live_words) if mine and mine <= w]
+        if fits:
+            best = min(fits, key=lambda i: len(live_words[i]) - len(mine))
+            matched.setdefault(best, card)
+    cards = []
+    for i, c in enumerate(live):
+        base = matched.get(i)
+        kind = f"{c['type']} card" if c["type"] else "card"
+        via = _APPLY_VIA.get(c["type"], _CARD_APPLY)
+        summary = " ".join(x for x in (c["description"], base.summary if base else "") if x)
+        if base:
+            cards.append(dataclasses.replace(base, name=c["name"], kind=kind, summary=summary, apply_via=via))
+        else:
+            cards.append(ProductCard(c["name"], "Cards", kind, summary, apply_via=via))
+    return kept + cards

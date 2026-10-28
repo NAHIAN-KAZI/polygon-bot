@@ -80,3 +80,53 @@ def test_current_falls_back_to_nothing_when_the_bank_fails(monkeypatch):
 
     monkeypatch.setattr(live_cards, "CardProductsAdapter", Boom)
     assert asyncio.run(live_cards.current("jwt")) == []
+
+
+# ---- merge: the cards a customer can actually ask for ---------------------------------------------------------------
+
+from app.knowledge.product_cards import ProductCard  # noqa: E402
+
+LIVE = live_cards.parse({"data": [
+    {"active": True, "cardCategory": "DEBIT", "scheme": "VISA", "tierName": "Polygon Visa Debit Card", "description": "Debit."},
+    {"active": True, "cardCategory": "DEBIT", "scheme": "VISA", "tierName": "Polygon Digital Visa Platinum Debit Card",
+     "description": "Digital debit."},
+    {"active": True, "cardCategory": "DEBIT", "scheme": "TAKAPAY", "tierName": "Polygon TakaPay Debit Card",
+     "description": "Domestic. Launch later: needs membership."},
+    {"active": True, "cardCategory": "CREDIT", "scheme": "VISA", "tierName": "Polygon Visa Platinum Card", "description": "Credit."},
+    {"active": True, "cardCategory": "CREDIT", "scheme": "VISA", "tierName": "Polygon Visa Infinite Credit Card", "description": "Premium."},
+    {"active": True, "cardCategory": "CREDIT", "scheme": "VISA", "tierName": "Polygon Islamic Visa Infinite Credit Card",
+     "description": "Shariah."},
+]})
+STORED = [
+    ProductCard("Visa Platinum", "Cards", "credit card", "KB platinum.", benefits=["lounge"], best_for=["travel"], apply_via="credit_card_apply"),
+    ProductCard("Visa Infinite", "Cards", "credit card", "KB infinite.", fees=["Tk 5,000 a year"], apply_via="credit_card_apply"),
+    ProductCard("Polygon Visa SME Credit Card", "Cards", "credit card", "Business.", apply_via="credit_card_apply"),
+    ProductCard("Polygon Visa Debit Card", "Cards", "debit card", "KB debit.", apply_via="card_apply"),
+    ProductCard("Gold DPS", "Deposit accounts", "dps", "Saves monthly.", apply_via="dps_open"),
+]
+
+
+def _by_name(cards):
+    return {c.name: c for c in cards}
+
+
+def test_merge_names_every_live_card_as_the_bank_does_and_enriches_it_from_the_knowledge_base():
+    merged = _by_name(live_cards.merge(STORED, LIVE))
+    platinum = merged["Polygon Visa Platinum Card"]
+    assert platinum.benefits == ["lounge"] and "Credit." in platinum.summary and "KB platinum." in platinum.summary
+    assert platinum.kind == "credit card" and platinum.apply_via == "credit_card_apply"
+    assert merged["Polygon Visa Infinite Credit Card"].fees == ["Tk 5,000 a year"]      # the plain one, not the Islamic one
+    assert merged["Polygon Islamic Visa Infinite Credit Card"].fees == []               # live card with no knowledge-base twin
+    assert merged["Polygon Visa Debit Card"].apply_via == "card_apply"
+    assert merged["Polygon TakaPay Debit Card"].summary.endswith("Launch later: needs membership.")
+
+
+def test_merge_drops_a_card_product_the_app_cannot_request_and_keeps_other_products():
+    merged = _by_name(live_cards.merge(STORED, LIVE))
+    assert "Polygon Visa SME Credit Card" not in merged and "Visa Platinum" not in merged
+    assert merged["Gold DPS"].apply_via == "dps_open"
+    assert len([c for c in merged.values() if c.apply_via in ("card_apply", "credit_card_apply")]) == len(LIVE)
+
+
+def test_merge_without_a_live_list_changes_nothing():
+    assert live_cards.merge(STORED, []) == STORED
