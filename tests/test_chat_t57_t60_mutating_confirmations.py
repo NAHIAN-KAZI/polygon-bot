@@ -647,3 +647,79 @@ def test_pending_confirmation_only_applies_to_free_text_not_explicit_requests(cl
     events = _parse_sse(resp.text)
     result_event = next(data for name, data in events if name == "result")
     assert result_event["type"] == "UNKNOWN_SERVICE"
+
+
+# --- T-147: a new beneficiary is never assumed to be a bank account ------------------------------------------------------
+
+
+@pytest.fixture
+def where_flow(monkeypatch):
+    """The new flow on, a catalogue with banks and wallets, and a scripted model answer for where it is saved."""
+    from app.banking import beneficiary_kinds as kinds
+
+    state = {"answer": {}, "asked": []}
+    found = [kinds.Target("city_account", "Polygon Bank Account", "Bank Transfer"),
+             kinds.Target("other_bank", "Other Bank", "Bank Transfer"),
+             kinds.Target("bkash", "Bkash", "Wallet Transfer"), kinds.Target("nagad", "Nagad", "Wallet Transfer"),
+             kinds.Target("mobile_recharge", "Mobile Recharge", "Mobile Recharge")]
+    monkeypatch.setattr(kinds, "targets", lambda: found)
+
+    async def post(path, body, timeout=None):
+        state["asked"].append(body["prompt"])
+        return {"response": json.dumps(state["answer"])}
+
+    monkeypatch.setattr(kinds.llm_backend, "post", post)
+    monkeypatch.setattr(chat_module.settings, "BENEFICIARY_ADD_OPENS_FORM", True)
+    _install_identity_fakes(monkeypatch)
+    _install_no_pending_session(monkeypatch)
+
+    def classify(payload):
+        async def fake_classify(message, recent_turns=None):
+            return BankingService(category="beneficiary_management", service="beneficiary_add", subservice=None,
+                                  payload=payload)
+        monkeypatch.setattr(chat_module, "classify", fake_classify)
+
+    state["classify"] = classify
+    return state
+
+
+def _result_and_text(client, message):
+    resp = client.post("/chat", json={"message": message}, headers=JWT_HEADERS)
+    events = _parse_sse(resp.text)
+    return (next(d for n, d in events if n == "result"), "".join(d.get("token", "") for n, d in events if n == "token"))
+
+
+def test_a_beneficiary_with_no_kind_asks_where_and_never_asks_for_bank_details(client, where_flow):
+    where_flow["classify"]({})
+    where_flow["answer"] = {"choice": 0}
+    result, text = _result_and_text(client, "ekta beneficiary add korte chai")
+    assert result["type"] == "CLARIFICATION_REQUIRED" and result["payload"]["pending"]["missingFields"] == ["where"]
+    prompt = where_flow["asked"][-1]
+    assert "Wallet Transfer - Bkash" in prompt and "Bank Transfer - Other Bank" in prompt
+    assert "routing" not in text.lower() and "branch" not in text.lower()
+
+
+def test_a_wallet_named_in_the_message_opens_the_beneficiary_form_on_it(client, where_flow):
+    where_flow["classify"]({"nickname": "jahid", "accountNumber": "01712345678"})
+    where_flow["answer"] = {"choice": 3, "quote": "bkash"}
+    result, text = _result_and_text(client, "bkash e jahid ke add koro 01712345678")
+    assert result["type"] == "APP_ACTION"
+    ui = result["payload"]["ui"]
+    assert ui["route"] == "/beneficiary/form"
+    assert ui["prefill"] == {"nickname": "jahid", "accountNumber": "01712345678", "leafServiceId": "bkash"}
+    assert "01712345678" not in where_flow["asked"][-1]          # the number is for the form, not the model
+
+
+def test_a_kind_the_model_says_without_the_customer_having_written_it_is_not_taken(client, where_flow):
+    where_flow["classify"]({"nickname": "jahid"})
+    where_flow["answer"] = {"choice": 1, "quote": "bank account"}          # the customer never wrote that
+    result, _ = _result_and_text(client, "jahid ke add koro")
+    assert result["type"] == "CLARIFICATION_REQUIRED"
+
+
+def test_the_kind_can_come_from_the_earlier_message_when_the_reply_is_short(client, where_flow, monkeypatch):
+    where_flow["classify"]({})
+    where_flow["answer"] = {"choice": 3, "quote": "bkash"}
+    monkeypatch.setattr(chat_module, "_recent_customer_messages", lambda turns: ["add a beneficiary for bkash"])
+    result, _ = _result_and_text(client, "ha")
+    assert result["type"] == "APP_ACTION" and result["payload"]["ui"]["prefill"]["leafServiceId"] == "bkash"

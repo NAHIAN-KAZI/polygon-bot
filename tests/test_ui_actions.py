@@ -37,9 +37,9 @@ def _doc(name: str) -> str:
 # --- registry integrity ------------------------------------------------------------------
 
 
-def test_there_are_34_actions_with_unique_ids_matching_their_keys():
+def test_there_are_35_actions_with_unique_ids_matching_their_keys():
     actions = list(ui_actions.UI_ACTIONS.values())
-    assert len(actions) == 34
+    assert len(actions) == 35
     assert len({a.id for a in actions}) == len(actions)
     assert all(key == a.id for key, a in ui_actions.UI_ACTIONS.items())
     assert ui_actions.CATEGORY == "app_actions"

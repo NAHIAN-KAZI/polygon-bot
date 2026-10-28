@@ -92,6 +92,9 @@ def _no_generated_clarifications(monkeypatch):
     _no_second_look.real = chat_module._second_look_apply
     monkeypatch.setattr(chat_module, "_second_look_apply", _no_second_look)
 
+    # The older in-chat bank add is what the existing tests exercise; tests of the form switch the new flow on.
+    monkeypatch.setattr(chat_module.settings, "BENEFICIARY_ADD_OPENS_FORM", False)
+
     # The bank's live card list needs the bank: none in tests (a test of it sets its own adapter).
     import app.knowledge.live_cards as live_cards_module
     from app.banking.adapters.base import AdapterUnavailableError

@@ -57,6 +57,7 @@ from app.conversation.composer import (
     unsupported_numbers,
 )
 from app.embeddings import embed_text
+from app.banking import beneficiary_kinds
 from app.knowledge import live_cards as live_cards_mod
 from app.llm import build_prompt, stream_generate
 from app.advisor import advise as advisor_advise
@@ -979,13 +980,15 @@ _APP_ACTION_PRODUCTS = {"card_apply": ("Card application", "Cards"),
 
 
 def _ui_action_outcome(action: "ui_actions.UiAction", payload: dict | None, message: str,
-                       own_mobile: str | None = None, chosen_product: dict | None = None) -> _TurnOutcome:
+                       own_mobile: str | None = None, chosen_product: dict | None = None,
+                       extra_prefill: dict | None = None, extra_shown: dict | None = None) -> _TurnOutcome:
     """A request the chat does not carry out (T-79): no bank call. The app gets the screen to open
     (with whatever the customer already said), or the information to show; the reply is composed.
     `own_mobile` is the customer's own registered mobile from the verified login (never from
     request input): used when they said the number is theirs, so they are not asked for it."""
     prefill = _ui_prefill(action, payload, message)
-    shown = dict(prefill)
+    shown = {**prefill, **(extra_shown or {})}       # what the reply may say they already gave
+    prefill.update(extra_prefill or {})              # what the code decided (a catalogue id), not the customer's words
     own = _bd_mobile(own_mobile)
     wants_own = str((payload or {}).get("forSelf")).strip().lower() in ("true", "yes", "1")
     if own and wants_own and "recipientMobile" not in prefill and any(f == "forSelf" for f, _ in action.prefill):
@@ -2547,6 +2550,8 @@ def _resolve_beneficiary_destination(beneficiary: dict) -> dict | None:
         if provider:
             return {"action": "wallet_transfer", "provider": str(provider).lower()}
         return None
+    if service_type == "MOBILE_RECHARGE":
+        return {"action": "mobile_recharge"}      # the app opens the recharge screen with this number filled in
     return None
 
 
@@ -2903,6 +2908,29 @@ async def _llm_pick_name(message: str, names: list[str], offered: bool = True) -
         if not isinstance(quote, str) or not quote.strip() or quote.casefold().strip() not in message.casefold():
             return None
     return choice - 1 if isinstance(choice, int) and not isinstance(choice, bool) and 1 <= choice <= len(names) else None
+
+
+async def _beneficiary_where_outcome(category: str, service: str, subservice: str | None, payload: dict | None,
+                                     message: str, recent_turns: list[ChatTurn]) -> _TurnOutcome:
+    """A new beneficiary is never assumed to be a bank account: the bank keeps several kinds (a bank account, a mobile
+    wallet, a number to recharge, a card, a bill) and each needs different details. When the customer's words say
+    which, the app's beneficiary form opens on that kind with what they wrote filled in; when they do not, they are
+    asked where it should be saved, with the kinds the bank offers (its own catalogue, so a new one appears by
+    itself)."""
+    found = beneficiary_kinds.targets()
+    # The words say where; the numbers are for the form, never for the model (a code typed here must stay private).
+    words = lambda text: re.sub(r"\d[\d\s-]{2,}\d|\d{3,}", "[number]", ascii_digits(text or ""))  # noqa: E731
+    target = await beneficiary_kinds.read_target(words(message), [words(m) for m in _recent_customer_messages(recent_turns)],
+                                                 found)
+    if target is None:
+        say = _say("clarify", what_is_unclear="where the new beneficiary should be saved (which kind of recipient it is)",
+                   could_mean=beneficiary_kinds.options(found) or None)
+        return _TurnOutcome("CLARIFICATION_REQUIRED", say, category, service, subservice,
+                            result_payload=_pending_payload(category, service, subservice, ["where"]),
+                            stored={"payload": payload or {}, "missingFields": ["where"]})
+    return _ui_action_outcome(ui_actions.get("beneficiary_add_form"), payload, message, None,
+                              extra_prefill={"leafServiceId": target.id},
+                              extra_shown={"kind of beneficiary": f"{target.group}: {target.name}" if target.name != target.group else target.name})
 
 
 async def _second_look_apply(result, message: str, identity, disabled: list[str] | None):
@@ -3717,6 +3745,15 @@ async def _chat_stream(req: ChatRequest, authorization: str | None, heard_readin
                             latency_ms=(time.monotonic() - turn_started_at) * 1000,
                             request_id=request_id,
                         )
+
+            if (turn_classification is None and (category, service) == _BENEFICIARY_ADD_KEY
+                    and settings.BENEFICIARY_ADD_OPENS_FORM and customer_identity is not None):
+                where_outcome = await _beneficiary_where_outcome(category, service, subservice, payload,
+                                                                 req.message, recent_turns)
+                async for chunk in _emit_outcome(where_outcome, request_id, customer_identity, turn_started_at,
+                                                 message=composer_message, history=history):
+                    yield chunk
+                turn_classification = where_outcome.classification()
 
             if (
                 turn_classification is None

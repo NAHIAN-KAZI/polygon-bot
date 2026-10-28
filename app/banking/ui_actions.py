@@ -188,6 +188,13 @@ _LIST = [
        "pin or unpin a saved beneficiary so it stays at the top of the list",
        "tap the pin on the beneficiary to keep it at the top (this is list pinning, not a security PIN)",
        ["14.25"], "BeneficiaryScreen", "/beneficiary"),
+    _a("beneficiary_add_form", "Add a beneficiary", "transfers", "screen",
+       "add, save or register a new beneficiary (a recipient kept for later): a Polygon Bank or other bank account, a "
+       "mobile wallet such as bKash, Nagad, Rocket or Upay, a mobile number for recharge, a card, a bill or a donation",
+       "the beneficiary form opens on the kind they chose; enter the details it asks for (they differ by kind) and save",
+       ["14.20"], "BeneficiaryFormScreen", "/beneficiary/form",
+       [("leafServiceId", "which kind of beneficiary, from the bank's own list"), ("nickname", "the name to save it under"),
+        ("accountNumber", "the account, wallet or mobile number")]),
     _a("beneficiary_photo", "Beneficiary photo", "transfers", "screen",
        "add, change or remove the photo of a saved beneficiary",
        "pick a photo from the phone's gallery or camera; photos are chosen in the app",
@@ -199,7 +206,7 @@ _LIST = [
        [("newLimit", "the new limit in taka")]),
     # ---- bills and recharge -------------------------------------------------------------------
     _a("mobile_recharge", "Mobile recharge", "transfers", "screen",
-       "recharge or top up a mobile phone number with talk time or a data pack: their own number or someone else's",
+       "recharge or top up a mobile phone number with talk time or a data pack: their own number or someone else's, given as a number (a person named without a number is looked up in the saved beneficiaries instead)",
        "choose the mobile operator, enter the mobile number to recharge (their own or someone else's), pick an amount or a pack, then confirm with a transaction PIN or one-time code",
        ["14.30"], "MobileRechargeScreen", "/mobile_recharge",
        [("recipientMobile", "the mobile number to recharge"), ("amount", "amount in taka"),

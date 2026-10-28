@@ -139,7 +139,7 @@ SERVICE_DESCRIPTIONS: dict[tuple[str, str], tuple[str, tuple[str, ...]]] = {
         ("startDate", "endDate"),
     ),
     ("polygon_services", "beneficiary"): (
-        'send money to a saved beneficiary by their name, or list the saved beneficiaries (not editing, deleting, pinning or changing the photo of one)',
+        'send money to, or recharge the mobile of, a saved beneficiary named by the customer (the name is looked up in their saved beneficiaries first; a mobile number they write themselves is not a name), or list the saved beneficiaries (not editing, deleting, pinning or changing the photo of one)',
         ("nameQuery", "amount"),
     ),
     ("beneficiary_management", "beneficiary_add"): (
@@ -459,7 +459,9 @@ def build_system_prompt(
         "after you route, so a message that says what the customer wants done -- in any "
         "language, however short -- is routed even when every detail is missing. "
         "ask_clarification is only for not knowing which service they want; its question is "
-        "your own short question about exactly that.\n"
+        "your own short question about exactly that. When the message could mean two or more "
+        "different listed services and nothing in it says which, ask_clarification with those "
+        "services as the options; never pick one of them by default.\n"
         "- Viewing existing disputes -> service_requests/disputes; existing complaints or "
         "tickets -> polygon_services/my_tickets; raising a dispute or describing a problem "
         "with a past transaction -> service_requests/raise_dispute; what the bank offers "
