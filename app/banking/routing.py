@@ -139,7 +139,7 @@ SERVICE_DESCRIPTIONS: dict[tuple[str, str], tuple[str, tuple[str, ...]]] = {
         ("startDate", "endDate"),
     ),
     ("polygon_services", "beneficiary"): (
-        'send money to, or recharge the mobile of, a saved beneficiary named by the customer (the name is looked up in their saved beneficiaries first; a mobile number they write themselves is not a name), or list the saved beneficiaries (not editing, deleting, pinning or changing the photo of one)',
+        'send money to a saved beneficiary by their name, or list the saved beneficiaries (not editing, deleting, pinning or changing the photo of one)',
         ("nameQuery", "amount"),
     ),
     ("beneficiary_management", "beneficiary_add"): (

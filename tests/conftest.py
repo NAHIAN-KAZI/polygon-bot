@@ -94,7 +94,7 @@ def _no_generated_clarifications(monkeypatch):
 
     # A recharge or transfer that names a saved person gets one more model question (T-147): off by default in tests;
     # the test of it calls the real function, kept on `.real`.
-    async def _no_name_lookup(result, message, identity):
+    async def _no_name_lookup(result, message, identity, token=None):
         return result
 
     _no_name_lookup.real = chat_module._named_person_lookup

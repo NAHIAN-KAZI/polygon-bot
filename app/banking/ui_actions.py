@@ -206,7 +206,7 @@ _LIST = [
        [("newLimit", "the new limit in taka")]),
     # ---- bills and recharge -------------------------------------------------------------------
     _a("mobile_recharge", "Mobile recharge", "transfers", "screen",
-       "recharge or top up a mobile phone number with talk time or a data pack: their own number or someone else's, given as a number (a person named without a number is looked up in the saved beneficiaries instead)",
+       "recharge or top up a mobile phone number with talk time or a data pack: their own number or someone else's",
        "choose the mobile operator, enter the mobile number to recharge (their own or someone else's), pick an amount or a pack, then confirm with a transaction PIN or one-time code",
        ["14.30"], "MobileRechargeScreen", "/mobile_recharge",
        [("recipientMobile", "the mobile number to recharge"), ("amount", "amount in taka"),
