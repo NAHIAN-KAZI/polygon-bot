@@ -168,11 +168,13 @@ def test_spending_guidance_end_to_end(monkeypatch):
 
 
 def test_a_recommendation_end_to_end_with_lead_tags_must_names_and_code_side_checks(monkeypatch):
-    Model(monkeypatch, picks={"picks": [{"number": 1, "reasons": ["saves Tk 18,875 a month"], "keep_in_mind": "annual fee"}]})
+    Model(monkeypatch, picks={"ranking": [{"number": 1, "score": 8, "pairs": [{"evidence": "E4", "benefit": "B1"}],
+                                            "keep_in_mind": "annual fee"}]})
     need = advise.Need(False, True, focus="a deposit", goal="save", kinds=("savings account", "fixed deposit"))
     result = run(advise.advise("which deposit?", [], snap(), need, CARDS))
     product = result.facts["suggested products"][0]
-    assert product["name"] == "Smart Saver" and product["why it fits"] == ["saves Tk 18,875 a month"]
+    assert product["name"] == "Smart Saver" and product["place"] == "best fit"
+    assert product["why it fits"] == ["keeps about 24.4% of their income unspent -- and Smart Saver gives building savings"]
     assert product["requirements against their figures"] == ["asks for Tk 1,000 to open; their balance is Tk 69,000 (enough today)"]
     assert product["rates"] == ["Up to 6%"] and product["keep in mind"] == "annual fee"
     assert result.must == {"suggested product 1": "Smart Saver"}
@@ -186,17 +188,18 @@ def test_a_recommendation_end_to_end_with_lead_tags_must_names_and_code_side_che
 
 
 def test_when_nothing_fits_that_is_said_and_no_lead_is_made(monkeypatch):
-    Model(monkeypatch, picks={"picks": []})
+    Model(monkeypatch, picks={"ranking": []})
     need = advise.Need(False, True, kinds=("credit card",))
     result = run(advise.advise("which card?", [], snap(), need, CARDS))
     assert result.facts["suggested products"] == [] and result.facts["no product fits"] and result.products == [] and result.must == {}
 
 
 def test_both_wanted_gives_both_parts(monkeypatch):
-    Model(monkeypatch, coaching={"cuts": [{"number": 1, "percent": 10, "how": "x"}]}, picks={"picks": [{"number": 1}]})
-    need = advise.Need(True, True, kinds=("debit card",))
+    Model(monkeypatch, coaching={"cuts": [{"number": 1, "percent": 10, "how": "x"}]},
+          picks={"ranking": [{"number": 1, "score": 7, "pairs": [{"evidence": "E1", "benefit": "B1"}]}]})
+    need = advise.Need(True, True, kinds=("savings account",))
     facts = run(advise.advise("help me", [], snap(), need, CARDS)).facts
-    assert "ways to save" in facts and facts["suggested products"][0]["name"] == "Everyday Debit"
+    assert "ways to save" in facts and facts["suggested products"][0]["name"] == "Smart Saver"
 
 
 def test_with_no_money_data_and_no_product_asked_there_is_nothing_to_go_on(monkeypatch):
@@ -227,7 +230,8 @@ def test_each_pick_states_how_it_relates_to_what_the_customer_already_holds():
 
 
 def test_the_relation_reaches_the_reply_facts_as_a_plain_sentence(monkeypatch):
-    Model(monkeypatch, picks={"picks": [{"number": 1, "reasons": ["x"], "relation": "extra"}]})
+    Model(monkeypatch, picks={"ranking": [{"number": 1, "score": 7, "pairs": [{"evidence": "E1", "benefit": "B1"}],
+                                            "relation": "extra"}]})
     need = advise.Need(False, True, kinds=("savings account",))
     facts = run(advise.advise("which?", [], snap(), need, CARDS)).facts
     assert facts["suggested products"][0]["compared with what they hold"] == \
@@ -235,12 +239,13 @@ def test_the_relation_reaches_the_reply_facts_as_a_plain_sentence(monkeypatch):
 
 
 def test_when_applying_the_facts_are_a_short_list_and_a_question_without_the_financial_summary(monkeypatch):
-    Model(monkeypatch, picks={"picks": [{"number": 1, "reasons": ["one", "two", "three"], "keep_in_mind": "fee",
-                                          "relation": "new"}]})
+    Model(monkeypatch, picks={"ranking": [{"number": 1, "score": 9, "keep_in_mind": "fee", "relation": "new",
+                                            "pairs": [{"evidence": "E1", "benefit": "B1"}, {"evidence": "E2", "benefit": "B1"},
+                                                      {"evidence": "E3", "benefit": "B1"}]}]})
     need = advise.Need(False, True, kinds=("savings account",))
     facts = run(advise.advise("which?", [], snap(), need, CARDS, applying=True)).facts
     product = facts["suggested products"][0]
-    assert "their situation" not in facts and product["why it fits"] == ["one", "two"]
+    assert "their situation" not in facts and len(product["why it fits"]) == 2
     assert product["fees"] == [] and product["rates"] == [] and product["keep in mind"] is None
     assert facts["next step"].startswith("ask which of these")
     # without applying the full picture is given
@@ -253,3 +258,96 @@ def test_a_need_that_names_products_offers_only_those_whatever_their_kind():
     assert [c.name for c in advise.candidates(CARDS, need)] == ["Gold Credit", "Smart Saver"]
     # kinds are ignored when names are given; with no names the kinds decide, as before
     assert [c.name for c in advise.candidates(CARDS, advise.Need(False, True, kinds=("debit card",)))] == ["Everyday Debit"]
+
+
+# ---- a stable ranking backed by evidence (T-150) ----------------------------------------------------------------------
+
+RANKING = {"ranking": [
+    {"number": 1, "score": 6, "pairs": [{"evidence": "E4", "benefit": "B1"}], "relation": "new"},
+    {"number": 2, "score": 9, "pairs": [{"evidence": "E1", "benefit": "B1"}, {"evidence": "E99", "benefit": "B1"}]}]}
+
+
+def two_deposits():
+    return [card("Smart Saver", "savings account", best_for=["building savings"]),
+            card("Term Deposit", "fixed deposit", benefits=["a fixed rate for a year"])]
+
+
+def test_the_evidence_is_only_what_the_customers_data_says_numbered_in_order():
+    facts = snapshot.facts(snap())
+    evidence = advise.build_evidence(facts, "save for a trip")
+    assert evidence[0] == advise.Evidence("E1", "their stated goal: save for a trip")
+    texts = [e.text for e in evidence]
+    assert "average income Tk 90,000 a month" in texts and "keeps about 24.4% of their income unspent" in texts
+    assert any(t.startswith("this rests on 2 month(s)") for t in texts)
+    assert [e.id for e in evidence] == [f"E{i}" for i in range(1, len(evidence) + 1)]
+    assert advise.build_evidence({}) == []
+
+
+def test_the_ranking_is_ordered_by_score_and_reasons_are_written_from_valid_pairs_only():
+    cards = two_deposits()
+    evidence = [advise.Evidence("E1", "average income Tk 90,000 a month"), advise.Evidence("E4", "an average balance")]
+    picks = advise.parse_ranking(RANKING, cards, evidence)
+    assert [p.card.name for p in picks] == ["Term Deposit", "Smart Saver"]            # 9 before 6
+    assert picks[0].reasons == ("average income Tk 90,000 a month -- and Term Deposit gives a fixed rate for a year",)
+    assert picks[0].score == 9 and picks[1].score == 6            # the unknown E99 gave no reason
+
+
+def test_a_product_with_no_real_pair_cannot_score_above_three_and_is_dropped():
+    cards = two_deposits()
+    evidence = [advise.Evidence("E1", "x")]
+    raw = {"ranking": [{"number": 1, "score": 10, "pairs": [{"evidence": "E7", "benefit": "B1"}]},
+                       {"number": 2, "score": 9, "pairs": [{"evidence": "E1", "benefit": "B5"}]}]}
+    assert advise.parse_ranking(raw, cards, evidence) == []
+    assert advise.parse_ranking(None, cards, evidence) == [] and advise.parse_ranking({"ranking": "x"}, cards, evidence) == []
+
+
+def test_equal_scores_keep_the_products_own_order_so_the_same_answer_gives_the_same_order():
+    cards = two_deposits()
+    evidence = [advise.Evidence("E1", "x")]
+    raw = {"ranking": [{"number": 2, "score": 7, "pairs": [{"evidence": "E1", "benefit": "B1"}]},
+                       {"number": 1, "score": 7, "pairs": [{"evidence": "E1", "benefit": "B1"}]}]}
+    assert [p.card.name for p in advise.parse_ranking(raw, cards, evidence)] == ["Smart Saver", "Term Deposit"]
+
+
+def test_a_customer_gets_the_same_ranking_again_without_asking_the_model(monkeypatch):
+    advise.clear_rank_cache()
+    model = Model(monkeypatch, picks=RANKING)
+    need = advise.Need(False, True, kinds=("savings account", "fixed deposit"))
+    cards = CARDS
+    first = run(advise.advise("which deposit?", [], snap(), need, cards, customer_key="109"))
+    second = run(advise.advise("which deposit is best for me", [], snap(), need, cards, customer_key="109"))
+    assert [p["name"] for p in first.facts["suggested products"]] == [p["name"] for p in second.facts["suggested products"]]
+    assert len([p for p in model.prompts if "which product suits them" in p]) == 1          # asked once
+    other = run(advise.advise("which deposit?", [], snap(), need, cards, customer_key="777"))
+    assert len([p for p in model.prompts if "which product suits them" in p]) == 2          # another customer, asked again
+    advise.clear_rank_cache()
+
+
+def test_a_product_whose_stated_requirement_the_customer_does_not_meet_is_not_ranked(monkeypatch):
+    advise.clear_rank_cache()
+    model = Model(monkeypatch, picks={"ranking": [{"number": 1, "score": 9, "pairs": [{"evidence": "E1", "benefit": "B1"}]}]})
+    poor = snap()
+    poor.ledgers = [{"identifier": "1234567890", "balance": 1_000_000}]           # Tk 10,000: Term Deposit asks Tk 50,000
+    need = advise.Need(False, True, kinds=("fixed deposit",))
+    result = run(advise.advise("which?", [], poor, need, CARDS, customer_key="1"))
+    assert result.facts["suggested products"] == []
+    assert not [p for p in model.prompts if "which product suits them" in p]       # nothing left to ask about
+    advise.clear_rank_cache()
+
+
+def test_a_why_question_is_answered_from_the_saved_reasons_without_ranking_again(monkeypatch):
+    model = Model(monkeypatch)
+    previous = {"type": "ADVICE_ANSWER", "ranking": [
+        {"name": "Smart Saver", "fit": "best fit", "score": 8, "why": ["keeps 24% unspent -- and Smart Saver gives building savings"]},
+        {"name": "Term Deposit", "fit": "second best", "score": 6, "why": ["average balance Tk 69,000 -- and Term Deposit gives a fixed rate"]}]}
+    need = advise.Need(False, True, explain=True, kinds=("savings account",))
+    result = run(advise.advise("why this one?", [], snap(), need, CARDS, customer_key="1", previous=previous))
+    assert result.choices == ["Smart Saver", "Term Deposit"] and model.prompts == []
+    assert result.facts["earlier ranking"][0]["place"] == "best fit"
+    assert result.must == {"suggested product 1": "Smart Saver", "suggested product 2": "Term Deposit"}
+    assert advise.explanation({"type": "KB_ANSWER"}) is None and advise.explanation(None) is None
+
+
+def test_the_need_reads_a_why_question_as_an_explanation():
+    need = advise.parse_need({"spending": False, "product": True, "explain": True, "focus": "why", "kinds": [1]}, KINDS)
+    assert need.explain is True

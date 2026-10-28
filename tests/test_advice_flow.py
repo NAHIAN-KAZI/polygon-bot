@@ -59,7 +59,7 @@ def advice(monkeypatch):
             raise state["snapshot_error"]
         return snapshot_module.Snapshot(as_of=date(2026, 10, 27))
 
-    async def advise(message, recent, snap, need, cards, applying=False):
+    async def advise(message, recent, snap, need, cards, applying=False, customer_key=None, previous=None):
         state["calls"].append("advise")
         state["need_used"] = need
         return state["advice"]

@@ -2768,7 +2768,7 @@ async def _kb_stream(req: ChatRequest, request_id: str, recent: list[str] | None
 
 async def _advice_stream(req: ChatRequest, request_id: str, customer_identity, token: str | None,
                          recent_turns: list[ChatTurn], message: str, history: list[tuple[str, str]],
-                         turn_started_at: float, stored_message: str, need=None, applying_for=None):
+                         turn_started_at: float, stored_message: str, need=None, applying_for=None, previous=None):
     """Personal advice from the customer's own money and the bank's products (app/advisor), or, signed out, a note
     that it needs a login. The use-case switches are checked before any bank call; the reply is composed from
     facts the code computed, and the figures are never stored by the back office (the result type is not a
@@ -2831,7 +2831,8 @@ async def _advice_stream(req: ChatRequest, request_id: str, customer_identity, t
         return
 
     advice = await advisor_advise.advise(req.message, _recent_customer_messages(recent_turns), snap, need, cards,
-                                         applying=applying_for is not None)
+                                         applying=applying_for is not None,
+                                         customer_key=str(customer_identity.customer_id), previous=previous)
     if applying_for is not None and not advice.choices:   # nothing to suggest: open the form as they asked
         async for chunk in finish(_ui_action_outcome(applying_for, None, req.message, customer_identity.customer_id)):
             yield chunk
@@ -2859,7 +2860,8 @@ async def _advice_stream(req: ChatRequest, request_id: str, customer_identity, t
             pending = {"pending_apply": {"action": next(iter(vias)), "choices": advice.choices}}
     async for chunk in finish(_TurnOutcome(
             "ADVICE_ANSWER", _say("advice", advice.must, **advice.facts), "advisor", advice.used, None,
-            result_payload=payload, stored={**(pending or {}), **({"topic": advice.choices[:3]} if advice.choices else {})})):
+            result_payload=payload, stored={**(pending or {}), **({"topic": advice.choices[:3]} if advice.choices else {}),
+                                            **({"ranking": advice.ranking} if advice.ranking else {})})):
         yield chunk
 
 
@@ -3521,6 +3523,12 @@ async def _chat_stream(req: ChatRequest, authorization: str | None, heard_readin
                     and last_session_classification.get("type") == "BANKING_SERVICE"
                     and last_session_classification.get("request") is not None):
                 classify_context = session_turns[-1:]
+            elif (not recent_turns and session_turns
+                  and last_session_classification.get("type") in ("KB_ANSWER", "ADVICE_ANSWER")
+                  and last_session_classification.get("topic")):
+                # The last answer was about something ("this card", "eta"): the classifier is told what, and reads a
+                # follow-up that refers back to it as being about that.
+                classify_context = session_turns[-1:]
             try:
                 result = await classify(req.message, recent_turns=classify_context,
                                         **({"app_notes": ui_notes} if ui_notes else {}))
@@ -3568,7 +3576,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None, heard_readin
 
     if isinstance(result, AdviceQuestion):
         async for chunk in _advice_stream(req, request_id, customer_identity, token, recent_turns, composer_message,
-                                          history, turn_started_at, stored_message):
+                                          history, turn_started_at, stored_message, previous=last_session_classification):
             yield chunk
         return
 

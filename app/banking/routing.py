@@ -673,9 +673,13 @@ def _earlier_subject(recent_turns: list[ChatTurn] | None) -> tuple[str, list[str
 
 def _subject_note(subject: tuple[str, list[str]]) -> str:
     message, topic = subject
-    return (f'EARLIER IN THIS CHAT: the customer asked "{message}" and the assistant answered about: '
-            f'{", ".join(topic)}. If the new message refers back to it ("this", "it", "that", "eta", "oita", "that card"), '
-            "read it as about that subject. A message with a subject of its own is a new request.")
+    names = ", ".join(topic)
+    return (f'EARLIER IN THIS CHAT: the customer asked "{message}" and the assistant answered about: {names}. '
+            'If the new message refers back to it ("this", "it", "that", "eta", "oita", "that card"), the subject is '
+            f"{names}: do not ask what it means. Asking what that product gives, costs, requires or how it works "
+            "(its benefits, fees, eligibility, \"what do I get if I take it\") is a knowledge question about it "
+            "(answer_kb_question); only asking which product suits THEM, or about their own money, is personal advice. "
+            "A message with a subject of its own is a new request.")
 
 
 async def _pick_domain(message: str, recent_turns: list[ChatTurn] | None) -> str | None:
@@ -943,6 +947,8 @@ async def _classify_scoped(
                 "it, \"it\"/\"that\"): route that action, reading \"it\" as what the previous "
                 "message was about."
             )
+        elif last_classification.get("type") in ("KB_ANSWER", "ADVICE_ANSWER"):
+            pass        # nothing was asked of the customer: only the answer's subject is added, below
         else:
             # T-53: broaden what counts as "answering" a pending clarification beyond bare
             # nouns/amounts/yes-or-no — a full-sentence reply that names the missing piece the
@@ -1002,7 +1008,7 @@ async def _classify_scoped(
                     "is a genuine subject change (a different kind of thing entirely, not just a "
                     "different phrasing of the same answer)."
                 )
-        if last_classification.get("type") != "BANKING_SERVICE":
+        if last_classification.get("type") not in ("BANKING_SERVICE", "KB_ANSWER", "ADVICE_ANSWER"):
             messages.append({
                 "role": "system",
                 "content": general_reasoning + worked_example,

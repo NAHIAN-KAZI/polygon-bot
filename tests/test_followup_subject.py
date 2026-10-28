@@ -28,7 +28,8 @@ def test_the_last_answers_subject_is_found_only_for_a_knowledge_or_advice_turn_w
 
 def test_the_note_names_the_subject_and_leaves_new_requests_alone():
     note = routing._subject_note(("tell me about it", ["Polygon Visa Infinite Credit Card"]))
-    assert "Polygon Visa Infinite Credit Card" in note and "refers back" in note and "new request" in note
+    assert "Polygon Visa Infinite Credit Card" in note and "do not ask what it means" in note and "new request" in note
+    assert "answer_kb_question" in note
 
 
 def test_a_knowledge_answer_is_written_in_the_language_the_customer_wrote_in():
@@ -36,3 +37,25 @@ def test_a_knowledge_answer_is_written_in_the_language_the_customer_wrote_in():
     assert "Write the answer in Bangla, in Bengali script." in prompt
     assert "Write the answer in" not in build_prompt("q", [{"filename": "k.md", "text": "t"}])
     assert "Write the answer in English." in build_prompt("q", [], language="English")
+
+
+def test_the_classifier_is_told_the_subject_of_a_knowledge_answer_and_does_not_think_it_asked_a_question(monkeypatch):
+    import asyncio
+    import json as _json
+
+    seen = {}
+
+    async def post_classification(messages, **extra):
+        seen["messages"] = messages
+        return [{"function": {"name": "answer_kb_question", "arguments": _json.dumps({})}}]
+
+    async def domain(message, recent_turns):
+        return None
+
+    monkeypatch.setattr(routing, "_post_classification", post_classification)
+    monkeypatch.setattr(routing, "_pick_domain", domain)
+    last = _turn("visa infinite card ta niye bolo", {"type": "KB_ANSWER", "topic": ["Polygon Visa Infinite Credit Card"]})
+    asyncio.run(routing.classify("Amar ki upokar hbe eta nile", recent_turns=[last]))
+    text = _json.dumps(seen["messages"], ensure_ascii=False)
+    assert "Polygon Visa Infinite Credit Card" in text and "EARLIER IN THIS CHAT" in text
+    assert "PENDING CLARIFICATION" not in text

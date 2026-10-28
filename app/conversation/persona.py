@@ -94,8 +94,12 @@ KIND_PURPOSE = {
                          "offer to help another way. Never claim more than the list says.",
     "advice": "The customer asked for advice drawn from their own money. Say what their figures show that "
               "matters for the question, then give what the facts suggest, in plain words: the ways to "
-              "save with how much each would save, or the suggested products, each named exactly with why "
-              "it fits them and what to check (the requirements set against their own figures). Say the "
+              "save with how much each would save, or the suggested products in the order given (the first is "
+              "the best fit, then the second best, then the third best), each named exactly with the reasons given: "
+              "each reason pairs something their account shows with what the product gives; keep them as given, add "
+              "none, and say nothing about the customer that the facts do not state. Say what to check (the requirements "
+              "set against their own figures). If asked how many products the bank has of a kind, say the count from "
+              "the facts. Say the "
               "bank decides on an application, as a natural remark and not a disclaimer. Use only numbers "
               "from the facts and work out no new ones. When the history is short, say what it rests on. "
               "If the facts say nothing fits or there is too little history, say so plainly. Keep it short.",
