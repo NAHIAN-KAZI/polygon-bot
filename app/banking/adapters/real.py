@@ -1,6 +1,7 @@
 import re
 from datetime import date, datetime, timedelta, timezone
 
+import re
 import httpx
 
 from app.banking.adapters.base import (
@@ -458,20 +459,29 @@ def _rows(body) -> list[dict]:
     return [r for r in body or [] if isinstance(r, dict)]
 
 
-async def _own_deposits(jwt: str | None, path: str, id_key: str, fields: tuple[str, ...], list_key: str,
-                        explicit_id: str | None = None) -> dict:
+async def _own_deposits(jwt: str | None, path: str, id_key: str, fields: tuple[str, ...], list_key: str) -> dict:
     """The customer's own fixed deposits or DPS from the bank's product list (amount, tenure, dates, status, what is
     saved so far...) and, for each, its profit history when the bank has one. The bank's identifier of a deposit
     is the one its own list gives (`fdIdentifier`, `dpsIdentifier`): the ledger account's identifier is a different
     thing, and the profit-history endpoint answers 404 to it. Profit history is empty for a conventional deposit
     (it takes part in no profit distribution), which is an answer, not an error."""
     entries = []
-    if explicit_id:
-        rows = [{id_key: explicit_id}]
-    else:
-        rows = _rows(await _call("GET", path, jwt))[:_MAX_DEPOSITS]
+    rows = _rows(await _call("GET", path, jwt))[:_MAX_DEPOSITS]
+    catalogue: dict[str, dict] = {}
+    if rows:
+        try:      # the products' own terms: a deposit record does not say its rate, its product does
+            catalogue = {str(p.get("code")): p for p in _rows(await _call("GET", "/product/v1/products", jwt))}
+        except AdapterAuthError:
+            raise
+        except AdapterUnavailableError:
+            catalogue = {}
     for row in rows:
         entry = {k: row[k] for k in fields if row.get(k) is not None}
+        product = catalogue.get(str(row.get("productCode")))
+        if product:
+            entry["productName"] = product.get("name")
+            if product.get("interestRate") is not None:
+                entry["interestRatePercent"] = product["interestRate"]
         identifier = row.get(id_key)
         if identifier:
             try:
@@ -484,6 +494,18 @@ async def _own_deposits(jwt: str | None, path: str, id_key: str, fields: tuple[s
                 entry["profitHistory"] = history[:_MAX_PROFIT_ROWS]
         entries.append(entry)
     return {list_key: entries}
+
+
+async def _own_profit_history(jwt: str | None, path: str, id_key: str, explicit: object) -> dict:
+    """One deposit's profit history by the identifier the payload names. The identifier is checked before it goes
+    into a URL: plain letters and digits only, and one of the customer's own deposits (the bank checks ownership
+    too; this never even asks it about anything else)."""
+    identifier = str(explicit)
+    own = {r.get(id_key) for r in _rows(await _call("GET", path, jwt))}
+    if not re.fullmatch(r"[A-Za-z0-9]{1,40}", identifier) or identifier not in own:
+        raise AdapterUnavailableError("No such deposit among the customer's own")
+    body = await _call("GET", f"{path}/{identifier}/profit-history", jwt)
+    return {"profitHistory": body} if isinstance(body, list) else body
 
 
 class FdProfitHistoryAdapter:
@@ -499,8 +521,7 @@ class FdProfitHistoryAdapter:
     ) -> AdapterResult:
         explicit = (payload or {}).get("id") or (payload or {}).get("identifier")
         if explicit:
-            body = await _call("GET", f"/product/v1/fixed-deposit/{explicit}/profit-history", jwt)
-            return AdapterResult(data={"profitHistory": body} if isinstance(body, list) else body)
+            return AdapterResult(data=await _own_profit_history(jwt, "/product/v1/fixed-deposit", "fdIdentifier", explicit))
         return AdapterResult(data=await _own_deposits(
             jwt, "/product/v1/fixed-deposit", "fdIdentifier", _FD_FIELDS, "fixedDeposits"))
 
@@ -517,8 +538,7 @@ class DpsProfitHistoryAdapter:
     ) -> AdapterResult:
         explicit = (payload or {}).get("id") or (payload or {}).get("identifier")
         if explicit:
-            body = await _call("GET", f"/product/v1/dps/{explicit}/profit-history", jwt)
-            return AdapterResult(data={"profitHistory": body} if isinstance(body, list) else body)
+            return AdapterResult(data=await _own_profit_history(jwt, "/product/v1/dps", "dpsIdentifier", explicit))
         return AdapterResult(data=await _own_deposits(
             jwt, "/product/v1/dps", "dpsIdentifier", _DPS_FIELDS, "dps"))
 

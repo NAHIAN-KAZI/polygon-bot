@@ -1084,33 +1084,28 @@ def test_loans_adapter_wraps_bare_array_response_under_loans_key(monkeypatch):
 # --- T-58: FdProfitHistoryAdapter / DpsProfitHistoryAdapter -------------------
 
 
-def test_fd_profit_history_adapter_explicit_id_skips_accounts_lookup(monkeypatch):
-    body = {"data": {"history": []}}
-    calls = _install_request(monkeypatch, response=FakeResponse(json_data=body))
-
-    result = asyncio.run(
-        real.fd_profit_history_adapter.fulfill(
-            _IDENTITY, _JWT, "fd_profit_history", {"id": "FDDE1F32376C574CB9"}
-        )
+def test_an_explicit_deposit_id_is_read_only_when_it_is_one_of_the_customers_own(monkeypatch):
+    calls = _install_path_responses(
+        monkeypatch,
+        {
+            "/product/v1/fixed-deposit": FakeResponse(json_data=FD_LIST),
+            "/product/v1/fixed-deposit/FDD93CB6889B6F475D/profit-history": FakeResponse(json_data=[{"period": "2026-09"}]),
+        },
     )
+    for key in ("id", "identifier"):
+        result = asyncio.run(real.fd_profit_history_adapter.fulfill(
+            _IDENTITY, _JWT, "fd_profit_history", {key: "FDD93CB6889B6F475D"}))
+        assert result.data == {"profitHistory": [{"period": "2026-09"}]}
+    assert calls[-1]["path"] == "/product/v1/fixed-deposit/FDD93CB6889B6F475D/profit-history"
 
-    assert len(calls) == 1
-    assert calls[0]["method"] == "GET"
-    assert calls[0]["path"] == "/product/v1/fixed-deposit/FDDE1F32376C574CB9/profit-history"
-    assert result == AdapterResult(data=body)
 
-
-def test_fd_profit_history_adapter_explicit_identifier_key_also_accepted(monkeypatch):
-    body = {"data": {"history": []}}
-    calls = _install_request(monkeypatch, response=FakeResponse(json_data=body))
-
-    asyncio.run(
-        real.fd_profit_history_adapter.fulfill(
-            _IDENTITY, _JWT, "fd_profit_history", {"identifier": "FDDE1F32376C574CB9"}
-        )
-    )
-
-    assert calls[0]["path"] == "/product/v1/fixed-deposit/FDDE1F32376C574CB9/profit-history"
+@pytest.mark.parametrize("bad", ["../../admin", "FDD93CB6889B6F475D/../x", "FDSOMEONEELSE", "", "a b"])
+def test_an_explicit_id_that_is_not_the_customers_own_or_not_plain_is_refused_before_any_url_is_built(monkeypatch, bad):
+    calls = _install_path_responses(monkeypatch, {"/product/v1/fixed-deposit": FakeResponse(json_data=FD_LIST)})
+    payload = {"id": bad} if bad else {"id": "x" * 41}
+    with pytest.raises(AdapterUnavailableError):
+        asyncio.run(real.fd_profit_history_adapter.fulfill(_IDENTITY, _JWT, "fd_profit_history", payload))
+    assert [c["path"] for c in calls] == ["/product/v1/fixed-deposit"]            # nothing else was asked of the bank
 
 
 _LEDGER_ACCOUNTS_ONE_FD_ONE_DPS = {
@@ -1124,10 +1119,12 @@ _LEDGER_ACCOUNTS_ONE_FD_ONE_DPS = {
 }
 
 
-FD_LIST = [{"fdIdentifier": "FDD93CB6889B6F475D", "status": "ACTIVE", "amount": 50000, "tenureValue": 12,
+FD_LIST = [{"fdIdentifier": "FDD93CB6889B6F475D", "productCode": "FD_GENERAL", "status": "ACTIVE", "amount": 50000, "tenureValue": 12,
             "tenureUnit": "MONTHS", "maturityDate": "2027-08-25", "startDate": "2026-08-25", "userId": 65,
             "phone": "01924504701", "fromAccount": "100126000023", "cifNumber": None}]
-DPS_LIST = [{"dpsIdentifier": "DPSABCFE255DE0C4DAE", "status": "ACTIVE", "installmentAmount": 50000,
+PRODUCTS = [{"code": "FD_GENERAL", "name": "Fixed Deposit General", "interestRate": 7.25},
+            {"code": "DPS_GOAL_12M", "name": "Goal Based DPS - 12 Months", "interestRate": 8.0}]
+DPS_LIST = [{"dpsIdentifier": "DPSABCFE255DE0C4DAE", "productCode": "DPS_GOAL_12M", "status": "ACTIVE", "installmentAmount": 50000,
              "collectedPoisha": 100000, "nextInstallmentDate": "2026-11-25", "tenureMonths": 12,
              "maturityDate": "2027-08-25", "userId": 65, "phone": "01924504701"}]
 
@@ -1137,15 +1134,17 @@ def test_fd_adapter_reads_the_customers_own_fixed_deposits_with_the_deposits_own
         monkeypatch,
         {
             "/product/v1/fixed-deposit": FakeResponse(json_data=FD_LIST),
+            "/product/v1/products": FakeResponse(json_data=PRODUCTS),
             "/product/v1/fixed-deposit/FDD93CB6889B6F475D/profit-history": FakeResponse(json_data=[]),
         },
     )
 
     result = asyncio.run(real.fd_profit_history_adapter.fulfill(_IDENTITY, _JWT, "fd_profit_history", {}))
 
-    assert [c["path"] for c in calls] == ["/product/v1/fixed-deposit",
+    assert [c["path"] for c in calls] == ["/product/v1/fixed-deposit", "/product/v1/products",
                                           "/product/v1/fixed-deposit/FDD93CB6889B6F475D/profit-history"]
     fd = result.data["fixedDeposits"][0]
+    assert fd["interestRatePercent"] == 7.25 and fd["productName"] == "Fixed Deposit General"   # from the product's terms
     assert fd["amount"] == 50000 and fd["maturityDate"] == "2027-08-25" and fd["status"] == "ACTIVE"
     assert "profitHistory" not in fd                                      # empty for a conventional deposit
     assert not {"userId", "phone", "fromAccount", "cifNumber", "fdIdentifier"} & set(fd)   # nothing personal is passed on
@@ -1156,6 +1155,7 @@ def test_fd_adapter_keeps_the_profit_history_when_the_bank_has_one_and_survives_
         monkeypatch,
         {
             "/product/v1/fixed-deposit": FakeResponse(json_data=FD_LIST),
+            "/product/v1/products": FakeResponse(json_data=PRODUCTS),
             "/product/v1/fixed-deposit/FDD93CB6889B6F475D/profit-history": FakeResponse(json_data=[{"period": "2026-09"}]),
         },
     )
@@ -1166,6 +1166,7 @@ def test_fd_adapter_keeps_the_profit_history_when_the_bank_has_one_and_survives_
         monkeypatch,
         {
             "/product/v1/fixed-deposit": FakeResponse(json_data=FD_LIST),
+            "/product/v1/products": FakeResponse(json_data=PRODUCTS),
             "/product/v1/fixed-deposit/FDD93CB6889B6F475D/profit-history": FakeResponse(status_code=404, json_data={}),
         },
     )
@@ -1179,17 +1180,33 @@ def test_a_customer_with_no_fixed_deposit_gets_an_empty_list_not_an_error(monkey
     assert got.data == {"fixedDeposits": []}
 
 
+def test_the_deposit_still_answers_when_the_product_catalogue_is_down(monkeypatch):
+    _install_path_responses(
+        monkeypatch,
+        {
+            "/product/v1/fixed-deposit": FakeResponse(json_data=FD_LIST),
+            "/product/v1/products": FakeResponse(status_code=500, json_data={}),
+            "/product/v1/fixed-deposit/FDD93CB6889B6F475D/profit-history": FakeResponse(json_data=[]),
+        },
+    )
+    fd = asyncio.run(real.fd_profit_history_adapter.fulfill(_IDENTITY, _JWT, "fd_profit_history", {})).data["fixedDeposits"][0]
+    assert fd["status"] == "ACTIVE" and "interestRatePercent" not in fd
+
+
 def test_dps_adapter_reads_the_customers_own_dps_schemes(monkeypatch):
     calls = _install_path_responses(
         monkeypatch,
         {
             "/product/v1/dps": FakeResponse(json_data=DPS_LIST),
+            "/product/v1/products": FakeResponse(json_data=PRODUCTS),
             "/product/v1/dps/DPSABCFE255DE0C4DAE/profit-history": FakeResponse(json_data=[]),
         },
     )
     result = asyncio.run(real.dps_profit_history_adapter.fulfill(_IDENTITY, _JWT, "dps_profit_history", None))
-    assert [c["path"] for c in calls] == ["/product/v1/dps", "/product/v1/dps/DPSABCFE255DE0C4DAE/profit-history"]
+    assert [c["path"] for c in calls] == ["/product/v1/dps", "/product/v1/products",
+                                          "/product/v1/dps/DPSABCFE255DE0C4DAE/profit-history"]
     dps = result.data["dps"][0]
+    assert dps["interestRatePercent"] == 8.0
     assert dps["installmentAmount"] == 50000 and dps["nextInstallmentDate"] == "2026-11-25" and dps["collectedPoisha"] == 100000
     assert not {"userId", "phone", "dpsIdentifier"} & set(dps)
 
