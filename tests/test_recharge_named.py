@@ -58,9 +58,15 @@ def test_nothing_saved_a_bank_error_or_no_login_leaves_the_request_alone(monkeyp
 
 def test_other_results_are_left_alone(monkeypatch):
     unsure = Clarification(question="?", options=())
-    assert _run(unsure, "jahid k recharge koro", 1, monkeypatch)[0] is unsure
+    assert _run(unsure, "help", 0, monkeypatch)[0] is unsure                   # names nobody saved
     other = BankingService("app_actions", "card_apply", None, {})
     assert _run(other, "jahid k recharge koro", 1, monkeypatch)[0] is other
+
+
+def test_a_clarification_that_names_a_saved_person_becomes_a_lookup_to_send_money(monkeypatch):
+    unsure = Clarification(question="where?", options=())
+    got, _ = _run(unsure, "jahid ke 500 taka pathao", 1, monkeypatch)
+    assert (got.category, got.service) == ("polygon_services", "beneficiary") and got.payload == {"nameQuery": "Jahid"}
 
 
 def test_a_saved_mobile_recharge_beneficiary_opens_the_recharge_screen():

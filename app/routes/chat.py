@@ -2942,9 +2942,10 @@ async def _named_person_lookup(result, message: str, identity, token: str | None
     recharge = (isinstance(result, BankingService) and result.category == ui_actions.CATEGORY
                 and result.service == "mobile_recharge")
     transfer = isinstance(result, BankingService) and (result.category, result.service) in _TRANSFER_KEYS
-    if not (recharge or transfer) or identity is None or not token:
+    unsure = isinstance(result, Clarification)       # "Jahid ke 500 taka pathao" is often asked about, not routed
+    if not (recharge or transfer or unsure) or identity is None or not token:
         return result
-    payload = result.payload or {}
+    payload = getattr(result, "payload", None) or {}
     if str(payload.get("forSelf")).strip().lower() in ("true", "yes", "1") or re.search(r"\d{6,}", ascii_digits(message or "")):
         return result
     try:
@@ -4141,6 +4142,23 @@ async def _chat_stream(req: ChatRequest, authorization: str | None, heard_readin
                                     "subservice": None,
                                     "question": beneficiary_reply_token,
                                 }
+                            elif (len(matches) == 1 and not from_model and payload.get("purpose") == "recharge"
+                                  and (_resolve_beneficiary_destination(matches[0]) or {}).get("action")
+                                  not in ("mobile_recharge", "wallet_transfer")):
+                                # saved as a bank account or a card: there is no mobile number to recharge
+                                beneficiary_reply_token = ""
+                                async for _piece in say_stream(_say(
+                                    "ask", {"name searched": payload.get("nameQuery")},
+                                    problem=(f"the saved {_beneficiary_name(matches[0])} is a "
+                                             + str(matches[0].get("serviceType") or "").replace("_", " ").lower()
+                                             + ", not a mobile number, so it cannot be recharged"),
+                                    options=["give the mobile number to recharge", "send money to the saved one instead"])):
+                                    beneficiary_reply_token += _piece
+                                    yield _sse("token", {"token": _piece})
+                                yield _result_event("CLARIFICATION_REQUIRED", None, None, None)
+                                turn_classification = {"type": "CLARIFICATION_REQUIRED", "category": None,
+                                                       "service": None, "subservice": None,
+                                                       "question": beneficiary_reply_token}
                             elif len(matches) == 1 and not from_model:
                                 # Only a certain match (plain text, or a pick the customer made)
                                 # goes straight to the recipient. What the model found is a
