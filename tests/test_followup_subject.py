@@ -20,14 +20,14 @@ def test_a_knowledge_or_advice_turn_keeps_what_it_was_about():
 
 def test_the_last_answers_subject_is_found_only_for_a_knowledge_or_advice_turn_with_a_subject():
     kb = _turn("visa infinite card ta niye bolo", {"type": "KB_ANSWER", "topic": ["Polygon Visa Infinite Credit Card"]})
-    assert routing._earlier_subject([kb]) == ("visa infinite card ta niye bolo", ["Polygon Visa Infinite Credit Card"])
+    assert routing._earlier_subject([kb]) == ("visa infinite card ta niye bolo", ["Polygon Visa Infinite Credit Card"], "KB_ANSWER")
     assert routing._earlier_subject([_turn("hi", {"type": "KB_ANSWER", "topic": []})]) is None
     assert routing._earlier_subject([_turn("balance", {"type": "BANKING_SERVICE", "topic": ["x"]})]) is None
     assert routing._earlier_subject([_turn("x", None)]) is None and routing._earlier_subject(None) is None
 
 
 def test_the_note_names_the_subject_and_leaves_new_requests_alone():
-    note = routing._subject_note(("tell me about it", ["Polygon Visa Infinite Credit Card"]))
+    note = routing._subject_note(("tell me about it", ["Polygon Visa Infinite Credit Card"], "KB_ANSWER"))
     assert "Polygon Visa Infinite Credit Card" in note and "do not ask what it means" in note and "new request" in note
     assert "answer_kb_question" in note
 
@@ -59,3 +59,9 @@ def test_the_classifier_is_told_the_subject_of_a_knowledge_answer_and_does_not_t
     text = _json.dumps(seen["messages"], ensure_ascii=False)
     assert "Polygon Visa Infinite Credit Card" in text and "EARLIER IN THIS CHAT" in text
     assert "PENDING CLARIFICATION" not in text
+
+
+def test_after_a_recommendation_a_why_question_is_told_to_be_personal_advice():
+    advice = routing._subject_note(("which card is best?", ["Visa Platinum"], "ADVICE_ANSWER"))
+    assert "give_personal_advice" in advice and "why one product and not another" in advice
+    assert "give_personal_advice" not in routing._subject_note(("tell me", ["Visa Platinum"], "KB_ANSWER")).split("only asking which")[0]

@@ -658,28 +658,32 @@ _DOMAIN_EXAMPLES = (
 )
 
 
-def _earlier_subject(recent_turns: list[ChatTurn] | None) -> tuple[str, list[str]] | None:
-    """(what the customer last asked, what the answer was about) when the last turn was a knowledge or advice answer
-    with a subject; else None. A follow-up that says "this", "it" or "that card" refers to it."""
+def _earlier_subject(recent_turns: list[ChatTurn] | None) -> tuple[str, list[str], str] | None:
+    """(what the customer last asked, what the answer was about, the answer's type) when the last turn was a
+    knowledge or advice answer with a subject; else None. A follow-up that says "this", "it" or "that card" refers
+    to it."""
     if not recent_turns:
         return None
     last = recent_turns[-1]
     c = last.classification or {}
     topic = [t for t in c.get("topic") or [] if isinstance(t, str) and t]
     if c.get("type") in ("KB_ANSWER", "ADVICE_ANSWER") and topic and last.message:
-        return last.message, topic
+        return last.message, topic, c["type"]
     return None
 
 
-def _subject_note(subject: tuple[str, list[str]]) -> str:
-    message, topic = subject
+def _subject_note(subject: tuple[str, list[str], str]) -> str:
+    message, topic, kind = subject
     names = ", ".join(topic)
-    return (f'EARLIER IN THIS CHAT: the customer asked "{message}" and the assistant answered about: {names}. '
+    note = (f'EARLIER IN THIS CHAT: the customer asked "{message}" and the assistant answered about: {names}. '
             'If the new message refers back to it ("this", "it", "that", "eta", "oita", "that card"), the subject is '
             f"{names}: do not ask what it means. Asking what that product gives, costs, requires or how it works "
             "(its benefits, fees, eligibility, \"what do I get if I take it\") is a knowledge question about it "
-            "(answer_kb_question); only asking which product suits THEM, or about their own money, is personal advice. "
-            "A message with a subject of its own is a new request.")
+            "(answer_kb_question); only asking which product suits THEM, or about their own money, is personal advice. ")
+    if kind == "ADVICE_ANSWER":
+        note += ("The earlier answer was a recommendation for them: asking why, on what it was based, or why one "
+                 "product and not another is a follow-up to it, so it is personal advice (give_personal_advice). ")
+    return note + "A message with a subject of its own is a new request."
 
 
 async def _pick_domain(message: str, recent_turns: list[ChatTurn] | None) -> str | None:
