@@ -361,6 +361,8 @@ async def advise(message: str, recent: list[str], snap: snap_mod.Snapshot, need:
         if applying and suggested:
             out["next step"] = ("ask which of these they would like to apply for; the application opens as soon "
                                 "as they choose")
+        elif suggested and any(c.apply_via for c in cards if c.name in advice.choices):
+            out["next step"] = ("say they can apply right here: tell you which one and the application opens")
         advice.used = "recommend" if suggested else advice.used
     advice.facts = plain_keys(advice.facts)
     return advice

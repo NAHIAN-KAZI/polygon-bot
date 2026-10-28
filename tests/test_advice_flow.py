@@ -340,3 +340,30 @@ def test_a_message_the_classifier_could_not_place_becomes_the_application_it_say
     assert off.service != "card_apply"                                                      # a switched-off screen is not offered
     kept = BankingService("account_info", "balance", None, {})
     assert look("debit card nite chai", {"action": 1, "quote": "nite chai"}, result=kept) is kept   # only an unsure result is looked at again
+
+
+def test_a_recommendation_remembers_which_screen_opens_what_it_suggested_so_choosing_one_opens_it(client, apply_flow, advice, monkeypatch):
+    async def classify(message, recent_turns=None, app_notes=None):
+        return AdviceQuestion()
+
+    monkeypatch.setattr(chat_module, "classify", classify)
+    _, result = say(client, "which debit card is best for me")
+    assert result["type"] == "ADVICE_ANSWER"
+    apply_flow["picked"] = 0
+    _, result = say(client, "the first one")
+    assert result["type"] == "APP_ACTION" and result["payload"]["ui"]["route"] == "/card_product_catalog"
+    assert result["payload"]["products"] == [{"name": "Platinum Debit", "group": "Cards", "strength": "apply"}]
+
+
+def test_a_recommendation_of_products_no_one_screen_opens_remembers_nothing(client, apply_flow, advice, monkeypatch):
+    async def classify(message, recent_turns=None, app_notes=None):
+        return AdviceQuestion()
+
+    monkeypatch.setattr(chat_module, "classify", classify)
+    apply_flow["cards"] = [ProductCard("Platinum Debit", "Cards", "debit card", apply_via="card_apply"),
+                           ProductCard("Gold Debit", "Cards", "debit card", apply_via="credit_card_apply")]
+    say(client, "which debit card is best for me")
+    apply_flow["picked"] = 0
+    asked = len(apply_flow.get("asked", []))
+    say(client, "the first one")
+    assert len(apply_flow.get("asked", [])) == asked          # nothing was offered, so no choice was looked for

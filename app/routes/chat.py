@@ -2834,6 +2834,13 @@ async def _advice_stream(req: ChatRequest, request_id: str, customer_identity, t
         payload["insight"] = advice.insight
     pending = {"pending_apply": {"action": applying_for.id, "choices": advice.choices}} \
         if applying_for is not None and advice.choices else None
+    if pending is None and advice.choices and not (req.disabled_use_cases and any(
+            d.startswith(f"{ui_actions.CATEGORY}.") for d in req.disabled_use_cases)):
+        # A recommendation ends by offering the application: remember which screen opens the suggested products, when
+        # one screen opens them all and its use case is on, so "the first one" or "apply" next goes straight to it.
+        vias = {c.apply_via for c in cards if c.name in advice.choices}
+        if len(vias) == 1 and None not in vias and f"{ui_actions.CATEGORY}.{next(iter(vias))}" not in (req.disabled_use_cases or []):
+            pending = {"pending_apply": {"action": next(iter(vias)), "choices": advice.choices}}
     async for chunk in finish(_TurnOutcome(
             "ADVICE_ANSWER", _say("advice", advice.must, **advice.facts), "advisor", advice.used, None,
             result_payload=payload, stored=pending)):
