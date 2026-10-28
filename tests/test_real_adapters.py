@@ -1221,11 +1221,13 @@ def test_dps_adapter_reads_the_customers_own_dps_schemes(monkeypatch):
 
 def test_fd_profit_history_adapter_wraps_bare_array_response(monkeypatch):
     body = [{"month": "2026-09", "profit": "12.50"}]
-    _install_request(monkeypatch, response=FakeResponse(json_data=body))
+    _install_path_responses(monkeypatch, {
+        "/product/v1/fixed-deposit": FakeResponse(json_data=[{"fdIdentifier": "FD1"}]),
+        "/product/v1/fixed-deposit/FD1/profit-history": FakeResponse(json_data=body)})
 
     result = asyncio.run(
         real.fd_profit_history_adapter.fulfill(
-            _IDENTITY, _JWT, "fd_profit_history", {"id": "FD-1"}
+            _IDENTITY, _JWT, "fd_profit_history", {"id": "FD1"}
         )
     )
 
@@ -1235,11 +1237,13 @@ def test_fd_profit_history_adapter_wraps_bare_array_response(monkeypatch):
 
 def test_dps_profit_history_adapter_wraps_bare_array_response(monkeypatch):
     body = [{"month": "2026-09", "profit": "5.00"}]
-    _install_request(monkeypatch, response=FakeResponse(json_data=body))
+    _install_path_responses(monkeypatch, {
+        "/product/v1/dps": FakeResponse(json_data=[{"dpsIdentifier": "DPS1"}]),
+        "/product/v1/dps/DPS1/profit-history": FakeResponse(json_data=body)})
 
     result = asyncio.run(
         real.dps_profit_history_adapter.fulfill(
-            _IDENTITY, _JWT, "dps_profit_history", {"id": "DPS-1"}
+            _IDENTITY, _JWT, "dps_profit_history", {"id": "DPS1"}
         )
     )
 
