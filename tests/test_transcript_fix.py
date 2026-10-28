@@ -159,7 +159,7 @@ def nemo(monkeypatch):
 
 
 def _correction(monkeypatch, fix):
-    async def fake(heard):
+    async def fake(heard, second=None):
         return fix
 
     monkeypatch.setattr(chat_module, "correct_transcript", fake)
@@ -222,3 +222,43 @@ def test_other_voice_modes_are_not_corrected(client, monkeypatch):
     events = _parse_sse(client.post("/chat", json={"audio": WAV_URL, "audio_mode": "transcript"},
                                     headers=AUTH_HEADERS).text)
     assert events[0] == ("transcript", {"text": "what are your branch hours"})
+
+
+# --- a second recogniser reads a long number Titu cannot (T-151) ---------------------------------------------------------
+
+TITU = "আমি একটা নাম্বারে পাঁচ শো টাকা বিকাশ করব শূন্য শূন্য শূন্য শ পাচ"
+
+
+def _fix2(heard, second):
+    return asyncio.run(correct_transcript(heard, second))
+
+
+def test_a_long_number_the_second_recogniser_heard_goes_into_the_prompt_and_the_text(model_says):
+    prompts = model_says({"text": "আমি একটা নাম্বারে 500 টাকা বিকাশ করব 01862610315", "readings": []})
+    fix = _fix2(TITU, "আমি আপনার নম্বর 15 টাকেও বিকাশ করবো 01862610315।")
+    assert fix.text == "আমি একটা নাম্বারে 500 টাকা বিকাশ করব 01862610315"
+    assert "01862610315" in prompts[0] and "better at English digits" in prompts[0]
+
+
+def test_a_number_that_neither_recogniser_heard_is_never_accepted(model_says):
+    model_says({"text": "আমি একটা নাম্বারে 500 টাকা বিকাশ করব 01711111111", "readings": []})
+    assert _fix2(TITU, "আমি বিকাশ করবো 01862610315").text == TITU           # the model made a number up: Titu's text stays
+
+
+def test_without_a_complete_number_in_the_second_transcript_nothing_changes_in_the_prompt(model_says):
+    prompts = model_says({"text": TITU, "readings": []})
+    _fix2(TITU, "আমি আপনার নম্বর 0186")                        # 4 digits: cut short, not a number to use
+    _fix2(TITU, None)
+    assert all("second speech recogniser" not in p for p in prompts)
+
+
+def test_a_number_titu_already_wrote_in_digits_is_left_to_titu(model_says):
+    prompts = model_says({"text": "নাম্বার 01711223344", "readings": []})
+    fix = _fix2("নাম্বার 01711223344", "নাম্বার 01862610315")
+    assert fix.text == "নাম্বার 01711223344" and all("second speech recogniser" not in p for p in prompts)
+
+
+def test_long_runs_reads_spaced_dashed_and_bangla_digits():
+    from app.conversation.transcript_fix import long_runs
+    assert long_runs("০১৮৬ ২৬১ ০৩১৫ and 018-6261-0315 and 500") == ["01862610315", "01862610315"]
+    assert long_runs(None) == [] and long_runs("0186") == []

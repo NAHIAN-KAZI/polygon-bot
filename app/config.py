@@ -41,6 +41,9 @@ class Settings:
     # transcript_fix.py): fixes misheard words, writes amounts said in words as digits, and asks
     # which was meant when two readings would do different things. Off = the transcript as heard.
     STT_CORRECTION: bool = os.environ.get("STT_CORRECTION", "true").lower() not in ("0", "false", "no")
+    # In "nemo" mode the model also hears the audio, only to read a long number Titu writes badly (English digits).
+    STT_SECOND_OPINION: bool = os.environ.get("STT_SECOND_OPINION", "true").lower() not in ("0", "false", "no")
+    STT_SECOND_OPINION_TIMEOUT: float = float(os.environ.get("STT_SECOND_OPINION_TIMEOUT", "12"))
     STT_CORRECTION_TIMEOUT: float = float(os.environ.get("STT_CORRECTION_TIMEOUT", "15"))
     # "Read aloud" button on replies (POST /tts, Microsoft's Edge neural voices via edge-tts).
     # The reply text is sent to Microsoft and replies can hold account details, so it's off

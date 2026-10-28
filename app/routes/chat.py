@@ -2,6 +2,7 @@ import copy
 import dataclasses
 import json
 from typing import Literal
+import asyncio
 import logging
 import re
 import time
@@ -3143,6 +3144,18 @@ def _session_safe_classification(classification: dict | None) -> dict | None:
     return _strip_secrets(classification)
 
 
+async def _second_opinion(audio: str) -> str | None:
+    """What the language model hears in the recording, for a long number Titu cannot read (English digits). None when
+    switched off, slow or failing: the correction then works from Titu's text alone."""
+    if not settings.STT_SECOND_OPINION or not settings.LLM_AUDIO_INPUT:       # no audio model here: Titu alone
+        return None
+    try:
+        return await asyncio.wait_for(transcribe(audio), settings.STT_SECOND_OPINION_TIMEOUT)
+    except Exception:  # noqa: BLE001 -- never logs the transcript
+        logger.info("second opinion on the recording unavailable")
+        return None
+
+
 async def _chat_stream(req: ChatRequest, authorization: str | None, heard_readings: tuple[str, ...] = ()):
     """`heard_readings`: a voice message that reads two or three ways asking for different
     things (transcript_fix) -- the customer is asked which was meant before anything acts."""
@@ -4379,7 +4392,8 @@ async def _chat_with_media(req: ChatRequest, authorization: str | None):
     if req.audio:
         try:
             if req.audio_mode == "nemo":
-                spoken = await transcribe_nemo(req.audio)
+                # Titu and the model hearing the same audio run together: the second only reads a long number.
+                spoken, second_opinion = await asyncio.gather(transcribe_nemo(req.audio), _second_opinion(req.audio))
                 heard_audio = None
             else:
                 # "audio" mode is transcribed too: every step after routing (grounding the
@@ -4402,7 +4416,7 @@ async def _chat_with_media(req: ChatRequest, authorization: str | None):
         if req.audio_mode == "nemo":
             # Titu mishears: corrected before anything acts on it (numbers said in words become
             # digits), and the customer can still see what it heard.
-            fix = await correct_transcript(spoken)
+            fix = await correct_transcript(spoken, second_opinion)
             spoken, heard_readings = fix.text, fix.readings
         if req.audio_mode != "audio":  # the mobile app never shows the customer a transcript
             yield _sse("transcript", {"text": spoken, **({"heard": heard} if heard != spoken else {})})

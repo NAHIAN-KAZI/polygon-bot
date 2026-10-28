@@ -114,6 +114,9 @@ def _no_generated_clarifications(monkeypatch):
     monkeypatch.setattr(live_cards_module, "CardProductsAdapter", _NoBank)
     live_cards_module.clear_cache()
 
+    # The model's second hearing of a recording (for a long number) is a model call: off by default in tests.
+    monkeypatch.setattr(chat_module.settings, "STT_SECOND_OPINION", False)
+
     # Planning and reranking knowledge searches are model calls: off by default in tests (the plain search of the
     # message runs, which the tests fake); tests of the planned path switch it on and fake its pieces.
     monkeypatch.setattr(chat_module.settings, "KB_QUERY_PLANNING", False)
@@ -145,7 +148,7 @@ def _no_generated_clarifications(monkeypatch):
 
     # Correcting a voice transcript is a model call too: off by default (the transcript stands
     # as heard); tests of the correction patch llm_backend or capture the real function.
-    async def _as_heard(heard):
+    async def _as_heard(heard, second=None):
         return TranscriptFix(heard)
 
     monkeypatch.setattr(chat_module, "correct_transcript", _as_heard)

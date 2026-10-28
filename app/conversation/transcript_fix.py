@@ -60,7 +60,16 @@ _PROMPT = (
     "a range like দুই তিন হাজার), or a name could be two people, and the choice changes what the "
     "bank would do, put one full reading per meaning in \"readings\" (2 or 3) and make \"text\" "
     "the most likely one. Otherwise \"readings\" is empty.\n\n"
+    "{second}"
     'Respond only with JSON: {{"text": "<transcript>", "readings": ["<reading>"]}}'
+)
+
+# Said when a second recogniser, better at English digits, heard a long number the first one did not write as digits.
+_SECOND = (
+    "A second speech recogniser, which is better at English digits, heard this number in the same message: {run}. "
+    "Where the transcript has that spoken number (written as digit words, garbled or cut short), write exactly this "
+    "digit string there and change nothing else about those words. If the transcript has no spoken number, ignore "
+    "this.\n\n"
 )
 
 # The model rarely asks on its own, and still swaps a garbled word for a banking word that doesn't
@@ -109,6 +118,14 @@ class TranscriptFix:
     readings: tuple[str, ...] = ()
 
 
+_LONG_RUN_RE = re.compile(r"\d(?:[ \-]?\d){6,}")        # 7+ digits, spaces or dashes between them allowed
+
+
+def long_runs(text: str | None) -> list[str]:
+    """The long digit strings in `text` (a phone, account or card number), as plain digits. Bangla digits count."""
+    return [re.sub(r"\D", "", m) for m in _LONG_RUN_RE.findall((text or "").translate(_BANGLA_DIGITS))]
+
+
 def _numbers(text: str) -> list[str]:
     return [n.replace(",", "") for n in _NUMBER_RE.findall(text.translate(_BANGLA_DIGITS))]
 
@@ -124,11 +141,17 @@ def _keeps_heard_numbers(heard: str, text: str) -> bool:
     return True
 
 
-def _usable(heard: str, text: object) -> str | None:
-    """`text` as a correction of `heard`, or None if it can't be trusted as one."""
+def _usable(heard: str, text: object, second: str | None = None) -> str | None:
+    """`text` as a correction of `heard`, or None if it can't be trusted as one. With a second recogniser's
+    transcript, a long digit string in the correction must be one that either recogniser actually heard: a number is
+    never made up or completed."""
     if not isinstance(text, str) or not text.strip():
         return None
     text = text.strip()
+    if second is not None:
+        heard_runs = set(long_runs(heard)) | set(long_runs(second))
+        if any(run not in heard_runs for run in long_runs(text)):
+            return None
     # Much longer than what was said: the model answered or embellished instead of correcting.
     if len(text) > 2 * len(heard) + 40:
         return None
@@ -137,9 +160,12 @@ def _usable(heard: str, text: object) -> str | None:
     return text if _keeps_heard_numbers(heard, text) else None
 
 
-async def correct_transcript(heard: str) -> TranscriptFix:
-    """Titu's transcript, corrected; `heard` itself whenever the correction can't be trusted."""
+async def correct_transcript(heard: str, second: str | None = None) -> TranscriptFix:
+    """Titu's transcript, corrected; `heard` itself whenever the correction can't be trusted. `second` is another
+    recogniser's transcript of the same audio (the model hearing it), used only for a long number Titu did not
+    write as digits: Titu is poor at English digits, the other is not."""
     unchanged = TranscriptFix(heard)
+    runs = [] if long_runs(heard) else long_runs(second)
     # Only digits and spaces (a spoken code, a bare number): no word to fix, and a code never
     # goes to the model.
     if not settings.STT_CORRECTION or not _LETTER_RE.search(heard):
@@ -149,7 +175,8 @@ async def correct_transcript(heard: str) -> TranscriptFix:
             "/api/generate",
             {
                 "model": settings.OLLAMA_MODEL,
-                "prompt": _PROMPT.format(heard=json.dumps(heard, ensure_ascii=False)),
+                "prompt": _PROMPT.format(heard=json.dumps(heard, ensure_ascii=False),
+                                         second=_SECOND.format(run=runs[0]) if runs else ""),
                 "stream": False, "format": "json", "think": settings.OLLAMA_THINK,
                 "options": {"num_ctx": settings.OLLAMA_NUM_CTX, "temperature": 0},
             },
@@ -162,14 +189,15 @@ async def correct_transcript(heard: str) -> TranscriptFix:
         return unchanged
     if not isinstance(parsed, dict):
         return unchanged
-    text = _usable(heard, parsed.get("text"))
+    guard = second if runs else None
+    text = _usable(heard, parsed.get("text"), guard)
     if text is None:
         logger.info("transcript correction rejected; using Titu's text")
         return unchanged
     readings: list[str] = []
     raw_readings = parsed.get("readings")
     for reading in raw_readings if isinstance(raw_readings, list) else []:
-        reading = _usable(heard, reading)
+        reading = _usable(heard, reading, guard)
         if reading is not None and reading.casefold() not in {r.casefold() for r in readings}:
             readings.append(reading)
     if len(readings) < 2 and text != heard and _doubtful_swap(heard, text):
