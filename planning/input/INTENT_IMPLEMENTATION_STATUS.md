@@ -234,7 +234,7 @@ No API needed — handled conversationally.
 | 14.17 QR parse | ✅ App action (T-79): the bot returns `APP_ACTION` `qr_payment` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
 | 14.18 QR payment history | ✅ Done (T-64, `transfer_info`/`qr_payment_history` — amounts already taka) |
 | 14.19 Beneficiary — list | ✅ Done |
-| 14.20 Beneficiary — add | ⛔ Blocked live (T-60 — chat flow + confirmation work, but the bank returns 500 for the add; waiting on the API team's required fields per serviceType) |
+| 14.20 Beneficiary — add | ✅ App action (T-147): the bot asks where it is saved (the bank's own catalogue: bank, wallet, mobile recharge, card, bills) and opens the app's beneficiary form on that kind (`beneficiary_add_form`, `leafServiceId` prefill). The older in-chat bank add (T-60, blocked live: the bank returns 500) stays behind `BENEFICIARY_ADD_OPENS_FORM=false`. |
 | 14.21 Beneficiary — edit | ✅ App action (T-79): the bot returns `APP_ACTION` `beneficiary_edit` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
 | 14.22 Beneficiary — delete | ✅ App action (T-79): the bot returns `APP_ACTION` `beneficiary_delete` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |
 | 14.23 Beneficiary — upload/change photo | ✅ App action (T-79): the bot returns `APP_ACTION` `beneficiary_photo` with the customer's own words prefilled; the app shows an inline box and makes the call. No bank call by the bot |

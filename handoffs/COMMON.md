@@ -314,8 +314,16 @@ is changed and the message is answered as a new request.
   (`CardReplacementArgs`).
 - `prefill` is passed as `Get.arguments` (a `Map<String, dynamic>` or `null`). Most target
   screens don't read it yet. They can adopt it with `if (Get.arguments is Map) ...`.
+- **Beneficiary form (`beneficiary_add_form`, `/beneficiary/form`, 2026-10-28).** A new beneficiary is never assumed to be a
+  bank account. When the customer has not said where, the bot asks (`CLARIFICATION_REQUIRED`, `payload.pending.missingFields`
+  `["where"]`, the options are the bank's own Pay & Transfer catalogue). Once the kind is known it sends `APP_ACTION`
+  `beneficiary_add_form` with `prefill` `{"leafServiceId": "<catalogue leaf id: bkash, nagad, city_account, other_bank,
+  mobile_recharge...>", "nickname"?, "accountNumber"?}`. `BeneficiaryFormController` reads it through
+  `BeneficiarySavePrefill.fromChat` (the form opens on that kind, the name and number filled in). Card applications are
+  two actions: `card_apply` (debit, prepaid and virtual cards, all on the virtual card screen, `/card_product_catalog`) and
+  `credit_card_apply` (`/apply_for_credit_card`, only a requested credit limit).
 
-### Registry (30 actions, `app/banking/ui_actions.py`)
+### Registry (35 actions, `app/banking/ui_actions.py`)
 
 "Rows" are the `planning/input/INTENT_IMPLEMENTATION_STATUS.md` rows each action covers.
 "In app" applies the rule above.
