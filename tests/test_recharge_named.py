@@ -72,3 +72,23 @@ def test_a_clarification_that_names_a_saved_person_becomes_a_lookup_to_send_mone
 def test_a_saved_mobile_recharge_beneficiary_opens_the_recharge_screen():
     assert chat_module._resolve_beneficiary_destination({"serviceType": "MOBILE_RECHARGE"}) == {"action": "mobile_recharge"}
     assert chat_module._resolve_beneficiary_destination({"serviceType": "CARD_PAYMENT"}) is None
+
+
+# ---- a number the customer did not say never reaches a request (T-151) -----------------------------------------------------
+
+def test_a_number_the_classifier_made_up_is_dropped_so_the_customer_is_asked():
+    sent = BankingService("transfer", "wallet_transfer", "bkash", {"walletNumber": "01711111111", "amount": "500"})
+    got = chat_module._check_numbers(sent, "শন এক আারি")
+    assert got.payload == {"amount": "500"}
+
+
+def test_a_number_that_is_in_the_message_stays_whatever_the_spacing_or_digits():
+    for message in ("send to 01862610315", "send to 0186 261 0315", "send to 018-6261-0315", "নম্বর ০১৮৬২৬১০৩১৫"):
+        sent = BankingService("transfer", "wallet_transfer", "bkash", {"walletNumber": "01862610315"})
+        assert chat_module._check_numbers(sent, message) is sent
+
+
+def test_other_results_and_payloads_without_numbers_are_untouched():
+    plain = BankingService("account_info", "balance", None, {"nickname": "x"})
+    assert chat_module._check_numbers(plain, "anything") is plain
+    assert chat_module._check_numbers(Clarification(question="?", options=()), "x") is not None

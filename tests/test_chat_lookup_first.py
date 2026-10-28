@@ -421,7 +421,7 @@ BEN_ROUTE = BankingService("beneficiary_management", "beneficiary_add", None,
 def test_beneficiary_add_polygon_account_confirms_with_holder_name(client, bank):
     bank.recipient = {"accountNumber": "2001000055556666", "accountName": "Rafiul Islam"}
     bank.routes["beneficiary"] = BEN_ROUTE
-    events = _post(client, "add a beneficiary")
+    events = _post(client, "add a beneficiary Rafi 2001000055556666")
     result = _result(events)
     assert bank.lookups == ["2001000055556666"]
     assert result["type"] == "CONFIRMATION_REQUIRED"
@@ -446,7 +446,7 @@ def test_beneficiary_add_polygon_account_confirms_with_holder_name(client, bank)
 def test_beneficiary_add_other_bank_asks_for_bank_details(client, bank):
     bank.recipient = None
     bank.routes["beneficiary"] = BEN_ROUTE
-    events = _post(client, "add a beneficiary")
+    events = _post(client, "add a beneficiary Rafi 2001000055556666")
     assert _result(events)["type"] == "CLARIFICATION_REQUIRED"
     stored = session_module.get_session(CUSTOMER_PHONE)[-1].classification
     assert stored["payload"]["serviceType"] == "OTHER_BANK"
@@ -465,7 +465,7 @@ def test_other_bank_missing_fields_rule():
 def test_beneficiary_add_lookup_unavailable(client, bank):
     bank.recipient = AdapterUnavailableError("down")
     bank.routes["beneficiary"] = BEN_ROUTE
-    events = _post(client, "add a beneficiary")
+    events = _post(client, "add a beneficiary Rafi 2001000055556666")
     assert _result(events)["type"] == "SERVICE_UNAVAILABLE"
     assert bank.fulfills == []
 
@@ -474,7 +474,7 @@ def test_beneficiary_add_with_service_type_known_skips_lookup(client, bank):
     bank.routes["beneficiary"] = BankingService(
         "beneficiary_management", "beneficiary_add", None,
         {"nickname": "Rafi", "accountNumber": "2001000055556666", "serviceType": "OWN_BANK"})
-    events = _post(client, "add a beneficiary")
+    events = _post(client, "add a beneficiary Rafi 2001000055556666")
     assert bank.lookups == []
     assert _result(events)["type"] == "CONFIRMATION_REQUIRED"
 

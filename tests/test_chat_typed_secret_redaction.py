@@ -106,7 +106,7 @@ def _request_log_messages(caplog):
 @pytest.mark.parametrize("starter", [
     "please freeze my card",
     "change my nickname to Rafi",
-    "add a beneficiary",
+    "add a beneficiary Rafi 1234567890",
 ])
 def test_code_typed_at_a_pending_yes_no_is_stored_and_logged_as_the_placeholder(
         client, env, caplog, starter):
@@ -123,7 +123,8 @@ def test_code_typed_at_a_pending_yes_no_is_stored_and_logged_as_the_placeholder(
     assert env["sends"] == [] and env["fulfills"] == []
     # the very next turn's history carries the earlier question but not the code
     history = chat_module._history(_turns())
-    assert ("Customer", starter) in history
+    # a long number the customer wrote is masked in what the composer is shown, the rest is as written
+    assert any(who == "Customer" and said.startswith(starter.split(" Rafi 1")[0]) for who, said in history)
     assert all(CODE not in said for _, said in history)
 
 

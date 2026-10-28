@@ -1229,6 +1229,27 @@ def _check_amount(result, message: str):
     return BankingService(result.category, result.service, result.subservice, payload or None)
 
 
+def _check_numbers(result, message: str):
+    """Drop an account, wallet or mobile number the customer did not write: the classifier cannot be allowed to make up
+    or complete one (live, a garbled voice message became a transfer to a number "ending 1111"). The digits must
+    appear in the message, spaces and dashes aside; a dropped number is simply asked for. Numbers from earlier in the
+    conversation come back through the carried-forward details, not from here."""
+    if not (isinstance(result, BankingService) and result.payload):
+        return result
+    wrote = re.sub(r"\D", "", ascii_digits(message or ""))
+    payload = dict(result.payload)
+    for field in _NUMBER_FIELDS:
+        value = payload.get(field)
+        if not isinstance(value, str):
+            continue
+        digits = re.sub(r"\D", "", ascii_digits(value))
+        if digits and digits not in wrote:
+            del payload[field]
+    if payload == result.payload:
+        return result
+    return BankingService(result.category, result.service, result.subservice, payload or None)
+
+
 def _wallet_ids() -> list[str]:
     """Wallet providers as the live taxonomy lists them (transfer/wallet_transfer)."""
     return _subservice_ids("transfer", "wallet_transfer")
@@ -3561,6 +3582,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None, heard_readin
                 )
             result = _hand_over_to_app(result)
             result = _check_amount(result, req.message)
+            result = _check_numbers(result, req.message)
             result = _carry_forward_gathered(result, classify_context)
             result = await _ground_freeze_request(result, req.message, recent_turns)
             result = _normalize_fee_type(result, req.message)
