@@ -168,7 +168,7 @@ def test_spending_guidance_end_to_end(monkeypatch):
 
 
 def test_a_recommendation_end_to_end_with_lead_tags_must_names_and_code_side_checks(monkeypatch):
-    Model(monkeypatch, picks={"ranking": [{"number": 1, "score": 8, "pairs": [{"evidence": "E4", "benefit": "B1"}],
+    Model(monkeypatch, picks={"matches": [{"number": 1, "pairs": [{"evidence": "E4", "benefit": "B1"}],
                                             "keep_in_mind": "annual fee"}]})
     need = advise.Need(False, True, focus="a deposit", goal="save", kinds=("savings account", "fixed deposit"))
     result = run(advise.advise("which deposit?", [], snap(), need, CARDS))
@@ -188,7 +188,7 @@ def test_a_recommendation_end_to_end_with_lead_tags_must_names_and_code_side_che
 
 
 def test_when_nothing_fits_that_is_said_and_no_lead_is_made(monkeypatch):
-    Model(monkeypatch, picks={"ranking": []})
+    Model(monkeypatch, picks={"matches": []})
     need = advise.Need(False, True, kinds=("credit card",))
     result = run(advise.advise("which card?", [], snap(), need, CARDS))
     assert result.facts["suggested products"] == [] and result.facts["no product fits"] and result.products == [] and result.must == {}
@@ -196,7 +196,7 @@ def test_when_nothing_fits_that_is_said_and_no_lead_is_made(monkeypatch):
 
 def test_both_wanted_gives_both_parts(monkeypatch):
     Model(monkeypatch, coaching={"cuts": [{"number": 1, "percent": 10, "how": "x"}]},
-          picks={"ranking": [{"number": 1, "score": 7, "pairs": [{"evidence": "E1", "benefit": "B1"}]}]})
+          picks={"matches": [{"number": 1, "pairs": [{"evidence": "E1", "benefit": "B1"}]}]})
     need = advise.Need(True, True, kinds=("savings account",))
     facts = run(advise.advise("help me", [], snap(), need, CARDS)).facts
     assert "ways to save" in facts and facts["suggested products"][0]["name"] == "Smart Saver"
@@ -230,7 +230,7 @@ def test_each_pick_states_how_it_relates_to_what_the_customer_already_holds():
 
 
 def test_the_relation_reaches_the_reply_facts_as_a_plain_sentence(monkeypatch):
-    Model(monkeypatch, picks={"ranking": [{"number": 1, "score": 7, "pairs": [{"evidence": "E1", "benefit": "B1"}],
+    Model(monkeypatch, picks={"matches": [{"number": 1, "pairs": [{"evidence": "E1", "benefit": "B1"}],
                                             "relation": "extra"}]})
     need = advise.Need(False, True, kinds=("savings account",))
     facts = run(advise.advise("which?", [], snap(), need, CARDS)).facts
@@ -239,7 +239,7 @@ def test_the_relation_reaches_the_reply_facts_as_a_plain_sentence(monkeypatch):
 
 
 def test_when_applying_the_facts_are_a_short_list_and_a_question_without_the_financial_summary(monkeypatch):
-    Model(monkeypatch, picks={"ranking": [{"number": 1, "score": 9, "keep_in_mind": "fee", "relation": "new",
+    Model(monkeypatch, picks={"matches": [{"number": 1, "keep_in_mind": "fee", "relation": "new",
                                             "pairs": [{"evidence": "E1", "benefit": "B1"}, {"evidence": "E2", "benefit": "B1"},
                                                       {"evidence": "E3", "benefit": "B1"}]}]})
     need = advise.Need(False, True, kinds=("savings account",))
@@ -262,9 +262,10 @@ def test_a_need_that_names_products_offers_only_those_whatever_their_kind():
 
 # ---- a stable ranking backed by evidence (T-150) ----------------------------------------------------------------------
 
-RANKING = {"ranking": [
-    {"number": 1, "score": 6, "pairs": [{"evidence": "E4", "benefit": "B1"}], "relation": "new"},
-    {"number": 2, "score": 9, "pairs": [{"evidence": "E1", "benefit": "B1"}, {"evidence": "E99", "benefit": "B1"}]}]}
+RANKING = {"matches": [
+    {"number": 1, "pairs": [{"evidence": "E4", "benefit": "B1"}], "relation": "new"},
+    {"number": 2, "pairs": [{"evidence": "E1", "benefit": "B1"}, {"evidence": "E4", "benefit": "B1"},
+                            {"evidence": "E99", "benefit": "B1"}]}]}
 
 
 def two_deposits():
@@ -283,30 +284,36 @@ def test_the_evidence_is_only_what_the_customers_data_says_numbered_in_order():
     assert advise.build_evidence({}) == []
 
 
-def test_the_ranking_is_ordered_by_score_and_reasons_are_written_from_valid_pairs_only():
+def test_the_order_and_score_are_worked_out_in_code_from_the_real_pairs():
     cards = two_deposits()
     evidence = [advise.Evidence("E1", "average income Tk 90,000 a month"), advise.Evidence("E4", "an average balance")]
     picks = advise.parse_ranking(RANKING, cards, evidence)
-    assert [p.card.name for p in picks] == ["Term Deposit", "Smart Saver"]            # 9 before 6
-    assert picks[0].reasons == ("average income Tk 90,000 a month -- and Term Deposit gives a fixed rate for a year",)
-    assert picks[0].score == 9 and picks[1].score == 6            # the unknown E99 gave no reason
+    assert [p.card.name for p in picks] == ["Term Deposit", "Smart Saver"]            # two real pairs beat one
+    assert picks[0].reasons[0] == "average income Tk 90,000 a month -- and Term Deposit gives a fixed rate for a year"
+    assert picks[0].score == 6 and picks[1].score == 3                                  # 3 a pair; the unknown E99 counts for nothing
+    # a score the model claims is never read
+    claimed = {"matches": [{"number": 1, "score": 10, "pairs": [{"evidence": "E1", "benefit": "B1"}]},
+                           {"number": 2, "score": 1, "pairs": [{"evidence": "E1", "benefit": "B1"}, {"evidence": "E4", "benefit": "B1"}]}]}
+    assert [p.card.name for p in advise.parse_ranking(claimed, cards, evidence)] == ["Term Deposit", "Smart Saver"]
 
 
-def test_a_product_with_no_real_pair_cannot_score_above_three_and_is_dropped():
+def test_the_same_matches_in_any_order_give_the_same_ranking():
     cards = two_deposits()
     evidence = [advise.Evidence("E1", "x")]
-    raw = {"ranking": [{"number": 1, "score": 10, "pairs": [{"evidence": "E7", "benefit": "B1"}]},
-                       {"number": 2, "score": 9, "pairs": [{"evidence": "E1", "benefit": "B5"}]}]}
+    forward = {"matches": [{"number": 1, "pairs": [{"evidence": "E1", "benefit": "B1"}]},
+                           {"number": 2, "pairs": [{"evidence": "E1", "benefit": "B1"}]}]}
+    backward = {"matches": list(reversed(forward["matches"]))}
+    first = [p.card.name for p in advise.parse_ranking(forward, cards, evidence)]
+    assert first == [p.card.name for p in advise.parse_ranking(backward, cards, evidence)] == ["Smart Saver", "Term Deposit"]
+
+
+def test_a_product_with_no_real_pair_is_not_a_candidate_for_this_customer():
+    cards = two_deposits()
+    evidence = [advise.Evidence("E1", "x")]
+    raw = {"matches": [{"number": 1, "score": 10, "pairs": [{"evidence": "E7", "benefit": "B1"}]},
+                       {"number": 2, "pairs": [{"evidence": "E1", "benefit": "B5"}]}, {"number": 1, "pairs": []}]}
     assert advise.parse_ranking(raw, cards, evidence) == []
-    assert advise.parse_ranking(None, cards, evidence) == [] and advise.parse_ranking({"ranking": "x"}, cards, evidence) == []
-
-
-def test_equal_scores_keep_the_products_own_order_so_the_same_answer_gives_the_same_order():
-    cards = two_deposits()
-    evidence = [advise.Evidence("E1", "x")]
-    raw = {"ranking": [{"number": 2, "score": 7, "pairs": [{"evidence": "E1", "benefit": "B1"}]},
-                       {"number": 1, "score": 7, "pairs": [{"evidence": "E1", "benefit": "B1"}]}]}
-    assert [p.card.name for p in advise.parse_ranking(raw, cards, evidence)] == ["Smart Saver", "Term Deposit"]
+    assert advise.parse_ranking(None, cards, evidence) == [] and advise.parse_ranking({"matches": "x"}, cards, evidence) == []
 
 
 def test_a_customer_gets_the_same_ranking_again_without_asking_the_model(monkeypatch):
@@ -325,7 +332,7 @@ def test_a_customer_gets_the_same_ranking_again_without_asking_the_model(monkeyp
 
 def test_a_product_whose_stated_requirement_the_customer_does_not_meet_is_not_ranked(monkeypatch):
     advise.clear_rank_cache()
-    model = Model(monkeypatch, picks={"ranking": [{"number": 1, "score": 9, "pairs": [{"evidence": "E1", "benefit": "B1"}]}]})
+    model = Model(monkeypatch, picks={"matches": [{"number": 1, "pairs": [{"evidence": "E1", "benefit": "B1"}]}]})
     poor = snap()
     poor.ledgers = [{"identifier": "1234567890", "balance": 1_000_000}]           # Tk 10,000: Term Deposit asks Tk 50,000
     need = advise.Need(False, True, kinds=("fixed deposit",))
@@ -351,3 +358,17 @@ def test_a_why_question_is_answered_from_the_saved_reasons_without_ranking_again
 def test_the_need_reads_a_why_question_as_an_explanation():
     need = advise.parse_need({"spending": False, "product": True, "explain": True, "focus": "why", "kinds": [1]}, KINDS)
     assert need.explain is True
+
+
+def test_the_cache_keeps_one_entry_per_customer_and_stays_bounded(monkeypatch):
+    advise.clear_rank_cache()
+    Model(monkeypatch, picks=RANKING)
+    monkeypatch.setattr(advise, "_CACHE_CUSTOMERS", 3)
+    need = advise.Need(False, True, kinds=("savings account", "fixed deposit"))
+    for customer in ("a", "b", "c", "d", "e"):
+        run(advise.advise("which?", [], snap(), need, CARDS, customer_key=customer))
+    assert len(advise._RANK_CACHE) <= 3 and "e" in advise._RANK_CACHE and "a" not in advise._RANK_CACHE
+    other = advise.Need(False, True, goal="travel", kinds=("savings account", "fixed deposit"))
+    run(advise.advise("which?", [], snap(), other, CARDS, customer_key="e"))
+    assert len(advise._RANK_CACHE) <= 3                       # a changed situation replaces the entry, it does not add one
+    advise.clear_rank_cache()
