@@ -53,6 +53,7 @@ from app.conversation.speech import AudioInputError, decode_audio, transcribe, t
 from app.conversation.transcript_fix import correct_transcript
 from app.conversation.vision import ImageInputError, read_image, with_image_text
 from app.conversation.composer import (
+    reply_language,
     _FOREIGN_CURRENCY, ascii_digits, build_messages, check_reply, compose, compose_stream, facts_listing, generate_chat,
     unsupported_numbers,
 )
@@ -2694,8 +2695,15 @@ def _recent_customer_messages(turns: list[ChatTurn] | None) -> list[str]:
     return [t.message for t in (turns or [])[-2:] if t.message and not t.message.startswith("[redacted")]
 
 
+def _topic_classification(result_type: str, topics: list[str]) -> dict | None:
+    """What a knowledge or advice answer was about, kept on its turn so the next message can refer back to it ("this
+    card", "eta", "oita"): the classifier reads it as the subject of a follow-up. None when there was no subject."""
+    names = [t for t in dict.fromkeys(topics) if t][:3]
+    return {"type": result_type, "category": None, "service": None, "subservice": None, "topic": names} if names else None
+
+
 async def _kb_stream(req: ChatRequest, request_id: str, recent: list[str] | None = None,
-                     live_cards: list[dict] | None = None):
+                     live_cards: list[dict] | None = None, topics: list[str] | None = None):
     try:
         found = await _find_knowledge(req.message, recent or [], req.top_k)
         hits = found.hits
@@ -2724,7 +2732,8 @@ async def _kb_stream(req: ChatRequest, request_id: str, recent: list[str] | None
         "reranked": found.reranked,
     }))
 
-    prompt = build_prompt(req.message, hits, found.nearest, live_cards_mod.prompt_block(live_cards) if live_cards else None)
+    prompt = build_prompt(req.message, hits, found.nearest, live_cards_mod.prompt_block(live_cards) if live_cards else None,
+                          reply_language(req.message))
     answer_parts: list[str] = []
     try:
         async for token in stream_generate(prompt):
@@ -2750,6 +2759,8 @@ async def _kb_stream(req: ChatRequest, request_id: str, recent: list[str] | None
     product_tags = await _read_product_interest(req.message, _hit_products(hits))
     if product_tags:
         kb_payload["products"] = product_tags   # the back office lists these as leads
+    if topics is not None:      # what this answer was about, so a follow-up ("this card", "eta") can be understood
+        topics.extend(p["name"] for p in (product_tags or _hit_products(hits)) if p.get("name"))
     yield _result_event("KB_ANSWER", None, None, None, payload=kb_payload)
 
     yield _sse("done", {})
@@ -2848,7 +2859,7 @@ async def _advice_stream(req: ChatRequest, request_id: str, customer_identity, t
             pending = {"pending_apply": {"action": next(iter(vias)), "choices": advice.choices}}
     async for chunk in finish(_TurnOutcome(
             "ADVICE_ANSWER", _say("advice", advice.must, **advice.facts), "advisor", advice.used, None,
-            result_payload=payload, stored=pending)):
+            result_payload=payload, stored={**(pending or {}), **({"topic": advice.choices[:3]} if advice.choices else {})})):
         yield chunk
 
 
@@ -3544,12 +3555,14 @@ async def _chat_stream(req: ChatRequest, authorization: str | None, heard_readin
     turn_classification: dict | None = None
 
     if isinstance(result, KbQuestion):
-        async for chunk in _kb_stream(req, request_id, _recent_customer_messages(recent_turns)):
+        kb_topics: list[str] = []
+        async for chunk in _kb_stream(req, request_id, _recent_customer_messages(recent_turns), topics=kb_topics):
             yield chunk
         if customer_identity is not None:
             record_turn(
                 customer_identity.customer_id,
-                ChatTurn(timestamp=datetime.now(timezone.utc), message=stored_message, classification=None),
+                ChatTurn(timestamp=datetime.now(timezone.utc), message=stored_message,
+                         classification=_topic_classification("KB_ANSWER", kb_topics)),
             )
         return
 
@@ -3645,11 +3658,14 @@ async def _chat_stream(req: ChatRequest, authorization: str | None, heard_readin
                 yield _sse("done", {})
                 return
             live = await live_cards_mod.current(token, customer_identity)
-            async for chunk in _kb_stream(req, request_id, _recent_customer_messages(recent_turns), live_cards=live):
+            kb_topics = []
+            async for chunk in _kb_stream(req, request_id, _recent_customer_messages(recent_turns), live_cards=live,
+                                          topics=kb_topics):
                 yield chunk
             if customer_identity is not None:
                 record_turn(customer_identity.customer_id,
-                            ChatTurn(timestamp=datetime.now(timezone.utc), message=stored_message, classification=None))
+                            ChatTurn(timestamp=datetime.now(timezone.utc), message=stored_message,
+                                     classification=_topic_classification("KB_ANSWER", kb_topics)))
             return
 
         if customer_identity is None:

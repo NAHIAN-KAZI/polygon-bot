@@ -61,12 +61,17 @@ def _live_block(live: str | None) -> str:
     )
 
 
+def _language_line(language: str | None) -> str:
+    return f"Write the answer in {language}.\n\n" if language else ""
+
+
 def build_prompt(question: str, context_chunks: list[dict], nearest: list[dict] | None = None,
-                 live: str | None = None) -> str:
+                 live: str | None = None, language: str | None = None) -> str:
     if not context_chunks and nearest:
         related = "\n\n".join(_format_chunk(c) for c in nearest)
         return (
             f"{SYSTEM_PROMPT_NEAREST}\n\n"
+            f"{_language_line(language)}"
             f"{_live_block(live)}"
             f"Related knowledge:\n{related}\n\n"
             f"Question: {question}\n"
@@ -75,6 +80,7 @@ def build_prompt(question: str, context_chunks: list[dict], nearest: list[dict] 
     if not context_chunks and live:
         return (
             f"{SYSTEM_PROMPT_WITH_CONTEXT}\n\n"
+            f"{_language_line(language)}"
             f"Context:\n{_live_block(live)}"
             f"Question: {question}\n"
             f"Answer:"
@@ -82,12 +88,14 @@ def build_prompt(question: str, context_chunks: list[dict], nearest: list[dict] 
     if not context_chunks:
         return (
             f"{SYSTEM_PROMPT_NO_CONTEXT}\n\n"
+            f"{_language_line(language)}"
             f"Question: {question}\n"
             f"Answer:"
         )
     context = "\n\n".join(_format_chunk(c) for c in context_chunks)
     return (
         f"{SYSTEM_PROMPT_WITH_CONTEXT}\n\n"
+        f"{_language_line(language)}"
         f"Context:\n{_live_block(live)}{context}\n\n"
         f"Question: {question}\n"
         f"Answer:"

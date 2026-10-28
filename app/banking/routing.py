@@ -658,6 +658,26 @@ _DOMAIN_EXAMPLES = (
 )
 
 
+def _earlier_subject(recent_turns: list[ChatTurn] | None) -> tuple[str, list[str]] | None:
+    """(what the customer last asked, what the answer was about) when the last turn was a knowledge or advice answer
+    with a subject; else None. A follow-up that says "this", "it" or "that card" refers to it."""
+    if not recent_turns:
+        return None
+    last = recent_turns[-1]
+    c = last.classification or {}
+    topic = [t for t in c.get("topic") or [] if isinstance(t, str) and t]
+    if c.get("type") in ("KB_ANSWER", "ADVICE_ANSWER") and topic and last.message:
+        return last.message, topic
+    return None
+
+
+def _subject_note(subject: tuple[str, list[str]]) -> str:
+    message, topic = subject
+    return (f'EARLIER IN THIS CHAT: the customer asked "{message}" and the assistant answered about: '
+            f'{", ".join(topic)}. If the new message refers back to it ("this", "it", "that", "eta", "oita", "that card"), '
+            "read it as about that subject. A message with a subject of its own is a new request.")
+
+
 async def _pick_domain(message: str, recent_turns: list[ChatTurn] | None) -> str | None:
     """Stage 1: which domain is this message about? Returns a DOMAINS key, or None
     on any failure (caller then falls back to the full single-stage prompt)."""
@@ -671,6 +691,9 @@ async def _pick_domain(message: str, recent_turns: list[ChatTurn] | None) -> str
                 f'\nThe assistant just asked the customer: "{question}". If the new message '
                 "answers that question, pick the domain that question is about.\n"
             )
+    subject = _earlier_subject(recent_turns)
+    if subject:
+        context += "\n" + _subject_note(subject) + "\n"
     system = (
         "You route a bank customer's chat message to ONE domain, by what the customer wants.\n"
         "1. Customers write English, Bangla or Banglish (romanized Bangla), often in one or "
@@ -990,6 +1013,11 @@ async def _classify_scoped(
         # (8/8 follow-ups vs 6/8 described-only; live 2026-10-13 a stolen card was never blocked).
         messages += [{"role": "user", "content": recent_turns[-1].message},
                      {"role": "assistant", "content": recent_turns[-1].classification["question"]}]
+    subject = _earlier_subject(recent_turns)
+    if subject:
+        messages += [{"role": "system", "content": _subject_note(subject)},
+                     {"role": "user", "content": subject[0]},
+                     {"role": "assistant", "content": f"(answered about {', '.join(subject[1])})"}]
     messages.append(_user_turn(message))
 
     post_extra = {"app_actions": True} if app_notes else {}
