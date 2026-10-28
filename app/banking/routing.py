@@ -127,8 +127,8 @@ SERVICE_DESCRIPTIONS: dict[tuple[str, str], tuple[str, tuple[str, ...]]] = {
     ("account_info", "device_history"): ("devices registered/logged in to their profile", ()),
     ("account_info", "login_history"): ("past login activity", ()),
     ("account_info", "cards"): ("list of the customer's cards", ()),
-    ("account_info", "fd_profit_history"): ("profit earned on their fixed deposits (FD)", ()),
-    ("account_info", "dps_profit_history"): ("profit earned on their DPS savings schemes", ()),
+    ("account_info", "fd_profit_history"): ("their own fixed deposits (FD/FDR): how much, for how long, when they mature, their status and the profit earned", ()),
+    ("account_info", "dps_profit_history"): ("their own DPS savings schemes: the instalment, the next instalment date, how much is saved so far, when it matures, the status and the profit earned", ()),
     ("loan_services", "my_loans"): (
         "overview/list/status of loans the customer currently holds",
         (),

@@ -441,7 +441,55 @@ class LoansAdapter:
         return AdapterResult(data=data)
 
 
+_FD_FIELDS = ("status", "amount", "tenureValue", "tenureUnit", "startDate", "maturityDate", "autoRenew",
+              "renewalCount", "provisionalRatePercent", "grossInterestPoisha", "netInterestPoisha", "contractType",
+              "productCode", "closedAt")
+_DPS_FIELDS = ("status", "installmentAmount", "nextInstallmentDate", "collectedPoisha", "tenureMonths", "startDate",
+               "maturityDate", "targetAmountPoisha", "progressPercent", "grossInterestPoisha", "netInterestPoisha",
+               "contractType", "productCode", "closedAt")
+_MAX_DEPOSITS = 5          # how many of a customer's deposits one answer reads
+_MAX_PROFIT_ROWS = 6
+
+
+def _rows(body) -> list[dict]:
+    """The rows of a list body, bare or wrapped as {"data": [...]}."""
+    if isinstance(body, dict):
+        body = body.get("data") if isinstance(body.get("data"), list) else body.get("content")
+    return [r for r in body or [] if isinstance(r, dict)]
+
+
+async def _own_deposits(jwt: str | None, path: str, id_key: str, fields: tuple[str, ...], list_key: str,
+                        explicit_id: str | None = None) -> dict:
+    """The customer's own fixed deposits or DPS from the bank's product list (amount, tenure, dates, status, what is
+    saved so far...) and, for each, its profit history when the bank has one. The bank's identifier of a deposit
+    is the one its own list gives (`fdIdentifier`, `dpsIdentifier`): the ledger account's identifier is a different
+    thing, and the profit-history endpoint answers 404 to it. Profit history is empty for a conventional deposit
+    (it takes part in no profit distribution), which is an answer, not an error."""
+    entries = []
+    if explicit_id:
+        rows = [{id_key: explicit_id}]
+    else:
+        rows = _rows(await _call("GET", path, jwt))[:_MAX_DEPOSITS]
+    for row in rows:
+        entry = {k: row[k] for k in fields if row.get(k) is not None}
+        identifier = row.get(id_key)
+        if identifier:
+            try:
+                history = _rows(await _call("GET", f"{path}/{identifier}/profit-history", jwt))
+            except AdapterAuthError:
+                raise
+            except AdapterUnavailableError:
+                history = []
+            if history:
+                entry["profitHistory"] = history[:_MAX_PROFIT_ROWS]
+        entries.append(entry)
+    return {list_key: entries}
+
+
 class FdProfitHistoryAdapter:
+    """GET product/v1/fixed-deposit (the customer's own fixed deposits) plus each one's profit-history. An explicit
+    `id` or `identifier` in the payload reads that deposit's profit history alone."""
+
     async def fulfill(
         self,
         customer_identity: CustomerIdentity,
@@ -449,17 +497,17 @@ class FdProfitHistoryAdapter:
         subservice: str,
         payload: dict | None,
     ) -> AdapterResult:
-        fd_identifier = await _resolve_ledger_account_identifier(
-            customer_identity, jwt, payload, "Fixed Deposit", "No Fixed Deposit account found"
-        )
-        body = await _call(
-            "GET", f"/product/v1/fixed-deposit/{fd_identifier}/profit-history", jwt
-        )
-        data = {"profitHistory": body} if isinstance(body, list) else body
-        return AdapterResult(data=data)
+        explicit = (payload or {}).get("id") or (payload or {}).get("identifier")
+        if explicit:
+            body = await _call("GET", f"/product/v1/fixed-deposit/{explicit}/profit-history", jwt)
+            return AdapterResult(data={"profitHistory": body} if isinstance(body, list) else body)
+        return AdapterResult(data=await _own_deposits(
+            jwt, "/product/v1/fixed-deposit", "fdIdentifier", _FD_FIELDS, "fixedDeposits"))
 
 
 class DpsProfitHistoryAdapter:
+    """GET product/v1/dps (the customer's own DPS schemes) plus each one's profit-history."""
+
     async def fulfill(
         self,
         customer_identity: CustomerIdentity,
@@ -467,12 +515,12 @@ class DpsProfitHistoryAdapter:
         subservice: str,
         payload: dict | None,
     ) -> AdapterResult:
-        dps_identifier = await _resolve_ledger_account_identifier(
-            customer_identity, jwt, payload, "DPS Deposit", "No DPS account found"
-        )
-        body = await _call("GET", f"/product/v1/dps/{dps_identifier}/profit-history", jwt)
-        data = {"profitHistory": body} if isinstance(body, list) else body
-        return AdapterResult(data=data)
+        explicit = (payload or {}).get("id") or (payload or {}).get("identifier")
+        if explicit:
+            body = await _call("GET", f"/product/v1/dps/{explicit}/profit-history", jwt)
+            return AdapterResult(data={"profitHistory": body} if isinstance(body, list) else body)
+        return AdapterResult(data=await _own_deposits(
+            jwt, "/product/v1/dps", "dpsIdentifier", _DPS_FIELDS, "dps"))
 
 
 class DisputesAdapter:

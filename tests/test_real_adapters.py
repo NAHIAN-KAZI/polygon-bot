@@ -1124,98 +1124,82 @@ _LEDGER_ACCOUNTS_ONE_FD_ONE_DPS = {
 }
 
 
-def test_fd_profit_history_adapter_single_match_auto_resolves_transparently(monkeypatch):
-    history_body = {"data": {"history": [{"id": "p-1"}]}}
+FD_LIST = [{"fdIdentifier": "FDD93CB6889B6F475D", "status": "ACTIVE", "amount": 50000, "tenureValue": 12,
+            "tenureUnit": "MONTHS", "maturityDate": "2027-08-25", "startDate": "2026-08-25", "userId": 65,
+            "phone": "01924504701", "fromAccount": "100126000023", "cifNumber": None}]
+DPS_LIST = [{"dpsIdentifier": "DPSABCFE255DE0C4DAE", "status": "ACTIVE", "installmentAmount": 50000,
+             "collectedPoisha": 100000, "nextInstallmentDate": "2026-11-25", "tenureMonths": 12,
+             "maturityDate": "2027-08-25", "userId": 65, "phone": "01924504701"}]
+
+
+def test_fd_adapter_reads_the_customers_own_fixed_deposits_with_the_deposits_own_identifier(monkeypatch):
     calls = _install_path_responses(
         monkeypatch,
         {
-            "/polygon-bank/v1/accounts": FakeResponse(json_data=_LEDGER_ACCOUNTS_ONE_FD_ONE_DPS),
-            "/product/v1/fixed-deposit/FDDE1F32376C574CB9/profit-history": FakeResponse(
-                json_data=history_body
-            ),
+            "/product/v1/fixed-deposit": FakeResponse(json_data=FD_LIST),
+            "/product/v1/fixed-deposit/FDD93CB6889B6F475D/profit-history": FakeResponse(json_data=[]),
         },
     )
 
-    result = asyncio.run(
-        real.fd_profit_history_adapter.fulfill(_IDENTITY, _JWT, "fd_profit_history", {})
+    result = asyncio.run(real.fd_profit_history_adapter.fulfill(_IDENTITY, _JWT, "fd_profit_history", {}))
+
+    assert [c["path"] for c in calls] == ["/product/v1/fixed-deposit",
+                                          "/product/v1/fixed-deposit/FDD93CB6889B6F475D/profit-history"]
+    fd = result.data["fixedDeposits"][0]
+    assert fd["amount"] == 50000 and fd["maturityDate"] == "2027-08-25" and fd["status"] == "ACTIVE"
+    assert "profitHistory" not in fd                                      # empty for a conventional deposit
+    assert not {"userId", "phone", "fromAccount", "cifNumber", "fdIdentifier"} & set(fd)   # nothing personal is passed on
+
+
+def test_fd_adapter_keeps_the_profit_history_when_the_bank_has_one_and_survives_it_failing(monkeypatch):
+    _install_path_responses(
+        monkeypatch,
+        {
+            "/product/v1/fixed-deposit": FakeResponse(json_data=FD_LIST),
+            "/product/v1/fixed-deposit/FDD93CB6889B6F475D/profit-history": FakeResponse(json_data=[{"period": "2026-09"}]),
+        },
     )
+    got = asyncio.run(real.fd_profit_history_adapter.fulfill(_IDENTITY, _JWT, "fd_profit_history", {}))
+    assert got.data["fixedDeposits"][0]["profitHistory"] == [{"period": "2026-09"}]
 
-    assert result == AdapterResult(data=history_body)
-    assert len(calls) == 2
-    assert calls[0]["path"] == "/polygon-bank/v1/accounts"
-    assert calls[1]["path"] == "/product/v1/fixed-deposit/FDDE1F32376C574CB9/profit-history"
+    _install_path_responses(
+        monkeypatch,
+        {
+            "/product/v1/fixed-deposit": FakeResponse(json_data=FD_LIST),
+            "/product/v1/fixed-deposit/FDD93CB6889B6F475D/profit-history": FakeResponse(status_code=404, json_data={}),
+        },
+    )
+    got = asyncio.run(real.fd_profit_history_adapter.fulfill(_IDENTITY, _JWT, "fd_profit_history", {}))
+    assert got.data["fixedDeposits"][0]["status"] == "ACTIVE"             # the 404 loses only the history
 
 
-def test_dps_profit_history_adapter_single_match_auto_resolves_transparently(monkeypatch):
-    history_body = {"data": {"history": [{"id": "p-1"}]}}
+def test_a_customer_with_no_fixed_deposit_gets_an_empty_list_not_an_error(monkeypatch):
+    _install_path_responses(monkeypatch, {"/product/v1/fixed-deposit": FakeResponse(json_data=[])})
+    got = asyncio.run(real.fd_profit_history_adapter.fulfill(_IDENTITY, _JWT, "fd_profit_history", {}))
+    assert got.data == {"fixedDeposits": []}
+
+
+def test_dps_adapter_reads_the_customers_own_dps_schemes(monkeypatch):
     calls = _install_path_responses(
         monkeypatch,
         {
-            "/polygon-bank/v1/accounts": FakeResponse(json_data=_LEDGER_ACCOUNTS_ONE_FD_ONE_DPS),
-            "/product/v1/dps/DPS412939644D894570/profit-history": FakeResponse(
-                json_data=history_body
-            ),
+            "/product/v1/dps": FakeResponse(json_data=DPS_LIST),
+            "/product/v1/dps/DPSABCFE255DE0C4DAE/profit-history": FakeResponse(json_data=[]),
         },
     )
-
-    result = asyncio.run(
-        real.dps_profit_history_adapter.fulfill(_IDENTITY, _JWT, "dps_profit_history", None)
-    )
-
-    assert result == AdapterResult(data=history_body)
-    assert len(calls) == 2
-    assert calls[0]["path"] == "/polygon-bank/v1/accounts"
-    assert calls[1]["path"] == "/product/v1/dps/DPS412939644D894570/profit-history"
+    result = asyncio.run(real.dps_profit_history_adapter.fulfill(_IDENTITY, _JWT, "dps_profit_history", None))
+    assert [c["path"] for c in calls] == ["/product/v1/dps", "/product/v1/dps/DPSABCFE255DE0C4DAE/profit-history"]
+    dps = result.data["dps"][0]
+    assert dps["installmentAmount"] == 50000 and dps["nextInstallmentDate"] == "2026-11-25" and dps["collectedPoisha"] == 100000
+    assert not {"userId", "phone", "dpsIdentifier"} & set(dps)
 
 
-def test_fd_profit_history_adapter_zero_matches_raises_adapter_unavailable(monkeypatch):
-    accounts_body = {"data": {"ledgerAccounts": [{"chartOfAccountName": "Savings", "identifier": "SAV123"}]}}
-    calls = _install_request(monkeypatch, response=FakeResponse(json_data=accounts_body))
-
-    with pytest.raises(AdapterUnavailableError):
-        asyncio.run(real.fd_profit_history_adapter.fulfill(_IDENTITY, _JWT, "fd_profit_history", {}))
-
-    assert len(calls) == 1
 
 
-def test_dps_profit_history_adapter_zero_matches_raises_adapter_unavailable(monkeypatch):
-    accounts_body = {"data": {"ledgerAccounts": [{"chartOfAccountName": "Savings", "identifier": "SAV123"}]}}
-    calls = _install_request(monkeypatch, response=FakeResponse(json_data=accounts_body))
-
-    with pytest.raises(AdapterUnavailableError):
-        asyncio.run(real.dps_profit_history_adapter.fulfill(_IDENTITY, _JWT, "dps_profit_history", {}))
-
-    assert len(calls) == 1
 
 
-def test_fd_profit_history_adapter_multiple_matches_raises_account_selection_required(monkeypatch):
-    accounts_body = {
-        "data": {
-            "ledgerAccounts": [
-                {"chartOfAccountName": "Fixed Deposit", "identifier": "FD-1"},
-                {"chartOfAccountName": "Fixed Deposit", "identifier": "FD-2"},
-            ]
-        }
-    }
-    calls = _install_request(monkeypatch, response=FakeResponse(json_data=accounts_body))
-
-    with pytest.raises(AdapterAccountSelectionRequiredError) as exc_info:
-        asyncio.run(real.fd_profit_history_adapter.fulfill(_IDENTITY, _JWT, "fd_profit_history", {}))
-
-    assert exc_info.value.accounts == [
-        {"identifier": "FD-1", "chartOfAccountName": "Fixed Deposit"},
-        {"identifier": "FD-2", "chartOfAccountName": "Fixed Deposit"},
-    ]
-    assert len(calls) == 1
 
 
-def test_fd_profit_history_adapter_malformed_ledger_accounts_raises_adapter_unavailable(monkeypatch):
-    calls = _install_request(monkeypatch, response=FakeResponse(json_data={"data": {}}))
-
-    with pytest.raises(AdapterUnavailableError):
-        asyncio.run(real.fd_profit_history_adapter.fulfill(_IDENTITY, _JWT, "fd_profit_history", {}))
-
-    assert len(calls) == 1
 
 
 def test_fd_profit_history_adapter_wraps_bare_array_response(monkeypatch):

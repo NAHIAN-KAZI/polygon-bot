@@ -2059,7 +2059,7 @@ _POISHA_KEYS = frozenset({
     "availableCredit", "unbilledAmount", "statementDueAmount", "minimumDueAmount",
     "disputedAmount", "amountPaid", "remainingOutstanding", "balanceAtIssuance",
     "current", "bankMax", "riskAdjustedMax", "used", "usedToday", "currentDailyLimit",
-    "bankMaxDailyLimit", "riskAdjustedMaxDailyLimit", "requestedDailyLimit",
+    "bankMaxDailyLimit", "riskAdjustedMaxDailyLimit", "requestedDailyLimit", "installmentAmount",
 })
 _TAKA_SERVICES = frozenset({"qr_payment_history"})
 
