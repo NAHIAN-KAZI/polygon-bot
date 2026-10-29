@@ -390,3 +390,28 @@ def test_the_credit_card_form_has_no_product_to_prefill_and_the_reply_does_not_a
     assert prefill == {"requestedLimit": "300000"} and "cardProduct" not in prefill
     facts = outcome.say[1]
     assert "no choice of product" in facts["tell them"]
+
+
+def test_a_credit_limit_written_while_choosing_the_card_is_prefilled_on_its_form(client, apply_flow, advice, monkeypatch):
+    seen = {}
+
+    async def read_fields(action, said):
+        seen["said"] = said
+        return {"requestedLimit": "300000"}
+
+    monkeypatch.setattr(chat_module, "_read_apply_fields", read_fields)
+    monkeypatch.setitem(apply_flow, "cards", [ProductCard("Gold Credit", "Cards", "credit card", apply_via="credit_card_apply")])
+    advice["advice"] = advise_module.Advice(
+        {"suggested products": [{"name": "Gold Credit"}]}, products=[{"name": "Gold Credit", "group": "Cards", "strength": "info"}],
+        choices=["Gold Credit"], used="recommend", must={})
+
+    async def classify(message, recent_turns=None, app_notes=None):
+        return BankingService("app_actions", "credit_card_apply", None, {})
+
+    monkeypatch.setattr(chat_module, "classify", classify)
+    say(client, "I want a credit card with a 3 lakh limit")
+    apply_flow["picked"] = 0
+    _, result = say(client, "ok apply for it, limit 300000")
+    assert result["payload"]["ui"]["route"] == "/apply_for_credit_card"
+    assert result["payload"]["ui"]["prefill"] == {"requestedLimit": "300000"}
+    assert seen["said"] == ["I want a credit card with a 3 lakh limit", "ok apply for it, limit 300000"]
