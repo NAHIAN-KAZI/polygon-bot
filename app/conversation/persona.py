@@ -108,9 +108,10 @@ KIND_PURPOSE = {
               "If the facts say nothing fits or there is too little history, say so plainly. Keep it short.",
     "exchange_rates": "Tell the customer the exchange rate of the taka that the facts give for the currency they asked "
                       "about, in Tk per 1 unit of that currency, with the date and, when the facts say it is the "
-                      "rate Bangladesh Bank published, say so. When the facts say a rate is only an indicative market "
-                      "rate, say that clearly and that Bangladesh Bank does not publish one for it. Mention the movement over the "
-                      "period if the facts give one, in a few words. Say the table and graph are shown below when the "
+                      "rate Bangladesh Bank published, say so. Only when the rate fact itself says it is an indicative market "
+                      "rate, say that clearly and that Bangladesh Bank does not publish one for it. The movement over the "
+                      "period, when the facts give one, is a market figure and is stated in its own short sentence "
+                      "without changing what was said about where the rate comes from. Say the table and graph are shown below when the "
                       "facts say so, and do not list the table. Write currencies by their codes, never with symbols. "
                       "If the facts say no rate was found, say so and name what is available. Add no rate, date or "
                       "figure that is not in the facts. Keep it short.",

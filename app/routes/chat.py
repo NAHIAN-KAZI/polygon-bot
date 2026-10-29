@@ -2940,7 +2940,8 @@ def _rates_outcome(data: dict | None, question: RatesQuestion) -> _TurnOutcome:
         facts["not found"] = "Bangladesh Bank's published rates could not be fetched right now"
     if trend:
         way = "rose" if trend["change_percent"] > 0 else "fell" if trend["change_percent"] < 0 else "did not change"
-        facts["movement"] = (f"indicative market trend of {code} over the last {trend['days']} days: it {way}"
+        facts["movement"] = (f"the market rate of {code} (separate from the published rate above) over the last "
+                             f"{trend['days']} days: it {way}"
                              + (f" {abs(trend['change_percent'])} percent" if trend["change_percent"] else ""))
     shown = [name for name, present in (("a table of the rates Bangladesh Bank published", bool(official)),
                                          ("a graph of the movement", bool(trend))) if present]

@@ -220,5 +220,5 @@ def test_the_reply_facts_give_dates_in_words_and_the_movement_only_as_a_percent(
     market = {("USD", (today - dt.timedelta(days=d)).isoformat()): 120 + (30 - d) * 0.1 for d in range(1, 31)}
     out = outcome_for(monkeypatch, "USD", market=market)
     assert "28 October 2026" in out.say[1]["rate"] and "2026-10-28" not in out.say[1]["rate"]
-    assert out.say[1]["movement"].startswith("indicative market trend of USD over the last 30 days: it rose")
+    assert out.say[1]["movement"].startswith("the market rate of USD (separate from the published rate above) over the last 30 days: it rose")
     assert "Tk" not in out.say[1]["movement"]
