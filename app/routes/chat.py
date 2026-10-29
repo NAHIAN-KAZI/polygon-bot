@@ -3674,6 +3674,11 @@ async def _chat_stream(req: ChatRequest, authorization: str | None, heard_readin
                     and last_session_classification.get("request") is not None):
                 fill_context = session_turns[-1:]  # a follow-up to the answered request
             result = await _llm_fill_pending_fields(fill_context, req.message)
+            if isinstance(result, BankingService):
+                # the reply filled the missing detail; a detail the same message states differently from the older
+                # request (a new amount, another wallet) wins over what the unfinished request had
+                result = await _prefer_new_details(
+                    result, BankingService(result.category, result.service, None, {}), req.message)
         if result is not None:
             # A bare follow-up ("500", "the savings one") answered our question; the reply
             # must still answer what the customer originally asked.
