@@ -52,7 +52,7 @@ from app import llm_backend
 from app.config import settings
 import app.banking.routing as routing_module
 from app.conversation.speech import AudioInputError, audio_seconds, decode_audio, transcribe, transcribe_nemo
-from app.conversation.transcript_fix import TranscriptFix, correct_transcript, titu_missed_it
+from app.conversation.transcript_fix import correct_transcript, titu_missed_it
 from app.conversation.vision import ImageInputError, read_image, with_image_text
 from app.conversation.composer import (
     reply_language,
@@ -4602,7 +4602,8 @@ async def _chat_with_media(req: ChatRequest, authorization: str | None):
             # Titu mishears: corrected before anything acts on it (numbers said in words become
             # digits), and the customer can still see what it heard.
             if titu_missed_it(spoken, second_opinion, audio_seconds(req.audio)):
-                fix = TranscriptFix(second_opinion.strip())          # Titu did not hear it: the model's reading stands
+                # Titu did not hear it: the model's reading stands, with the same banking-word correction ("Upe" -> Upay)
+                fix = await correct_transcript(second_opinion.strip(), None)
             else:
                 fix = await correct_transcript(spoken, second_opinion)
             spoken, heard_readings = fix.text, fix.readings
