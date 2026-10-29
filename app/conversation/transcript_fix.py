@@ -130,14 +130,31 @@ def long_runs(text: str | None) -> list[str]:
 # a word or two for the whole message, so far fewer words than the audio holds means it did not hear it.
 _MIN_WORDS_PER_SECOND = 0.8
 _MIN_SECOND_WORDS = 3
+# Real Bangla words average about 4.5 characters or more; the syllables a Bangla-only recogniser writes for English
+# speech average 2 to 3.
+_SYLLABLE_WORD_LENGTH = 3.5
+
+
+_BENGALI_RE = re.compile(r"[\u0980-\u09FF]")
+_LATIN_RE = re.compile(r"[A-Za-z]")
+
+
+def _script_share(text: str, pattern: re.Pattern) -> float:
+    letters = len(_LETTER_RE.findall(text))
+    return len(pattern.findall(text)) / letters if letters else 0.0
 
 
 def titu_missed_it(heard: str, second: str | None, seconds: float) -> bool:
-    """Titu wrote far fewer words than the audio holds while the model hearing it wrote a real sentence: use the model's
-    transcript instead of Titu's. Counted in code from the length of the audio and the words, not read from the text."""
-    if not second or seconds < 1.5:
+    """Titu did not hear the message, and the model hearing it did: use the model's transcript instead of Titu's. Two
+    signals, both counted in code: Titu wrote far fewer words than the audio holds, or the customer spoke English (the
+    model wrote it in English letters) which a Bangla-only recogniser can only turn into Bengali-looking syllables."""
+    if not second or len(second.split()) < _MIN_SECOND_WORDS or seconds < 1.5:
         return False
-    return len(heard.split()) / seconds < _MIN_WORDS_PER_SECOND and len(second.split()) >= _MIN_SECOND_WORDS
+    if len(heard.split()) / seconds < _MIN_WORDS_PER_SECOND:
+        return True
+    words = heard.split()
+    syllables = bool(words) and sum(len(w) for w in words) / len(words) < _SYLLABLE_WORD_LENGTH     # not real Bangla words
+    return syllables and _script_share(second, _LATIN_RE) >= 0.6 and _script_share(heard, _BENGALI_RE) >= 0.5
 
 
 def _numbers(text: str) -> list[str]:

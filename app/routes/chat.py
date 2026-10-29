@@ -1403,6 +1403,38 @@ def _candidate_number(candidate: dict) -> str:
     )
 
 
+async def _prefer_new_details(merged, fresh, message: str):
+    """What the customer says now beats what an older, unfinished request left behind. `_carry_forward_gathered` keeps
+    the earlier details when a reply answers a question; but a customer who sends a whole new request ("send 300 on
+    nagad to 0186...") after an unfinished "send 50 to upay" must get 300 on nagad, not 50 on upay. Only a detail that
+    was carried forward (not read from this message by the classifier) is looked at again: an amount or a wallet this
+    message states differently, or a number of its own, replaces the old one. A reply that only answers the question
+    states none of them, so it keeps everything it did before."""
+    if not (isinstance(merged, BankingService) and isinstance(fresh, BankingService) and merged is not fresh
+            and (merged.category, merged.service) == (fresh.category, fresh.service)):
+        return merged
+    payload = dict(merged.payload or {})
+    carried = [k for k in payload if k not in (fresh.payload or {})]
+    subservice = merged.subservice
+    if "amount" in carried:
+        found = await _fill_fields((merged.category, merged.service), subservice, {}, ["amount"],
+                                   "(a new request from the customer)", message)
+        if found and (found.payload or {}).get("amount") not in (None, "", payload["amount"]):
+            payload["amount"] = found.payload["amount"]
+    if (merged.category, merged.service) == ("transfer", "wallet_transfer") and subservice and not fresh.subservice:
+        wallet = await _read_wallet_provider(message)
+        if wallet and wallet.lower() != str(subservice).lower():
+            subservice = wallet
+    wrote = {re.sub(r"\D", "", ascii_digits(m)) for m in re.findall(r"\d(?:[ \-]?\d){7,}", ascii_digits(message or ""))}
+    for field in _NUMBER_FIELDS:
+        stored = re.sub(r"\D", "", ascii_digits(str(payload.get(field) or "")))
+        if field in carried and stored and wrote and stored not in wrote:
+            del payload[field]                    # they gave a number of their own: the old one is not theirs now
+    if payload == (merged.payload or {}) and subservice == merged.subservice:
+        return merged
+    return BankingService(merged.category, merged.service, subservice, payload or None)
+
+
 def _carry_forward_gathered(result, recent_turns: list[ChatTurn]):
     """The customer answered our missing-field question and the answer routes to the
     SAME service: keep what they told us before (nickname, account number, ...) and
@@ -3685,7 +3717,9 @@ async def _chat_stream(req: ChatRequest, authorization: str | None, heard_readin
             result = _hand_over_to_app(result)
             result = _check_amount(result, req.message)
             result = _check_numbers(result, req.message)
+            fresh_result = result
             result = _carry_forward_gathered(result, classify_context)
+            result = await _prefer_new_details(result, fresh_result, req.message)
             result = await _ground_freeze_request(result, req.message, recent_turns)
             result = _normalize_fee_type(result, req.message)
             result = await _ground_transfer_destination(result, req.message)

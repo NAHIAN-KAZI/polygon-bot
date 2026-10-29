@@ -270,7 +270,7 @@ def test_titu_missed_it_when_it_wrote_far_fewer_words_than_the_audio_holds():
     from app.conversation.transcript_fix import titu_missed_it
     english = "I want to send 500 taka to bKash. The number is 01862610315."
     assert titu_missed_it("এ পা", english, 6.0) is True            # 2 words for 6 seconds
-    assert titu_missed_it("আমি পাঁচশো টাকা বিকাশ করব নাম্বারটা হল", english, 6.0) is False   # 7 words: Titu heard it
+    assert titu_missed_it("আমি পাঁচশো টাকা বিকাশ করব নাম্বারটা হল", english, 6.0) is False   # real Bangla words: Titu heard it
     assert titu_missed_it("এ পা", None, 6.0) is False and titu_missed_it("এ পা", "yes ok", 6.0) is False
     assert titu_missed_it("", english, 1.0) is False                # a very short clip says nothing
 
@@ -279,3 +279,14 @@ def test_with_a_second_opinion_no_long_number_may_appear_that_neither_heard(mode
     model_says({"text": "আমি 500 টাকা নাম্বার 01711223344", "readings": []})
     # the second recogniser wrote words, no number: the model's invented number is refused
     assert _fix2("আমি পাঁচশো টাকা নাম্বার শূন্য এক", "আমি পাঁচশো টাকা নাম্বার").text == "আমি পাঁচশো টাকা নাম্বার শূন্য এক"
+
+
+def test_english_speech_is_taken_from_the_model_when_titu_wrote_bengali_looking_syllables():
+    from app.conversation.transcript_fix import titu_missed_it
+    english = "Send 200 taka to Rocket. The number is 01862610315."
+    garbled = "সেন থি হানট রকেট ত নামারে জ আ শ থি য় পাভ"          # 13 words in 7 seconds: not "few words"
+    assert titu_missed_it(garbled, english, 7.0) is True
+    # a Bangla message with English words: the model wrote Bengali script too, so Titu stands
+    assert titu_missed_it("আমি পাঁচশো টাকা bKash করব", "আমি পাঁচশো টাকা bKash করব নাম্বারটা", 6.0) is False
+    # both English letters (Titu was right to write them): no change
+    assert titu_missed_it("send 200 taka to rocket now ok", english, 7.0) is False
