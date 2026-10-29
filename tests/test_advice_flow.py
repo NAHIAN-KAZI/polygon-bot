@@ -162,7 +162,7 @@ from app.banking import session as session_module
 
 
 CARDS_FOR_APPLY = [ProductCard("Platinum Debit", "Cards", "debit card", apply_via="card_apply"),
-                   ProductCard("Gold Debit", "Cards", "debit card", apply_via="card_apply"),
+                   ProductCard("Gold Debit", "Cards", "prepaid card", apply_via="card_apply"),
                    ProductCard("Gold Credit", "Cards", "credit card")]           # no screen opens a credit card
 
 
@@ -212,7 +212,7 @@ def test_wanting_to_apply_without_naming_a_product_suggests_first_and_does_not_o
 def test_a_first_message_that_picks_a_product_opens_the_form_with_it_chosen_and_suggests_nothing(client, apply_flow, advice):
     apply_flow["picked"] = 0
     reply, result = say(client, "I want to apply for the Platinum Debit card")
-    assert result["type"] == "APP_ACTION" and result["payload"]["ui"]["route"] == "/card_product_catalog"
+    assert result["type"] == "APP_ACTION" and result["payload"]["ui"]["route"] == "/request_virtual_card/form"
     assert result["payload"]["products"] == [{"name": "Platinum Debit", "group": "Cards", "strength": "apply"}]
     assert "snapshot" not in advice["calls"] and "Platinum Debit" in reply
 
@@ -225,7 +225,7 @@ def test_with_the_product_suggestions_switched_off_the_form_opens_at_once(client
 def test_nothing_to_suggest_still_opens_the_form(client, apply_flow, advice):
     advice["advice"] = advise_module.Advice({"suggested products": []}, used="insights")
     _, result = say(client, "I want to apply for a debit card")
-    assert result["type"] == "APP_ACTION" and result["payload"]["ui"]["route"] == "/card_product_catalog"
+    assert result["type"] == "APP_ACTION" and result["payload"]["ui"]["route"] == "/request_virtual_card/form"
 
 
 def test_the_bank_being_down_still_opens_the_form(client, apply_flow, advice):
@@ -246,7 +246,7 @@ def test_choosing_one_of_the_suggestions_opens_the_form_and_the_chosen_product_i
     classify_before = apply_flow["classify_calls"]
     reply, result = say(client, "the second one")
     assert apply_flow["asked"][-1] == ["Platinum Debit", "Gold Debit"]
-    assert result["type"] == "APP_ACTION" and result["payload"]["ui"]["route"] == "/card_product_catalog"
+    assert result["type"] == "APP_ACTION" and result["payload"]["ui"]["route"] == "/request_virtual_card/form"
     assert result["payload"]["products"] == [{"name": "Gold Debit", "group": "Cards", "strength": "apply"}]
     assert "Gold Debit" in reply and apply_flow["classify_calls"] == classify_before   # no new classification needed
 
@@ -351,7 +351,7 @@ def test_a_recommendation_remembers_which_screen_opens_what_it_suggested_so_choo
     assert result["type"] == "ADVICE_ANSWER"
     apply_flow["picked"] = 0
     _, result = say(client, "the first one")
-    assert result["type"] == "APP_ACTION" and result["payload"]["ui"]["route"] == "/card_product_catalog"
+    assert result["type"] == "APP_ACTION" and result["payload"]["ui"]["route"] == "/request_virtual_card/form"
     assert result["payload"]["products"] == [{"name": "Platinum Debit", "group": "Cards", "strength": "apply"}]
 
 
@@ -367,3 +367,26 @@ def test_a_recommendation_of_products_no_one_screen_opens_remembers_nothing(clie
     asked = len(apply_flow.get("asked", []))
     say(client, "the first one")
     assert len(apply_flow.get("asked", [])) == asked          # nothing was offered, so no choice was looked for
+
+
+def test_the_chosen_card_and_its_type_go_to_the_form_as_its_prefill(client, apply_flow, advice):
+    say(client, "I want to apply for a debit card")
+    apply_flow["picked"] = 1
+    _, result = say(client, "the second one")
+    assert result["payload"]["ui"]["prefill"] == {"cardProduct": "Gold Debit", "cardType": "prepaid"}
+
+
+def test_a_first_message_naming_the_card_prefills_it_too(client, apply_flow, advice):
+    apply_flow["picked"] = 0
+    _, result = say(client, "I want to apply for the Platinum Debit card")
+    assert result["payload"]["ui"]["prefill"] == {"cardProduct": "Platinum Debit", "cardType": "debit"}
+
+
+def test_the_credit_card_form_has_no_product_to_prefill_and_the_reply_does_not_ask_to_pick_one(client, apply_flow, advice, monkeypatch):
+    action = ui_actions.get("credit_card_apply")
+    outcome = chat_module._ui_action_outcome(action, {"requestedLimit": "300000"}, "credit card, limit 300000 taka",
+                                             None, {"name": "Gold Credit", "group": "Cards", "type": None})
+    prefill = outcome.result_payload["ui"]["prefill"]
+    assert prefill == {"requestedLimit": "300000"} and "cardProduct" not in prefill
+    facts = outcome.say[1]
+    assert "no choice of product" in facts["tell them"]

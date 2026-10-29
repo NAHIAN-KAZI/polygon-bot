@@ -992,6 +992,11 @@ def _ui_action_outcome(action: "ui_actions.UiAction", payload: dict | None, mess
     prefill = _ui_prefill(action, payload, message)
     shown = {**prefill, **(extra_shown or {})}       # what the reply may say they already gave
     prefill.update(extra_prefill or {})              # what the code decided (a catalogue id), not the customer's words
+    takes_product = any(f == "cardProduct" for f, _ in action.prefill)
+    if chosen_product and takes_product:             # the card they chose is on the form already, with its type
+        prefill["cardProduct"] = chosen_product["name"]
+        if chosen_product.get("type"):
+            prefill["cardType"] = chosen_product["type"]
     own = _bd_mobile(own_mobile)
     wants_own = str((payload or {}).get("forSelf")).strip().lower() in ("true", "yes", "1")
     if own and wants_own and "recipientMobile" not in prefill and any(f == "forSelf" for f, _ in action.prefill):
@@ -1000,11 +1005,16 @@ def _ui_action_outcome(action: "ui_actions.UiAction", payload: dict | None, mess
     ui = {"kind": action.kind, "title": action.name, "screen": action.screen, "route": action.route,
           "prefill": prefill or None, "needs": action.needs}
     if action.kind == "screen":
-        say = _say("redirect", screen=f"a {action.name} form right here in the chat",
+        say = _say("redirect", screen=(f"the {action.name} screen of the app, opened with the button under this message"
+                                       if action.id in ui_actions.APPLY_FOR_ACTIONS
+                                       else f"a {action.name} form right here in the chat"),
                    what_they_will_do_there=action.needs, already_filled_in=shown or None,
                    done_in_chat="no; they finish it with the buttons on that form",
                    the_product_they_chose=(chosen_product or {}).get("name"),
-                   tell_them="pick that product on the form" if chosen_product else None,
+                   tell_them=(None if not chosen_product else
+                              "the product they chose is already selected on the form, they check it and finish" if takes_product
+                              else "this form has no choice of product, it only asks for what is listed: the bank decides "
+                                   "which one they get, so do not tell them to pick the product there"),
                    **_read_back(prefill.get("recipientMobile")))
     elif action.kind == "unavailable":
         say = _say("not_done", what=action.name, why=action.needs, changed="nothing")
@@ -2997,7 +3007,7 @@ async def _suggest_before_applying(action, req: ChatRequest, recent_turns: list[
         return None
     index = await _llm_pick_name(req.message, [c.name for c in pool[:30]], offered=False)
     if index is not None:                    # a message that already names one product needs no suggestion
-        return "open", {"name": pool[index].name, "group": pool[index].group}
+        return "open", {"name": pool[index].name, "group": pool[index].group, "type": _card_type(pool[index])}
     need = advisor_advise.Need(spending=False, product=True, focus=action.name, names=tuple(c.name for c in pool))
     return "suggest", need
 
@@ -3178,6 +3188,12 @@ async def _try_save_offer(session_turns: list[ChatTurn], message: str) -> dict |
             "accountNumber": re.sub(r"\D", "", str(offer["accountNumber"]))}
 
 
+def _card_type(card) -> str | None:
+    """The kind of card a product is, as the apply form names its types, or None when it is not one of them."""
+    first = (getattr(card, "kind", "") or "").split(" ")[0].casefold()
+    return first if first in ("debit", "prepaid", "virtual") else None
+
+
 async def _try_apply_selection(session_turns: list[ChatTurn], message: str):
     """(the apply action, the chosen product) when the last answer suggested products to apply for and this reply
     picks one of them; else None."""
@@ -3192,7 +3208,8 @@ async def _try_apply_selection(session_turns: list[ChatTurn], message: str):
         return None
     cards = live_cards_mod.merge(product_cards.all_cards(), await live_cards_mod.current(None))
     card = next((c for c in cards if c.name == names[index]), None)
-    return action, {"name": names[index], "group": card.group if card else None}
+    return action, {"name": names[index], "group": card.group if card else None,
+                    "type": _card_type(card) if card else None}
 
 
 _REDACTED_SUBMISSION = "[redacted: verification submission]"

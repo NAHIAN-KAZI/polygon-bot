@@ -86,14 +86,15 @@ _LIST = [
        "debit, prepaid and virtual cards are all requested on this one screen, the app has no separate debit card "
        "application: choose a card product and the account to link, enter the name for the card and confirm; debit and "
        "prepaid cards need a one-time code and PIN, a virtual card request goes to the bank for review",
-       ["4.11", "4.13", "4.15"], "CardProductCatalogScreen", "/card_product_catalog",
-       [("cardType", "debit, prepaid or virtual")]),
+       ["4.11", "4.13", "4.15"], "RequestVirtualCardScreen", "/request_virtual_card/form",
+       [("cardType", "debit, prepaid or virtual"), ("cardProduct", "the card product they chose, as the bank names it")]),
     _a("credit_card_apply", "Apply for a credit card", "cards", "screen",
        "apply for, request, get or take a new credit card, or ask for a credit card limit; not a debit, prepaid or "
        "virtual card, and not viewing existing applications",
        "enter the credit limit they would like and submit; the bank reviews the application and decides the card and "
        "the final limit, and an approved card then appears under My Accounts",
-       ["4.24"], "CreditCardApplicationScreen", "/apply_for_credit_card"),
+       ["4.24"], "CreditCardApplicationScreen", "/apply_for_credit_card",
+       [("requestedLimit", "the credit limit they asked for, in taka")]),
     _a("loan_apply", "Apply for a loan", "deposits_loans", "screen",
        "apply for, request or take a new loan or financing (personal, home, car, business...); not viewing existing loans",
        "choose the kind of financing, enter the amount and how long to repay, and submit the request with the documents it asks for",
