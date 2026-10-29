@@ -415,3 +415,62 @@ def test_a_credit_limit_written_while_choosing_the_card_is_prefilled_on_its_form
     assert result["payload"]["ui"]["route"] == "/apply_for_credit_card"
     assert result["payload"]["ui"]["prefill"] == {"requestedLimit": "300000"}
     assert seen["said"] == ["I want a credit card with a 3 lakh limit", "ok apply for it, limit 300000"]
+
+
+def test_a_credit_card_named_in_a_request_the_classifier_took_for_the_debit_screen_opens_the_credit_screen(client, apply_flow, advice):
+    apply_flow["cards"] = [ProductCard("Platinum Debit", "Cards", "debit card", apply_via="card_apply"),
+                           ProductCard("Gold Credit", "Cards", "credit card", apply_via="credit_card_apply")]
+    apply_flow["picked"] = 1                                    # the message names Gold Credit
+    reply, result = say(client, "ami Gold Credit er jonno apply korbo")
+    assert apply_flow["asked"][-1] == ["Platinum Debit", "Gold Credit"]         # the products of every apply screen
+    assert result["type"] == "APP_ACTION" and result["payload"]["ui"]["route"] == "/apply_for_credit_card"
+    assert result["payload"]["products"] == [{"name": "Gold Credit", "group": "Cards", "strength": "apply"}]
+    assert "cardProduct" not in (result["payload"]["ui"]["prefill"] or {})
+
+
+def test_a_reply_that_wants_to_apply_but_not_clearly_which_asks_again_and_the_next_answer_still_counts(client, apply_flow, advice, monkeypatch):
+    async def wants(message, names):
+        apply_flow["wants_asked"] = list(names)
+        return True
+
+    monkeypatch.setattr(chat_module, "_wants_to_apply", wants)
+    say(client, "I want to apply for a debit card")
+    apply_flow["picked"] = None
+    _, asked = say(client, "ei jinish ta nite chai")                            # garbled: which one is unclear
+    assert asked["type"] == "CLARIFICATION_REQUIRED" and apply_flow["wants_asked"] == ["Platinum Debit", "Gold Debit"]
+    reply = say(client, "ei jinish ta nite chai")[0]
+    assert "Platinum Debit" in reply and "Gold Debit" in reply
+    apply_flow["picked"] = 1
+    _, result = say(client, "the second")
+    assert result["type"] == "APP_ACTION" and result["payload"]["products"][0]["name"] == "Gold Debit"
+
+
+def test_a_reply_about_something_else_is_not_taken_for_an_application(client, apply_flow, advice, monkeypatch):
+    async def wants(message, names):
+        return False
+
+    monkeypatch.setattr(chat_module, "_wants_to_apply", wants)
+    say(client, "I want to apply for a debit card")
+    apply_flow["picked"] = None
+    before = apply_flow["classify_calls"]
+    say(client, "what is the fee for a transfer?")
+    assert apply_flow["classify_calls"] == before + 1
+
+
+def test_the_model_must_quote_the_words_that_name_a_product_picked_from_a_first_message(monkeypatch):
+    import asyncio
+
+    asked = []
+
+    async def post(path, body, **kw):
+        asked.append(body["prompt"])
+        return {"response": json.dumps({"choice": 2, "quote": quote["text"]})}
+
+    monkeypatch.setattr(chat_module.llm_backend, "post", post)
+    quote = {"text": "ইসলামিক ভিসা ইনফিনিটি"}
+    names = ["Gold Credit", "Islamic Visa Infinite"]
+    message = "আমি ইসলামিক ভিসা ইনফিনিটি টার জন্য এপ্লাই করব"
+    assert asyncio.run(chat_module._llm_pick_name(message, names, offered=False)) == 1
+    assert '"quote"' in asked[0] and "written in Bangla letters" in asked[0]
+    quote["text"] = "words the customer never wrote"
+    assert asyncio.run(chat_module._llm_pick_name(message, names, offered=False)) is None

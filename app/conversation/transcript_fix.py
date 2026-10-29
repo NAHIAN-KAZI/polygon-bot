@@ -67,9 +67,10 @@ _PROMPT = (
 # Said when a second recogniser, better at English digits, heard a long number the first one did not write as digits.
 _SECOND = (
     "A second speech recogniser, which is better at English digits, heard this number in the same message: {run}. "
-    "Where the transcript has that spoken number (written as digit words, garbled or cut short), write exactly this "
-    "digit string there and change nothing else about those words. If the transcript has no spoken number, ignore "
-    "this.\n\n"
+    "The customer said a long number digit by digit (a phone or account number). In the transcript above it appears as "
+    "digit words, garbled syllables or a cut-short run of odd words, usually after a word meaning number or at the end. "
+    "Replace that whole stretch of garbled words with exactly this digit string, and change nothing else. If the "
+    "transcript has no spoken number, ignore this.\n\n"
 )
 
 # The model rarely asks on its own, and still swaps a garbled word for a banking word that doesn't

@@ -238,6 +238,8 @@ def test_a_long_number_the_second_recogniser_heard_goes_into_the_prompt_and_the_
     fix = _fix2(TITU, "আমি আপনার নম্বর 15 টাকেও বিকাশ করবো 01862610315।")
     assert fix.text == "আমি একটা নাম্বারে 500 টাকা বিকাশ করব 01862610315"
     assert "01862610315" in prompts[0] and "better at English digits" in prompts[0]
+    # the whole garbled stretch is replaced, not just a digit word beside it (a Nagad number said in Bangla words)
+    assert "Replace that whole stretch of garbled words" in prompts[0]
 
 
 def test_a_number_that_neither_recogniser_heard_is_never_accepted(model_says):
