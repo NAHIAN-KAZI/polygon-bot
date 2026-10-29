@@ -96,10 +96,13 @@ _PLATFORM: tuple[UseCase, ...] = (
     _u("profile_update.update_profile_image", "Change my profile photo", "EDIT_PERSONAL_DETAILS", "app_screen"),
 )
 
+EXCHANGE_RATES = "general.exchange_rates"
+
 # The bot's own answers (knowledge base and small talk): listed so the back office sees them, not switchable.
 _GENERAL: tuple[UseCase, ...] = (
     UseCase("general.knowledge_answers", "Answers from the knowledge base", "GENERAL", "answer", switchable=False),
     UseCase("general.greetings", "Greetings and small talk", "GENERAL", "answer", switchable=False),
+    UseCase(EXCHANGE_RATES, "Bangladesh exchange rates", "GENERAL", "answer"),
 )
 
 # Advice drawn from the customer's own money and the bank's products (app/advisor): two switches, because a bank may

@@ -31,6 +31,7 @@ from app.banking.routing import (
     DOMAINS,
     SERVICE_DESCRIPTIONS,
     AdviceQuestion,
+    RatesQuestion,
     AppActionsQuestion,
     BankingService,
     Clarification,
@@ -62,6 +63,7 @@ from app.conversation.composer import (
 from app.embeddings import embed_text
 from app.banking import beneficiary_kinds
 from app.knowledge import live_cards as live_cards_mod
+from app.knowledge import live_rates as live_rates_mod
 from app.llm import build_prompt, stream_generate
 from app.advisor import advise as advisor_advise
 from app.advisor import snapshot as advisor_snapshot
@@ -2893,6 +2895,82 @@ async def _kb_stream(req: ChatRequest, request_id: str, recent: list[str] | None
     yield _sse("done", {})
 
 
+def _num(value: float) -> str:
+    """A rate as Bangladesh Bank prints it: up to four decimals, no trailing zeros."""
+    return f"{value:.4f}".rstrip("0").rstrip(".")
+
+
+def _rates_outcome(data: dict | None, question: RatesQuestion) -> _TurnOutcome:
+    """The taka's exchange rate for a question (T-158). `data` is `live_rates.lookup`: Bangladesh Bank's published
+    table, the focus currency with its official rate (or a labelled market figure when the bank prints none) and a market
+    trend. The reply is composed from these facts only; the app draws the table and the graph from the payload."""
+    if data is None:
+        return _TurnOutcome("SERVICE_UNAVAILABLE", _say("unavailable", problem="the exchange rates could not be fetched "
+                                                        "right now", request_kind="a lookup"),
+                            "general", "exchange_rates", None)
+    official, focus, trend = data["official"], data["focus"], data["trend"]
+    code, row, market = focus["currency"], focus["official_rate"], focus["market"]
+    facts: dict = {"asked about": f"the exchange rate of the taka against {code}" if focus["named"]
+                   else "exchange rates in general (USD shown)"}
+    must: dict = {}
+    if row:
+        both = row.get("buy") is not None and row.get("sell") is not None and row["buy"] != row["sell"]
+        detail = f" (buy {_num(row['buy'])}, sell {_num(row['sell'])})" if both else ""
+        facts["rate"] = (f"1 {code} = Tk {_num(row['rate'])}{detail}, published by Bangladesh Bank on "
+                         f"{official['published_on']}")
+        must[f"{code} rate"] = _num(row["buy"] if both else row["rate"])
+    elif market:
+        facts["rate"] = (f"1 {code} = Tk {_num(market['rate'])} on {market['date']}: an indicative market rate; "
+                         f"Bangladesh Bank does not publish a rate for {code}")
+        must[f"{code} rate"] = _num(market["rate"])
+    elif focus["named"]:
+        facts["not found"] = f"no rate was found for {code}"
+        if official:
+            facts["rates Bangladesh Bank publishes"] = ", ".join(sorted(official["currencies"]))
+    elif official is None:
+        facts["not found"] = "Bangladesh Bank's published rates could not be fetched right now"
+    if trend:
+        first, last = trend["points"][0], trend["points"][-1]
+        way = "rose" if trend["change_percent"] > 0 else "fell" if trend["change_percent"] < 0 else "did not change"
+        facts["movement"] = (f"indicative market trend of {code} over {trend['days']} days: from Tk {_num(first['rate'])} "
+                             f"on {first['date']} to Tk {_num(last['rate'])} on {last['date']}, it {way}"
+                             + (f" {abs(trend['change_percent'])} percent" if trend["change_percent"] else ""))
+    shown = [name for name, present in (("a table of the rates Bangladesh Bank published", bool(official)),
+                                         ("a graph of the movement", bool(trend))) if present]
+    if shown:
+        facts["shown below"] = " and ".join(shown)
+    payload = {"exchange_rates": {
+        "currency": code,
+        "official": ({"source": "Bangladesh Bank", "published_on": official["published_on"],
+                      "rates": [{"currency": c, **{k: v for k, v in r.items() if k in ("buy", "sell", "rate")}}
+                                for c, r in sorted(official["currencies"].items())]} if official else None),
+        "market": market,
+        "trend": ({**trend, "kind": "indicative_market"} if trend else None),
+        "attribution": live_rates_mod.ATTRIBUTION,
+    }}
+    topic = [f"the exchange rate of {code}"] if row or market or trend else []
+    return _TurnOutcome("EXCHANGE_RATES", _say("exchange_rates", must, **facts), "general", "exchange_rates", None,
+                        result_payload=payload, stored=_topic_classification("EXCHANGE_RATES", topic) or {})
+
+
+async def _rates_stream(req: ChatRequest, request_id: str, customer_identity, turn_started_at: float, message: str,
+                        history: list[tuple[str, str]], stored_message: str, question: RatesQuestion):
+    """The taka's exchange rate: public data, so no login is needed; the back-office switch is still checked first.
+    Fetched live and kept only in memory (app/knowledge/live_rates)."""
+    if use_cases.EXCHANGE_RATES in (req.disabled_use_cases or []):
+        outcome = _switched_off_outcome(use_cases.EXCHANGE_RATES, "general", "exchange_rates", None)
+    else:
+        outcome = _rates_outcome(await live_rates_mod.lookup(question.currency, question.days), question)
+    async for chunk in _emit_outcome(outcome, request_id, customer_identity, turn_started_at, message=message,
+                                     history=history):
+        yield chunk
+    if customer_identity is not None:
+        record_turn(customer_identity.customer_id,
+                    ChatTurn(timestamp=datetime.now(timezone.utc), message=stored_message,
+                             classification=outcome.classification() if outcome.stored else None))
+    yield _sse("done", {})
+
+
 async def _advice_stream(req: ChatRequest, request_id: str, customer_identity, token: str | None,
                          recent_turns: list[ChatTurn], message: str, history: list[tuple[str, str]],
                          turn_started_at: float, stored_message: str, need=None, applying_for=None, previous=None):
@@ -3753,7 +3831,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None, heard_readin
                     and last_session_classification.get("request") is not None):
                 classify_context = session_turns[-1:]
             elif (not recent_turns and session_turns
-                  and last_session_classification.get("type") in ("KB_ANSWER", "ADVICE_ANSWER")
+                  and last_session_classification.get("type") in ("KB_ANSWER", "ADVICE_ANSWER", "EXCHANGE_RATES")
                   and last_session_classification.get("topic")):
                 # The last answer was about something ("this card", "eta"): the classifier is told what, and reads a
                 # follow-up that refers back to it as being about that.
@@ -3804,6 +3882,12 @@ async def _chat_stream(req: ChatRequest, authorization: str | None, heard_readin
                 ChatTurn(timestamp=datetime.now(timezone.utc), message=stored_message,
                          classification=_topic_classification("KB_ANSWER", kb_topics)),
             )
+        return
+
+    if isinstance(result, RatesQuestion):
+        async for chunk in _rates_stream(req, request_id, customer_identity, turn_started_at, composer_message, history,
+                                         stored_message, result):
+            yield chunk
         return
 
     if isinstance(result, AdviceQuestion):

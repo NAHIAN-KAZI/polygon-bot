@@ -157,7 +157,8 @@ def test_e2e_without_notes_the_classifier_call_is_unchanged(client, monkeypatch)
 def test_the_app_actions_tool_is_offered_only_when_there_are_notes():
     from app.banking.routing import build_tools
     assert [t["function"]["name"] for t in build_tools()] == [
-        "answer_kb_question", "route_banking_service", "give_personal_advice", "ask_clarification"]
+        "answer_kb_question", "route_banking_service", "give_personal_advice", "show_exchange_rates",
+        "ask_clarification"]
     assert "answer_from_app_actions" in [t["function"]["name"] for t in build_tools(app_actions=True)]
 
 

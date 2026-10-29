@@ -116,7 +116,7 @@ def check_reply(text: str, facts_json: str, must_include: Mapping[str, str]) -> 
     text = ascii_digits(text)
     if len(text) > _MAX_LEN:
         return "the reply was too long"
-    if any(symbol in text for symbol in _FOREIGN_CURRENCY):
+    if any(symbol in text and symbol not in facts_json for symbol in _FOREIGN_CURRENCY):
         return "it used a currency other than Tk"
     if _MARKDOWN_RE.search(text):
         return "it used markdown formatting; write plain text"

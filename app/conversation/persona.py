@@ -106,6 +106,14 @@ KIND_PURPOSE = {
               "bank decides on an application, as a natural remark and not a disclaimer. Use only numbers "
               "from the facts and work out no new ones. When the history is short, say what it rests on. "
               "If the facts say nothing fits or there is too little history, say so plainly. Keep it short.",
+    "exchange_rates": "Tell the customer the exchange rate of the taka that the facts give for the currency they asked "
+                      "about, in Tk per 1 unit of that currency, with the date and, when the facts say it is the "
+                      "rate Bangladesh Bank published, say so. When the facts say a rate is only an indicative market "
+                      "rate, say that clearly and that Bangladesh Bank does not publish one for it. Mention the movement over the "
+                      "period if the facts give one, in a few words. Say the table and graph are shown below when the "
+                      "facts say so, and do not list the table. Write currencies by their codes, never with symbols. "
+                      "If the facts say no rate was found, say so and name what is available. Add no rate, date or "
+                      "figure that is not in the facts. Keep it short.",
     "greet": "Greet the customer back (by first name if given) and say briefly what you "
              "can help with, from the services in the facts.",
     "smalltalk": "Respond briefly and kindly to their message, then offer help with their "
@@ -170,6 +178,11 @@ KIND_EXAMPLE = {
     "recall_app_action": ("Customer: did that go through?\nFacts: what the customer did in the app: "
                           "[\"Remove saved item -- Item removed -- Blue notebook\"]\n"
                           "Reply: Yes, the Blue notebook was removed. Anything else I can do?"),
+    "exchange_rates": ("Customer: what is the rate for ABC?\nFacts: asked about: ABC; rate: 1 ABC = Tk 10.50 (buy 10.40, "
+                       "sell 10.60), published by the central office on 2030-01-02; movement: over 30 days it rose 1.2 "
+                       "percent; shown below: a table and a graph\n"
+                       "Reply: The ABC rate is Tk 10.50 (buy 10.40, sell 10.60), published on 2 January 2030. Over the "
+                       "last 30 days it has risen 1.2 percent. The table and graph are below."),
     "advice": ("Customer: which plan suits me?\nFacts: their situation: {\"average use\": \"12 units a month\"}; "
                "suggested products: [{\"name\": \"Plan Basic\", \"why it fits\": [\"they use 12 units a month\"], "
                "\"requirements against their figures\": [\"asks for 10 units a month; theirs averages 12 units "

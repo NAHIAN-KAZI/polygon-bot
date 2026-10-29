@@ -138,12 +138,13 @@ def fake_taxonomy(monkeypatch):
 # --- build_tools --------------------------------------------------------------
 
 
-def test_build_tools_returns_the_four_tools_with_expected_names():
+def test_build_tools_returns_the_five_tools_with_expected_names():
     tools = build_tools()
 
-    assert len(tools) == 4
+    assert len(tools) == 5
     names = [t["function"]["name"] for t in tools]
-    assert names == ["answer_kb_question", "route_banking_service", "give_personal_advice", "ask_clarification"]
+    assert names == ["answer_kb_question", "route_banking_service", "give_personal_advice", "show_exchange_rates",
+                     "ask_clarification"]
 
 
 def test_build_tools_route_banking_service_schema():

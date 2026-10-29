@@ -85,6 +85,13 @@ class Settings:
     BENEFICIARY_ADD_OPENS_FORM: bool = os.environ.get("BENEFICIARY_ADD_OPENS_FORM", "true").lower() not in ("0", "false", "no")
     ADVISOR_RANK_CACHE_SECONDS: int = int(os.environ.get("ADVISOR_RANK_CACHE_SECONDS", "600"))   # only saves a model call when a customer asks again at once (T-150)
     LIVE_CARDS_TTL: int = int(os.environ.get("LIVE_CARDS_TTL", "600"))   # seconds the bank's card list is kept (T-145)
+    # Bangladesh exchange rates (T-158): shown live, kept only in memory for a while, never stored.
+    RATES_OFFICIAL_URL: str = os.environ.get("RATES_OFFICIAL_URL", "https://allratestoday.com/api/open/central-bank/bb")
+    RATES_MARKET_CDN: str = os.environ.get("RATES_MARKET_CDN", "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@{version}/v1/currencies/{code}.json")
+    RATES_MARKET_FALLBACK: str = os.environ.get("RATES_MARKET_FALLBACK", "https://{version}.currency-api.pages.dev/v1/currencies/{code}.json")
+    RATES_TTL: int = int(os.environ.get("RATES_TTL", "3600"))               # seconds the official table is kept
+    RATES_TREND_TTL: int = int(os.environ.get("RATES_TREND_TTL", "21600"))  # seconds a trend line is kept
+    RATES_TIMEOUT: float = float(os.environ.get("RATES_TIMEOUT", "6"))
     PRODUCT_CARDS_PATH: str = os.environ.get("PRODUCT_CARDS_PATH", "/app/data/product_cards.json")
     PRODUCT_CARD_TEXT_CHARS: int = int(os.environ.get("PRODUCT_CARD_TEXT_CHARS", "6000"))   # product text the model reads
     PRODUCT_CARD_CONCURRENCY: int = int(os.environ.get("PRODUCT_CARD_CONCURRENCY", "4"))

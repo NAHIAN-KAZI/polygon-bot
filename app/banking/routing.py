@@ -57,13 +57,24 @@ class AdviceQuestion:
 
 
 @dataclass(frozen=True)
+class RatesQuestion:
+    """The customer wants to know the exchange (forex) rate of the taka against a foreign currency: today's rate, how
+    it moved, or the rates in general. Public information fetched live, never from the knowledge base and never from the
+    customer's own account. `currency` is the three-letter code they asked about (None when they named none or want
+    all), `days` the period they want the movement for (None when they did not say)."""
+    currency: str | None = None
+    days: int | None = None
+
+
+@dataclass(frozen=True)
 class UnknownService:
     category: str
     service: str
     subservice: str | None = None
 
 
-ClassificationResult = KbQuestion | BankingService | Clarification | AppActionsQuestion | AdviceQuestion | UnknownService
+ClassificationResult = (KbQuestion | BankingService | Clarification | AppActionsQuestion | AdviceQuestion | RatesQuestion
+                        | UnknownService)
 
 
 _INVALID_PATH_CORRECTION = (
@@ -444,6 +455,11 @@ def build_system_prompt(
         "give_personal_advice. Plain facts about a product (what it is, its fee, who may apply) are "
         "knowledge questions, and a lookup of a balance, a statement or what they spent in a "
         "period is a service.\n"
+        "7b. The customer asks for the exchange rate (forex rate, foreign currency rate) of the taka against "
+        "another currency, today's or how it moved, or for exchange rates in general -> show_exchange_rates, "
+        "with the currency's three-letter code and the number of days only if they said them. That is public "
+        "information, not a service on their account and not a knowledge question; sending money abroad or a "
+        "fee is not this.\n"
         "8. General banking knowledge (other than fees), non-banking topics and abuse with no "
         "request -> answer_kb_question. A greeting, or a message with nothing to act on -> "
         "ask_clarification.\n\n"
@@ -537,6 +553,32 @@ def build_tools(app_actions: bool = False) -> list[dict]:
         {
             "type": "function",
             "function": {
+                "name": "show_exchange_rates",
+                "description": (
+                    "The customer asks for the exchange (forex) rate of the taka against a foreign currency, how it "
+                    "has moved, or the rates in general; also a follow-up that names another currency or a period "
+                    "after such an answer. Not for sending money abroad and not for fees."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "currency": {
+                            "type": "string",
+                            "description": "Three-letter code of the currency they asked about (USD, EUR, GBP, SAR...). "
+                                           "Leave out when they named none or want all.",
+                        },
+                        "days": {
+                            "type": "integer",
+                            "description": "How many days of movement they want, only if they said a period.",
+                        },
+                    },
+                    "required": [],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "ask_clarification",
                 "description": (
                     "Ask the customer a short clarifying question, written for this message, "
@@ -595,7 +637,15 @@ async def _post_classification(messages: list[dict], app_actions: bool = False) 
 
 
 _TOOL_NAMES = ("route_banking_service", "ask_clarification", "answer_kb_question", "answer_from_app_actions",
-               "give_personal_advice")
+               "give_personal_advice", "show_exchange_rates")
+
+
+def _rates_question(arguments) -> RatesQuestion:
+    args = arguments if isinstance(arguments, dict) else {}
+    code = str(args.get("currency") or "").strip().upper()
+    days = args.get("days")
+    return RatesQuestion(code if len(code) == 3 and code.isalpha() else None,
+                         days if isinstance(days, int) and not isinstance(days, bool) and days > 0 else None)
 
 
 def _tool_call_from_text(content: str | None) -> list[dict]:
@@ -667,7 +717,7 @@ def _earlier_subject(recent_turns: list[ChatTurn] | None) -> tuple[str, list[str
     last = recent_turns[-1]
     c = last.classification or {}
     topic = [t for t in c.get("topic") or [] if isinstance(t, str) and t]
-    if c.get("type") in ("KB_ANSWER", "ADVICE_ANSWER") and topic and last.message:
+    if c.get("type") in ("KB_ANSWER", "ADVICE_ANSWER", "EXCHANGE_RATES") and topic and last.message:
         return last.message, topic, c["type"]
     return None
 
@@ -683,6 +733,9 @@ def _subject_note(subject: tuple[str, list[str], str]) -> str:
     if kind == "ADVICE_ANSWER":
         note += ("The earlier answer was a recommendation for them: asking why, on what it was based, or why one "
                  "product and not another is a follow-up to it, so it is personal advice (give_personal_advice). ")
+    if kind == "EXCHANGE_RATES":
+        note += ("The earlier answer showed an exchange rate: a follow-up that names another currency or a period, or "
+                 "asks for the graph or the movement, is a new exchange-rate request (show_exchange_rates). ")
     return note + "A message with a subject of its own is a new request."
 
 
@@ -951,7 +1004,7 @@ async def _classify_scoped(
                 "it, \"it\"/\"that\"): route that action, reading \"it\" as what the previous "
                 "message was about."
             )
-        elif last_classification.get("type") in ("KB_ANSWER", "ADVICE_ANSWER"):
+        elif last_classification.get("type") in ("KB_ANSWER", "ADVICE_ANSWER", "EXCHANGE_RATES"):
             pass        # nothing was asked of the customer: only the answer's subject is added, below
         else:
             # T-53: broaden what counts as "answering" a pending clarification beyond bare
@@ -1012,7 +1065,7 @@ async def _classify_scoped(
                     "is a genuine subject change (a different kind of thing entirely, not just a "
                     "different phrasing of the same answer)."
                 )
-        if last_classification.get("type") not in ("BANKING_SERVICE", "KB_ANSWER", "ADVICE_ANSWER"):
+        if last_classification.get("type") not in ("BANKING_SERVICE", "KB_ANSWER", "ADVICE_ANSWER", "EXCHANGE_RATES"):
             messages.append({
                 "role": "system",
                 "content": general_reasoning + worked_example,
@@ -1060,6 +1113,8 @@ async def _classify_scoped(
             return KbQuestion()
         if retry_name == "give_personal_advice":
             return AdviceQuestion()
+        if retry_name == "show_exchange_rates":
+            return _rates_question(retry_arguments)
         if retry_name == "answer_from_app_actions" and app_notes:
             return AppActionsQuestion()
         if retry_name == "ask_clarification":
@@ -1095,6 +1150,8 @@ async def _classify_scoped(
         return KbQuestion()
     if name == "give_personal_advice":
         return AdviceQuestion()
+    if name == "show_exchange_rates":
+        return _rates_question(arguments)
     if name == "answer_from_app_actions" and app_notes:
         return AppActionsQuestion()
     if name == "ask_clarification":
@@ -1136,6 +1193,8 @@ async def _classify_scoped(
             return KbQuestion()
         if retry_name == "give_personal_advice":
             return AdviceQuestion()
+        if retry_name == "show_exchange_rates":
+            return _rates_question(retry_arguments)
         if retry_name == "answer_from_app_actions" and app_notes:
             return AppActionsQuestion()
         if retry_name == "ask_clarification":
