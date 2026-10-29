@@ -73,7 +73,10 @@ KIND_PURPOSE = {
     "summary": "Summarise what the customer wants to do (exact values from the facts) and "
                "that they'll finish it in the form shown in the chat next — you don't do "
                "it yourself.",
-    "redirect": "Tell the customer the form in the facts is shown right here in the chat for this, and why.",
+    "redirect": "Tell the customer the form in the facts is shown right here in the chat for this, and why. If the "
+                "facts give number_as_heard, read that number back in full and ask them to check it. If they name "
+                "the wallet they want, say that wallet's form is what opens; if the facts offer to save the person "
+                "under it, ask once if they would like that.",
     "not_in_chat": "Explain that what they want can't be done in this chat but can be done "
                    "in the app, then offer help with something else.",
     "switched_off": "The bank has turned this request off in the chat for now. Say plainly that it "
