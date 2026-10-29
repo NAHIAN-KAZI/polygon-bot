@@ -122,7 +122,7 @@ def outcome_for(monkeypatch, currency=None, days=None, official=OFFICIAL_BODY, m
 def test_the_official_rate_is_stated_with_its_date_and_both_buy_and_sell_when_they_differ(monkeypatch):
     out = outcome_for(monkeypatch, "EUR")
     assert out.result_type == "EXCHANGE_RATES" and out.say[0] == "exchange_rates"
-    assert "buy 137.8906, sell 137.9401" in out.say[1]["rate"] and "published by Bangladesh Bank on 2026-10-28" in out.say[1]["rate"]
+    assert "buy 137.8906, sell 137.9401" in out.say[1]["rate"] and "published by Bangladesh Bank on 28 October 2026" in out.say[1]["rate"]
     assert out.say[2] == {"EUR rate": "137.8906"}
     payload = out.result_payload["exchange_rates"]
     assert payload["official"]["source"] == "Bangladesh Bank" and {r["currency"] for r in payload["official"]["rates"]} == {"USD", "EUR"}
@@ -213,3 +213,12 @@ def test_the_classifier_turns_a_rates_tool_call_into_a_rates_question(monkeypatc
     monkeypatch.setattr(routing, "_post_classification", post)
     result = asyncio.run(routing.classify("pound er dam koto, last 2 weeks"))
     assert result == RatesQuestion("GBP", 14)
+
+
+def test_the_reply_facts_give_dates_in_words_and_the_movement_only_as_a_percent(monkeypatch):
+    today = dt.date.today()
+    market = {("USD", (today - dt.timedelta(days=d)).isoformat()): 120 + (30 - d) * 0.1 for d in range(1, 31)}
+    out = outcome_for(monkeypatch, "USD", market=market)
+    assert "28 October 2026" in out.say[1]["rate"] and "2026-10-28" not in out.say[1]["rate"]
+    assert out.say[1]["movement"].startswith("indicative market trend of USD over the last 30 days: it rose")
+    assert "Tk" not in out.say[1]["movement"]

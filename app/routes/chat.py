@@ -2900,6 +2900,15 @@ def _num(value: float) -> str:
     return f"{value:.4f}".rstrip("0").rstrip(".")
 
 
+def _nice_date(iso: str) -> str:
+    """2026-10-28 -> 28 October 2026, so the reply can say a date the way the customer's language does."""
+    try:
+        d = datetime.strptime(str(iso)[:10], "%Y-%m-%d")
+    except ValueError:
+        return str(iso)
+    return f"{d.day} {d.strftime('%B %Y')}"
+
+
 def _rates_outcome(data: dict | None, question: RatesQuestion) -> _TurnOutcome:
     """The taka's exchange rate for a question (T-158). `data` is `live_rates.lookup`: Bangladesh Bank's published
     table, the focus currency with its official rate (or a labelled market figure when the bank prints none) and a market
@@ -2917,10 +2926,10 @@ def _rates_outcome(data: dict | None, question: RatesQuestion) -> _TurnOutcome:
         both = row.get("buy") is not None and row.get("sell") is not None and row["buy"] != row["sell"]
         detail = f" (buy {_num(row['buy'])}, sell {_num(row['sell'])})" if both else ""
         facts["rate"] = (f"1 {code} = Tk {_num(row['rate'])}{detail}, published by Bangladesh Bank on "
-                         f"{official['published_on']}")
+                         f"{_nice_date(official['published_on'])}")
         must[f"{code} rate"] = _num(row["buy"] if both else row["rate"])
     elif market:
-        facts["rate"] = (f"1 {code} = Tk {_num(market['rate'])} on {market['date']}: an indicative market rate; "
+        facts["rate"] = (f"1 {code} = Tk {_num(market['rate'])} on {_nice_date(market['date'])}: an indicative market rate; "
                          f"Bangladesh Bank does not publish a rate for {code}")
         must[f"{code} rate"] = _num(market["rate"])
     elif focus["named"]:
@@ -2930,10 +2939,8 @@ def _rates_outcome(data: dict | None, question: RatesQuestion) -> _TurnOutcome:
     elif official is None:
         facts["not found"] = "Bangladesh Bank's published rates could not be fetched right now"
     if trend:
-        first, last = trend["points"][0], trend["points"][-1]
         way = "rose" if trend["change_percent"] > 0 else "fell" if trend["change_percent"] < 0 else "did not change"
-        facts["movement"] = (f"indicative market trend of {code} over {trend['days']} days: from Tk {_num(first['rate'])} "
-                             f"on {first['date']} to Tk {_num(last['rate'])} on {last['date']}, it {way}"
+        facts["movement"] = (f"indicative market trend of {code} over the last {trend['days']} days: it {way}"
                              + (f" {abs(trend['change_percent'])} percent" if trend["change_percent"] else ""))
     shown = [name for name, present in (("a table of the rates Bangladesh Bank published", bool(official)),
                                          ("a graph of the movement", bool(trend))) if present]
