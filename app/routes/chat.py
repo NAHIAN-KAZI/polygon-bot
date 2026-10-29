@@ -2593,6 +2593,11 @@ async def _llm_match_beneficiaries(name_query: str, beneficiaries: list[dict]) -
     return out[:_MAX_NAME_MATCHES]
 
 
+# The beneficiary kinds that are a person or an account money can be sent to (the bank's own list of kinds; the others
+# are payees for bills and donations).
+_PERSON_TYPES = frozenset({"OWN_BANK", "OTHER_BANK", "MFS", "MOBILE_RECHARGE"})
+
+
 def _resolve_beneficiary_destination(beneficiary: dict) -> dict | None:
     """Mirrors the mobile app's `beneficiarySendRoute()` switch on `serviceType`
     (see beneficiary-to-transfer-flow.md) — `None` means no deterministic
@@ -4313,6 +4318,13 @@ async def _chat_stream(req: ChatRequest, authorization: str | None, heard_readin
 
                             # the wallet they named ("bkash e pathabo"): from the lookup, or read from their words
                             wanted_provider = _provider_prefill(payload).get("provider")
+                            asked_before = last_session_classification.get("payload") if (
+                                last_session_classification.get("type") == "BENEFICIARY_SELECTION_REQUIRED") else None
+                            if payload.get("beneficiaryId") is not None and isinstance(asked_before, dict):
+                                # the pick of "which one?": what was said with the name still counts, whatever the app sent
+                                wanted_provider = wanted_provider or _provider_prefill(asked_before).get("provider")
+                                if not _amount_prefill(payload):
+                                    payload = {**payload, **_amount_prefill(asked_before)}
                             if wanted_provider is None and payload.get("nameQuery") and payload.get("purpose") != "recharge":
                                 wanted_provider = await _read_wallet_provider(composer_message)
                             provider_extra = {"provider": wanted_provider} if wanted_provider else {}
@@ -4331,6 +4343,11 @@ async def _chat_stream(req: ChatRequest, authorization: str | None, heard_readin
                                         payload.get("nameQuery", ""), beneficiaries)
                                     from_model = bool(matches)
 
+                            # a biller (an education fee, insurance, a club...) is a payee for bills, not a person to send
+                            # money to: with other matches left, it is not offered as one
+                            people = [b for b in matches if b.get("serviceType") in _PERSON_TYPES]
+                            if people and len(people) < len(matches) and payload.get("beneficiaryId") is None:
+                                matches = people
                             if len(matches) == 0:
                                 beneficiary_reply_token = ""
                                 async for _piece in say_stream(_say(
@@ -4382,9 +4399,9 @@ async def _chat_stream(req: ChatRequest, authorization: str | None, heard_readin
                                 async for _piece in say_stream(_say(
                                     "redirect", {"beneficiary": _beneficiary_name(matched)},
                                     the_wallet_they_want=wanted_provider,
-                                    then_offer=(f"saving them as a {wanted_provider} beneficiary too, so next time they are "
-                                                "found under it: ask if they want that, and if they say yes the form opens"
-                                                if offer_save else None),
+                                    then_offer=(f"a button under the card saves them as a {wanted_provider} beneficiary with the "
+                                                "form already filled in, so next time they are found under it: mention it once "
+                                                "(they can also just say yes)" if offer_save else None),
                                     their_request=("recharge a mobile for this person" if payload.get("purpose") == "recharge" else None),
                                     saved_as=(str(matched.get("serviceType") or "").replace("_", " ").lower() or None),
                                     screen=("the saved beneficiary shown right below this message, with a button that opens the transfer form" if destination
@@ -4399,7 +4416,11 @@ async def _chat_stream(req: ChatRequest, authorization: str | None, heard_readin
                                     service,
                                     subservice,
                                     payload={"beneficiary": matched, "destination": destination,
-                                             **_amount_prefill(payload), **provider_extra},
+                                             **_amount_prefill(payload), **provider_extra,
+                                             **({"save_as": {"leafServiceId": wanted_provider,
+                                                             "nickname": _beneficiary_name(matched),
+                                                             "accountNumber": re.sub(r"\D", "", str(matched.get("accountNumber")))}}
+                                                if offer_save else {})},
                                     routing={
                                         "category": category,
                                         "service": service,

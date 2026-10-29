@@ -30,7 +30,8 @@ def test_a_person_saved_for_recharge_opens_the_wallet_transfer_the_customer_name
     assert result["payload"]["destination"] == {"action": "wallet_transfer", "provider": "bkash"}
     assert result["payload"]["provider"] == "bkash" and result["payload"]["amount"] == "500"
     assert result["routing"]["action"] == "wallet_transfer"
-    assert "the wallet they want: bkash" in text and "saving them as a bkash beneficiary too" in text
+    assert "the wallet they want: bkash" in text and "a button under the card saves them as a bkash beneficiary" in text
+    assert result["payload"]["save_as"] == {"leafServiceId": "bkash", "nickname": "dipu", "accountNumber": "01711229005"}
 
 
 def test_the_wallet_is_read_from_the_words_when_the_classifier_did_not_carry_it(client, monkeypatch):
@@ -55,7 +56,7 @@ def test_no_wallet_named_keeps_the_kind_the_person_is_saved_as_and_offers_nothin
     monkeypatch.setattr(chat_module, "_read_wallet_provider", read)
     result, text = _ask(client)
     assert result["payload"]["destination"] == {"action": "mobile_recharge"} and "provider" not in result["payload"]
-    assert "saving them as" not in text
+    assert "save_as" not in result["payload"] and "button under the card" not in text
 
 
 def test_a_person_saved_as_a_bank_account_is_not_sent_to_a_wallet(client, monkeypatch):
@@ -125,3 +126,27 @@ def test_agreeing_to_the_offer_gives_the_form_values_and_anything_else_does_not(
     assert asyncio.run(chat_module._try_save_offer(_turn({"type": "KB_ANSWER"}), "ha")) is None
     assert asyncio.run(chat_module._try_save_offer(_turn({"type": "BENEFICIARY_MATCH"}), "ha")) is None
     assert asyncio.run(chat_module._try_save_offer([], "ha")) is None
+
+
+DIPU_UNI = {"id": 39, "nickname": "dipu uni", "accountHolderName": "2019160093", "serviceType": "EDUCATION_FEE", "mfsProvider": None}
+
+
+def test_a_biller_is_not_offered_as_the_person_to_send_money_to(client, monkeypatch):
+    _wallets(monkeypatch)
+    _install_beneficiary_fixture(monkeypatch, [DIPU_UNI, DIPU], payload={"nameQuery": "dipu", "amount": "500", "provider": "bkash"})
+    result, _ = _ask(client)
+    assert result["type"] == "BENEFICIARY_MATCH" and result["payload"]["beneficiary"]["id"] == 38      # not "dipu uni or dipu?"
+
+
+def test_picking_from_the_list_keeps_the_wallet_and_amount_said_with_the_name_whatever_the_app_sent(client, monkeypatch):
+    _wallets(monkeypatch)
+    _install_beneficiary_fixture(monkeypatch, [DIPU_UNI, DIPU], payload={"beneficiaryId": 38})
+    asked = ChatTurn(timestamp=datetime.now(timezone.utc), message="dipu k bkash e 500 taka pathabo", classification={
+        "type": "BENEFICIARY_SELECTION_REQUIRED", "category": "polygon_services", "service": "beneficiary",
+        "payload": {"amount": "500", "provider": "bkash"}})
+    monkeypatch.setattr(chat_module, "get_session", lambda customer_id: [asked])
+    result, _ = _ask(client, "Send to dipu")
+    assert result["type"] == "BENEFICIARY_MATCH"
+    assert result["payload"]["provider"] == "bkash" and result["payload"]["amount"] == "500"
+    assert result["payload"]["destination"] == {"action": "wallet_transfer", "provider": "bkash"}
+    assert result["payload"]["save_as"]["leafServiceId"] == "bkash"
