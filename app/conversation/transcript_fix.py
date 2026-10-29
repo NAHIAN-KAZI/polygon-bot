@@ -126,6 +126,20 @@ def long_runs(text: str | None) -> list[str]:
     return [re.sub(r"\D", "", m) for m in _LONG_RUN_RE.findall((text or "").translate(_BANGLA_DIGITS))]
 
 
+# A recording of ordinary speech has 2 to 3 words a second. A Bangla-only recogniser given English (or noise) writes
+# a word or two for the whole message, so far fewer words than the audio holds means it did not hear it.
+_MIN_WORDS_PER_SECOND = 0.8
+_MIN_SECOND_WORDS = 3
+
+
+def titu_missed_it(heard: str, second: str | None, seconds: float) -> bool:
+    """Titu wrote far fewer words than the audio holds while the model hearing it wrote a real sentence: use the model's
+    transcript instead of Titu's. Counted in code from the length of the audio and the words, not read from the text."""
+    if not second or seconds < 1.5:
+        return False
+    return len(heard.split()) / seconds < _MIN_WORDS_PER_SECOND and len(second.split()) >= _MIN_SECOND_WORDS
+
+
 def _numbers(text: str) -> list[str]:
     return [n.replace(",", "") for n in _NUMBER_RE.findall(text.translate(_BANGLA_DIGITS))]
 
@@ -189,7 +203,7 @@ async def correct_transcript(heard: str, second: str | None = None) -> Transcrip
         return unchanged
     if not isinstance(parsed, dict):
         return unchanged
-    guard = second if runs else None
+    guard = second                    # with a second opinion, no long number may appear that neither heard
     text = _usable(heard, parsed.get("text"), guard)
     if text is None:
         logger.info("transcript correction rejected; using Titu's text")

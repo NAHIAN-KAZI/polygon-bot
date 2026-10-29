@@ -262,3 +262,20 @@ def test_long_runs_reads_spaced_dashed_and_bangla_digits():
     from app.conversation.transcript_fix import long_runs
     assert long_runs("০১৮৬ ২৬১ ০৩১৫ and 018-6261-0315 and 500") == ["01862610315", "01862610315"]
     assert long_runs(None) == [] and long_runs("0186") == []
+
+
+# --- Titu missed the speech: the model's transcript stands (T-152) ----------------------------------------------------------
+
+def test_titu_missed_it_when_it_wrote_far_fewer_words_than_the_audio_holds():
+    from app.conversation.transcript_fix import titu_missed_it
+    english = "I want to send 500 taka to bKash. The number is 01862610315."
+    assert titu_missed_it("এ পা", english, 6.0) is True            # 2 words for 6 seconds
+    assert titu_missed_it("আমি পাঁচশো টাকা বিকাশ করব নাম্বারটা হল", english, 6.0) is False   # 7 words: Titu heard it
+    assert titu_missed_it("এ পা", None, 6.0) is False and titu_missed_it("এ পা", "yes ok", 6.0) is False
+    assert titu_missed_it("", english, 1.0) is False                # a very short clip says nothing
+
+
+def test_with_a_second_opinion_no_long_number_may_appear_that_neither_heard(model_says):
+    model_says({"text": "আমি 500 টাকা নাম্বার 01711223344", "readings": []})
+    # the second recogniser wrote words, no number: the model's invented number is refused
+    assert _fix2("আমি পাঁচশো টাকা নাম্বার শূন্য এক", "আমি পাঁচশো টাকা নাম্বার").text == "আমি পাঁচশো টাকা নাম্বার শূন্য এক"

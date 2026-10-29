@@ -55,6 +55,15 @@ def _wav_seconds(raw: bytes) -> float:
     return data_size / byte_rate
 
 
+def audio_seconds(data_url: str) -> float:
+    """How long the recording is, in seconds; 0 when it cannot be read (the checks in `decode_audio` report that)."""
+    match = _DATA_URL_RE.match((data_url or "").strip())
+    try:
+        return _wav_seconds(base64.b64decode(match.group(1).strip())) if match else 0.0
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
 def decode_audio(data_url: str) -> str:
     """The raw base64 of a data:audio/wav URL, after checking format and length."""
     match = _DATA_URL_RE.match(data_url.strip())

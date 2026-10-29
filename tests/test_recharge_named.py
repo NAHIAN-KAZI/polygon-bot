@@ -92,3 +92,16 @@ def test_other_results_and_payloads_without_numbers_are_untouched():
     plain = BankingService("account_info", "balance", None, {"nickname": "x"})
     assert chat_module._check_numbers(plain, "anything") is plain
     assert chat_module._check_numbers(Clarification(question="?", options=()), "x") is not None
+
+
+# ---- a number the customer spoke is read back in full (T-152) -------------------------------------------------------------
+
+def test_a_spoken_number_is_read_back_as_digit_groups_and_a_typed_one_is_not():
+    token = chat_module._spoken_turn.set(True)
+    try:
+        got = chat_module._read_back("01862610315")
+        assert got["number_as_heard"] == "0186 261 0315" and "read it back in full" in got["check_it"]
+        assert chat_module._read_back("0186") == {} and chat_module._read_back(None) == {}
+    finally:
+        chat_module._spoken_turn.reset(token)
+    assert chat_module._read_back("01862610315") == {}
