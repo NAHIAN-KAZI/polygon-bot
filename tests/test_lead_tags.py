@@ -33,7 +33,8 @@ def test_hit_products_are_distinct_ordered_and_capped():
     hits = [{"product": "Visa Debit Card", "group": "Cards"}, {"product": "Visa Debit Card", "group": "Cards"},
             {"text": "no product data"}, {"product": "Home Loan", "group": "Loans and finance"},
             {"product": "Personal Loan", "group": "Loans and finance"}, {"product": "Auto Loan", "group": "Loans and finance"}]
-    assert [p["name"] for p in chat_module._hit_products(hits)] == ["Visa Debit Card", "Home Loan", "Personal Loan"]
+    assert [p["name"] for p in chat_module._hit_products(hits)] == ["Visa Debit Card", "Home Loan", "Personal Loan", "Auto Loan"]
+    assert len(chat_module._hit_products([{"product": f"P{i}", "group": "G"} for i in range(10)])) == 6     # a list question names several
     assert chat_module._hit_products([{"text": "a"}, {"product": "X"}]) == []     # a product needs its group too
     assert chat_module._hit_products([]) == []
 

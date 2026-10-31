@@ -2050,7 +2050,7 @@ async def _read_product_interest(message: str, products: list[dict]) -> list[dic
     return tags
 
 
-def _hit_products(hits: list[dict], limit: int = 3) -> list[dict]:
+def _hit_products(hits: list[dict], limit: int = 6) -> list[dict]:
     """The distinct products behind the retrieved chunks, best match first (chunks without product data add none)."""
     seen: list[dict] = []
     for hit in hits:
