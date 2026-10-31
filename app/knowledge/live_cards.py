@@ -82,12 +82,38 @@ def prompt_block(cards: list[dict]) -> str:
 _SHOWCASE_TYPES = ("debit", "credit", "prepaid")
 
 
-def showcase(cards: list[dict]) -> list[dict]:
-    """The cards as the app draws them (scrollable rows by type): name, type, scheme and what the artwork needs. Types
-    the app has no artwork for are left out of the pictures; the text answer still names every card."""
-    return [{"name": c["name"], "type": c["type"], "scheme": c.get("scheme_code") or c["network"].upper(),
-             "routingProfile": c.get("routing_profile"), "capabilities": c.get("capabilities") or []}
-            for c in cards if c["type"] in _SHOWCASE_TYPES][:40]
+def _clip(items, count: int, chars: int) -> list[str]:
+    return [" ".join(str(i).split())[:chars] for i in (items or []) if str(i).strip()][:count]
+
+
+def details(card: ProductCard | None) -> dict | None:
+    """What the card's details sheet shows, from the knowledge base's own summary of the product (what it is, fees,
+    benefits, who may apply, who it suits), trimmed to a size a phone screen can hold. None when there is nothing."""
+    if card is None:
+        return None
+    out = {"summary": " ".join((card.summary or "").split())[:320],
+           "fees": _clip(card.fees, 6, 180), "rates": _clip(card.rates, 4, 180),
+           "benefits": _clip(card.benefits, 8, 220), "eligibility": _clip(card.eligibility, 6, 180),
+           "bestFor": _clip(card.best_for, 6, 60)}
+    return {k: v for k, v in out.items() if v} or None
+
+
+def showcase(cards: list[dict], enriched: list[ProductCard] | None = None) -> list[dict]:
+    """The cards as the app draws them (scrollable rows by type): name, type, scheme, what the artwork needs and, when
+    the knowledge base describes the card, its details. Types the app has no artwork for are left out of the pictures;
+    the text answer still names every card."""
+    known = {c.name: c for c in enriched or []}
+    shown = []
+    for c in cards:
+        if c["type"] not in _SHOWCASE_TYPES:
+            continue
+        item = {"name": c["name"], "type": c["type"], "scheme": c.get("scheme_code") or c["network"].upper(),
+                "routingProfile": c.get("routing_profile"), "capabilities": c.get("capabilities") or []}
+        extra = details(known.get(c["name"]))
+        if extra:
+            item["details"] = extra
+        shown.append(item)
+    return shown[:40]
 
 
 async def current(jwt: str | None, identity=None) -> list[dict]:

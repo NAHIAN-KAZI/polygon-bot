@@ -144,3 +144,18 @@ def test_the_showcase_gives_the_app_what_it_needs_to_draw_each_card_and_skips_ty
     assert shown[0] == {"name": "Polygon Visa Gold Debit", "type": "debit", "scheme": "VISA",
                         "routingProfile": "STANDARD", "capabilities": ["CONTACTLESS"]}
     assert shown[1]["routingProfile"] is None and shown[1]["capabilities"] == []
+
+
+def test_a_cards_details_come_from_the_knowledge_base_card_trimmed_and_without_empty_sections():
+    from app.knowledge.product_cards import ProductCard
+    stored = ProductCard("Polygon Visa Gold Debit", "Cards", "debit card", summary="A gold debit card.",
+                         fees=["Annual fee: BDT 500"], benefits=[f"Benefit {i} " + "x" * 400 for i in range(12)],
+                         eligibility=[], best_for=["everyday spending"], apply_via="card_apply")
+    live = live_cards.parse({"data": [{"tierName": "Polygon Visa Gold Debit", "cardCategory": "DEBIT", "scheme": "VISA", "active": True},
+                                      {"tierName": "Polygon Plain", "cardCategory": "DEBIT", "scheme": "VISA", "active": True}]})
+    shown = live_cards.showcase(live, live_cards.merge([stored], live))
+    gold, plain = shown
+    assert gold["details"]["fees"] == ["Annual fee: BDT 500"] and gold["details"]["bestFor"] == ["everyday spending"]
+    assert len(gold["details"]["benefits"]) == 8 and all(len(b) <= 220 for b in gold["details"]["benefits"])
+    assert "eligibility" not in gold["details"] and "rates" not in gold["details"]
+    assert "details" not in plain            # the knowledge base says nothing about it
