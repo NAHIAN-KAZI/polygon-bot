@@ -17434,7 +17434,7 @@ Interest rates in percent a year. Lac = 100,000 and Crore = 10,000,000 taka.
 
 Fixed deposit rates by tenure and deposit amount, for individuals and for non-individuals (companies and other entities). These are the rates of the regular Fixed Deposit. The Monthly Interest Paying Fixed Deposit Account has its own rates, on its product page.
 
-#### Other tenures
+#### Fixed Deposit: other tenures interest rate
 
 | Tenure | Individuals | Non-individuals |
 |---|---|---|
@@ -17443,7 +17443,7 @@ Fixed deposit rates by tenure and deposit amount, for individuals and for non-in
 | 335 Days | - | 3.50% |
 | Government & Autonomous Entity - 1 (One) Year | - | 7.50% |
 
-#### 90 Days
+#### Fixed Deposit: 90 Days interest rate
 
 | Deposit amount | Individuals | Non-individuals |
 |---|---|---|
@@ -17454,7 +17454,7 @@ Fixed deposit rates by tenure and deposit amount, for individuals and for non-in
 | 20 crore to below  50 crore | 7.50% | 8.00% |
 | 50 crore and above | 7.50% | 8.00% |
 
-#### 91 Days
+#### Fixed Deposit: 91 Days interest rate
 
 | Deposit amount | Individuals | Non-individuals |
 |---|---|---|
@@ -17464,7 +17464,7 @@ Fixed deposit rates by tenure and deposit amount, for individuals and for non-in
 | 20 crore to below  50 crore | 7.50% | 8.00% |
 | 50 crore and above | 7.50% | 8.00% |
 
-#### 92 Days
+#### Fixed Deposit: 92 Days interest rate
 
 | Deposit amount | Individuals | Non-individuals |
 |---|---|---|
@@ -17475,7 +17475,7 @@ Fixed deposit rates by tenure and deposit amount, for individuals and for non-in
 | 20 crore to below  50 crore | 7.50% | 8.00% |
 | 50 crore and above | 7.50% | 8.00% |
 
-#### 93 Days
+#### Fixed Deposit: 93 Days interest rate
 
 | Deposit amount | Individuals | Non-individuals |
 |---|---|---|
@@ -17487,7 +17487,7 @@ Fixed deposit rates by tenure and deposit amount, for individuals and for non-in
 | 50 crore to below  100 crore | 7.50% | 8.00% |
 | 100 crore & above | 7.50% | 8.00% |
 
-#### 94 Days
+#### Fixed Deposit: 94 Days interest rate
 
 | Deposit amount | Individuals | Non-individuals |
 |---|---|---|
@@ -17498,7 +17498,7 @@ Fixed deposit rates by tenure and deposit amount, for individuals and for non-in
 | 20 crore to below  50 crore | 7.50% | 8.00% |
 | 50 crore and above | 7.50% | 8.00% |
 
-#### 95 Days
+#### Fixed Deposit: 95 Days interest rate
 
 | Deposit amount | Individuals | Non-individuals |
 |---|---|---|
@@ -17508,7 +17508,7 @@ Fixed deposit rates by tenure and deposit amount, for individuals and for non-in
 | 20 crore to below  50 crore | 6.50% | 8.00% |
 | 50 crore and above | 6.50% | 8.00% |
 
-#### 96 Days
+#### Fixed Deposit: 96 Days interest rate
 
 | Deposit amount | Individuals | Non-individuals |
 |---|---|---|
@@ -17518,7 +17518,7 @@ Fixed deposit rates by tenure and deposit amount, for individuals and for non-in
 | 20 crore to below  50 crore | 6.50% | 6.50% |
 | 50 crore and above | 6.50% | 6.50% |
 
-#### 3 (Three) months
+#### Fixed Deposit: 3 (Three) months interest rate
 
 | Deposit amount | Individuals | Non-individuals |
 |---|---|---|
@@ -17528,7 +17528,7 @@ Fixed deposit rates by tenure and deposit amount, for individuals and for non-in
 | 20 crore to below 300 crore | 6.35% | 2.50% |
 | 300 crore and above | 6.35% | 8.00% |
 
-#### 180 Days
+#### Fixed Deposit: 180 Days interest rate
 
 | Deposit amount | Individuals | Non-individuals |
 |---|---|---|
@@ -17538,7 +17538,7 @@ Fixed deposit rates by tenure and deposit amount, for individuals and for non-in
 | 20 crore to below  50 crore | 7.50% | 7.50% |
 | 50 crore and above | 7.50% | 7.50% |
 
-#### 181 Days
+#### Fixed Deposit: 181 Days interest rate
 
 | Deposit amount | Individuals | Non-individuals |
 |---|---|---|
@@ -17549,7 +17549,7 @@ Fixed deposit rates by tenure and deposit amount, for individuals and for non-in
 | 20 crore to below  50 crore | 7.50% | 7.50% |
 | 50 crore and above | 7.50% | 7.50% |
 
-#### 182 Days
+#### Fixed Deposit: 182 Days interest rate
 
 | Deposit amount | Individuals | Non-individuals |
 |---|---|---|
@@ -17560,7 +17560,7 @@ Fixed deposit rates by tenure and deposit amount, for individuals and for non-in
 | 20 crore to below  50 crore | 7.50% | 7.50% |
 | 50 crore and above | 7.50% | 7.50% |
 
-#### 183 Days
+#### Fixed Deposit: 183 Days interest rate
 
 | Deposit amount | Individuals | Non-individuals |
 |---|---|---|
@@ -17571,7 +17571,7 @@ Fixed deposit rates by tenure and deposit amount, for individuals and for non-in
 | 20 crore to below  50 crore | 7.50% | 7.50% |
 | Above 50 crore | 7.50% | 7.50% |
 
-#### 184 Days
+#### Fixed Deposit: 184 Days interest rate
 
 | Deposit amount | Individuals | Non-individuals |
 |---|---|---|
@@ -17582,7 +17582,7 @@ Fixed deposit rates by tenure and deposit amount, for individuals and for non-in
 | 20 crore to below  50 crore | - | 6.35% |
 | Above 50 crore | - | 6.35% |
 
-#### 185 Days
+#### Fixed Deposit: 185 Days interest rate
 
 | Deposit amount | Individuals | Non-individuals |
 |---|---|---|
@@ -17593,7 +17593,7 @@ Fixed deposit rates by tenure and deposit amount, for individuals and for non-in
 | 20 crore to below  50 crore | 7.50% | 6.75% |
 | 50 crore and above | 7.50% | 6.75% |
 
-#### 6 (Six) months
+#### Fixed Deposit: 6 (Six) months interest rate
 
 | Deposit amount | Individuals | Non-individuals |
 |---|---|---|
@@ -17603,7 +17603,7 @@ Fixed deposit rates by tenure and deposit amount, for individuals and for non-in
 | 20 crore to below  50 crore | 6.35% | 7.50% |
 | 50 crore and above | 6.35% | 7.50% |
 
-#### 7 (Seven) months
+#### Fixed Deposit: 7 (Seven) months interest rate
 
 | Deposit amount | Individuals | Non-individuals |
 |---|---|---|
@@ -17613,7 +17613,7 @@ Fixed deposit rates by tenure and deposit amount, for individuals and for non-in
 | 20 Crore to Below 50 Crore | 7.50% | - |
 | 50 Crore & Above | 7.50% | - |
 
-#### 360 Days
+#### Fixed Deposit: 360 Days interest rate
 
 | Deposit amount | Individuals | Non-individuals |
 |---|---|---|
@@ -17624,7 +17624,7 @@ Fixed deposit rates by tenure and deposit amount, for individuals and for non-in
 | 50 crore to below 100 crore | - | 7.50% |
 | 100 Crore & Above | - | 7.50% |
 
-#### 362 Days
+#### Fixed Deposit: 362 Days interest rate
 
 | Deposit amount | Individuals | Non-individuals |
 |---|---|---|
@@ -17635,7 +17635,7 @@ Fixed deposit rates by tenure and deposit amount, for individuals and for non-in
 | 50 crore to below 100 crore | 6.35% | 7.50% |
 | 100 Crore & Above | 6.35% | 7.50% |
 
-#### 365 Days
+#### Fixed Deposit: 365 Days interest rate
 
 | Deposit amount | Individuals | Non-individuals |
 |---|---|---|
@@ -17647,7 +17647,7 @@ Fixed deposit rates by tenure and deposit amount, for individuals and for non-in
 | 50 crore to below 100 crore | 7.50% | 7.50% |
 | 100 Crore & Above | 7.50% | 7.50% |
 
-#### 366 Days
+#### Fixed Deposit: 366 Days interest rate
 
 | Deposit amount | Individuals | Non-individuals |
 |---|---|---|
@@ -17658,7 +17658,7 @@ Fixed deposit rates by tenure and deposit amount, for individuals and for non-in
 | 20 crore to below  50 crore | 7.50% | 7.50% |
 | 50 Crore & Above | 7.50% | 7.50% |
 
-#### 370 Days
+#### Fixed Deposit: 370 Days interest rate
 
 | Deposit amount | Individuals | Non-individuals |
 |---|---|---|
@@ -17669,7 +17669,7 @@ Fixed deposit rates by tenure and deposit amount, for individuals and for non-in
 | 50 crore to below 100 crore | 7.50% | 7.50% |
 | 100 Crore & Above | 7.50% | 7.50% |
 
-#### 375 Days
+#### Fixed Deposit: 375 Days interest rate
 
 | Deposit amount | Individuals | Non-individuals |
 |---|---|---|
@@ -17680,7 +17680,7 @@ Fixed deposit rates by tenure and deposit amount, for individuals and for non-in
 | 20 crore to below  50 crore | 7.50% | 7.50% |
 | 50 Crore & Above | 7.50% | 7.50% |
 
-#### 380 Days
+#### Fixed Deposit: 380 Days interest rate
 
 | Deposit amount | Individuals | Non-individuals |
 |---|---|---|
@@ -17691,7 +17691,7 @@ Fixed deposit rates by tenure and deposit amount, for individuals and for non-in
 | 20 crore to below  50 crore | 7.50% | 7.50% |
 | 50 Crore & Above | 7.50% | 7.50% |
 
-#### 13 (Thirteen) months
+#### Fixed Deposit: 13 (Thirteen) months interest rate
 
 | Deposit amount | Individuals | Non-individuals |
 |---|---|---|
@@ -17701,7 +17701,7 @@ Fixed deposit rates by tenure and deposit amount, for individuals and for non-in
 | 20 Crore to Below 50 Crore | 7.50% | - |
 | 50 Crore & Above | 7.50% | - |
 
-#### 15 (Fifteen) months
+#### Fixed Deposit: 15 (Fifteen) months interest rate
 
 | Deposit amount | Individuals | Non-individuals |
 |---|---|---|
@@ -17712,7 +17712,7 @@ Fixed deposit rates by tenure and deposit amount, for individuals and for non-in
 | 20 crore to below  50 crore | 7.50% | 7.50% |
 | 50 Crore & Above | 7.50% | 7.50% |
 
-#### 1 (One) Year
+#### Fixed Deposit: 1 (One) Year interest rate
 
 | Deposit amount | Individuals | Non-individuals |
 |---|---|---|
@@ -17722,7 +17722,7 @@ Fixed deposit rates by tenure and deposit amount, for individuals and for non-in
 | 20 crore to below  50 crore | 7.50% | 7.50% |
 | 50 Crore & Above | 7.50% | 7.50% |
 
-#### 02 (Two) Years
+#### Fixed Deposit: 02 (Two) Years interest rate
 
 | Deposit amount | Individuals | Non-individuals |
 |---|---|---|
@@ -17732,7 +17732,7 @@ Fixed deposit rates by tenure and deposit amount, for individuals and for non-in
 | 20 crore to below  50 crore | 7.50% | 7.50% |
 | 50 Crore & Above | 7.50% | 7.50% |
 
-#### 03 (Three) Years
+#### Fixed Deposit: 03 (Three) Years interest rate
 
 | Deposit amount | Individuals | Non-individuals |
 |---|---|---|
