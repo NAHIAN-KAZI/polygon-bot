@@ -3050,6 +3050,18 @@ async def _advice_stream(req: ChatRequest, request_id: str, customer_identity, t
     except BaseException:
         snapshot_task.cancel()
         raise
+    if need.knowledge:
+        # A fact or a calculation about a named product ("what do I get after 10 years at 1,000 a month?") is a
+        # knowledge question, not advice: the classifier sends it here because it is about the customer's own plan.
+        snapshot_task.cancel()
+        kb_topics: list[str] = []
+        async for chunk in _kb_stream(req, request_id, _recent_customer_messages(recent_turns), topics=kb_topics):
+            yield chunk
+        if customer_identity is not None:
+            record_turn(customer_identity.customer_id,
+                        ChatTurn(timestamp=datetime.now(timezone.utc), message=stored_message,
+                                 classification=_with_pending_apply(_topic_classification("KB_ANSWER", kb_topics), previous)))
+        return
     wanted_product = need.product
     if use_cases.ADVISOR_INSIGHTS in disabled:
         need = dataclasses.replace(need, spending=False)

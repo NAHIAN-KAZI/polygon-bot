@@ -396,3 +396,13 @@ def test_read_need_takes_the_names_from_the_previous_recommendation(monkeypatch)
     assert need.product and "1. Gold Credit" in seen[0] and "3. X" in seen[0] and "4. Y" not in seen[0]
     run(advise.read_need("how much do I spend?", [], CARDS, {"type": "KB_ANSWER"}))
     assert "just recommended" not in seen[1]
+
+
+def test_a_fact_about_a_named_product_is_a_knowledge_question_not_advice():
+    assert "\"knowledge\": false" in advise.read_need_prompt("what do I get after 10 years?", [], KINDS)
+    need = advise.parse_need({"knowledge": True, "product": True, "spending": False, "focus": "maturity value"}, KINDS)
+    assert need.knowledge and not need.product and not need.spending
+    # a question about reasons stays an explanation, and a plain product question is unchanged
+    assert advise.parse_need({"knowledge": True, "explain": True, "kinds": [1]}, KINDS).explain
+    plain = advise.parse_need({"product": True, "kinds": [1], "focus": "card"}, KINDS)
+    assert plain.product and not plain.knowledge

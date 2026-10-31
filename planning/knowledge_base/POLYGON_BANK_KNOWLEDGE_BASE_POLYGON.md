@@ -1488,18 +1488,61 @@ Easily opened and closed from Digital Banking …
 Any Bangladeshi individual and non-individual entity with active conventional Current or Savings Account with Polygon Bank.
 
 #### Interest Earnings
-Monthly interest payment. Interest rates in percent a year (effective 18 October 2026). The same rates apply to individuals and non-individuals.
+Monthly interest payment. These are the interest rates of the Monthly Interest Paying Fixed Deposit Account only (effective 18 October 2026), in percent a year. The same rates apply to individuals and non-individuals. The regular Fixed Deposit has its own rates, on the fixed deposit interest rates page.
 
-| Deposit amount | 6 months | 7 months | 1 year | 13 months |
-|---|---|---|---|---|
-| Below 50 lakh | 6.90% | 6.90% | 6.80% | 6.80% |
-| 50 lakh to below 1 crore | 6.90% | 6.90% | 6.80% | 6.80% |
-| 1 crore to below 5 crore | 7.20% | 7.20% | 7.10% | 7.00% |
-| 5 crore to below 20 crore | 7.40% | 7.40% | 7.30% | 7.30% |
-| 20 crore to below 50 crore | 7.40% | 7.40% | 7.30% | 7.30% |
-| 50 crore and above | 7.40% | 7.40% | 7.30% | 7.30% |
+##### Monthly Interest Paying Fixed Deposit Account: 6 months interest rate
 
-For longer tenors the rate is the same for any amount: 2 years 7.00%, 3 years 6.80% and 5 years 6.30%.
+| Deposit amount | Interest rate for 6 months |
+|---|---|
+| Below 50 lakh | 6.90% |
+| 50 lakh to below 1 crore | 6.90% |
+| 1 crore to below 5 crore | 7.20% |
+| 5 crore to below 20 crore | 7.40% |
+| 20 crore to below 50 crore | 7.40% |
+| 50 crore and above | 7.40% |
+
+##### Monthly Interest Paying Fixed Deposit Account: 7 months interest rate
+
+| Deposit amount | Interest rate for 7 months |
+|---|---|
+| Below 50 lakh | 6.90% |
+| 50 lakh to below 1 crore | 6.90% |
+| 1 crore to below 5 crore | 7.20% |
+| 5 crore to below 20 crore | 7.40% |
+| 20 crore to below 50 crore | 7.40% |
+| 50 crore and above | 7.40% |
+
+##### Monthly Interest Paying Fixed Deposit Account: 1 year interest rate
+
+| Deposit amount | Interest rate for 1 year |
+|---|---|
+| Below 50 lakh | 6.80% |
+| 50 lakh to below 1 crore | 6.80% |
+| 1 crore to below 5 crore | 7.10% |
+| 5 crore to below 20 crore | 7.30% |
+| 20 crore to below 50 crore | 7.30% |
+| 50 crore and above | 7.30% |
+
+##### Monthly Interest Paying Fixed Deposit Account: 13 months interest rate
+
+| Deposit amount | Interest rate for 13 months |
+|---|---|
+| Below 50 lakh | 6.80% |
+| 50 lakh to below 1 crore | 6.80% |
+| 1 crore to below 5 crore | 7.00% |
+| 5 crore to below 20 crore | 7.30% |
+| 20 crore to below 50 crore | 7.30% |
+| 50 crore and above | 7.30% |
+
+##### Monthly Interest Paying Fixed Deposit Account: 2 years, 3 years and 5 years interest rate
+
+The rate is the same for any amount.
+
+| Tenor | Interest rate |
+|---|---|
+| 2 years | 7.00% |
+| 3 years | 6.80% |
+| 5 years | 6.30% |
 
 #### Required Document
 Duly filled Term Deposit Opening Form
@@ -17389,7 +17432,7 @@ Interest rates in percent a year. Lac = 100,000 and Crore = 10,000,000 taka.
 
 ### Fixed deposit interest rates (effective 18 October 2026)
 
-Fixed deposit rates by tenure and deposit amount, for individuals and for non-individuals (companies and other entities).
+Fixed deposit rates by tenure and deposit amount, for individuals and for non-individuals (companies and other entities). These are the rates of the regular Fixed Deposit. The Monthly Interest Paying Fixed Deposit Account has its own rates, on its product page.
 
 #### Other tenures
 

@@ -37,6 +37,7 @@ class Need:
     kinds: tuple[str, ...] = ()         # product kinds that could answer (from the cards' own kinds)
     names: tuple[str, ...] = ()         # when set, only these products (an application screen's own products)
     explain: bool = False               # they ask why, or on what basis, about a recommendation just given
+    knowledge: bool = False             # a fact or a calculation about a product they name: a knowledge question
 
 
 @dataclass
@@ -123,13 +124,18 @@ def read_need_prompt(message: str, recent: list[str], kinds: list[str], just_rec
         "about a deposit lists every kind that is a deposit); otherwise [].\n"
         '- "explain": true when they ask why a product was suggested, on what it was based, or why not another one '
         "(a question about the reasons of a recommendation just given), otherwise false.\n"
-        'Respond only with JSON: {"spending": false, "product": false, "explain": false, "focus": "", "goal": "", '
-        '"kinds": []}'
+        '- "knowledge": true when they ask for a fact or a calculation about a product they name (its rate, fee, '
+        "minimum, maturity value, how it works) and do not ask which product suits them or is best for them, "
+        "otherwise false.\n"
+        'Respond only with JSON: {"spending": false, "product": false, "explain": false, "knowledge": false, '
+        '"focus": "", "goal": "", "kinds": []}'
     )
 
 
 def parse_need(raw: dict | None, kinds: list[str]) -> Need:
     """The need, checked. When the answer is unusable, spending guidance is the safe default: it needs no product."""
+    if raw and raw.get("knowledge") is True and raw.get("explain") is not True:
+        return Need(spending=False, product=False, focus=_clean(raw.get("focus"), 120), knowledge=True)
     if raw and raw.get("explain") is True:
         return Need(spending=False, product=True, focus=_clean(raw.get("focus"), 120), explain=True,
                     kinds=tuple(kinds[n - 1] for n in _numbers(raw.get("kinds"), len(kinds))))
