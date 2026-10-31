@@ -3381,9 +3381,10 @@ async def _try_apply_selection(session_turns: list[ChatTurn], message: str):
     names = [n for n in (pending or {}).get("choices") or [] if isinstance(n, str)]
     if action is None or not names:
         return None
-    index = await _llm_pick_name(message, names)
+    # Both questions look only at the reply, so they are asked together; the second is only used when the first picks none.
+    index, wants = await asyncio.gather(_llm_pick_name(message, names), _wants_to_apply(message, names))
     if index is None:
-        return ("ask", action, names) if await _wants_to_apply(message, names) else None
+        return ("ask", action, names) if wants else None
     cards = live_cards_mod.merge(product_cards.all_cards(), await live_cards_mod.current(None))
     card = next((c for c in cards if c.name == names[index]), None)
     return "pick", action, {"name": names[index], "group": card.group if card else None,
