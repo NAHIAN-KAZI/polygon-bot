@@ -360,8 +360,12 @@ def _ask_say(category: str, service: str, subservice: str | None, payload: dict 
         options = [_subservice_name("transfer", svc, sub) or sub
                    for svc in ("bank_transfer", "wallet_transfer")
                    for sub in (_subservice_ids("transfer", svc))]
+    heard_wrong = _rejected_number.get() if "walletNumber" in missing_fields else None
     return _say(
         "ask",
+        number_heard=(" ".join(heard_wrong[i:i + 4] for i in range(0, len(heard_wrong), 4)) if heard_wrong else None),
+        problem=("that is not a valid Bangladeshi mobile number, which has 11 digits and starts with 01; ask them to "
+                 "say it again digit by digit, or to type it" if heard_wrong else None),
         request=(described[0] if described else _service_name(category, service)),
         transfer_type=_subservice_name(category, service, subservice) if subservice else None,
         missing=[_CLARIFICATION_FIELD_DESCRIPTIONS.get(f, f.replace("_", " ")) for f in missing_fields],
@@ -766,6 +770,9 @@ _CARD_PICK_KEYS = (_FREEZE_KEY, _REPORT_LOST_KEY)
 _REASON_CODES = ("LOST", "STOLEN", "DAMAGED", "EXPIRED", "OTHER")
 _EMAIL_RE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 _BD_MOBILE_RE = re.compile(r"01[3-9]\d{8}")
+# A wallet number heard (typed or spoken) that is not a Bangladeshi mobile number, kept for the turn so the question
+# that asks for the number again can say what was heard instead of asking blind.
+_rejected_number: contextvars.ContextVar[str | None] = contextvars.ContextVar("rejected_number", default=None)
 
 
 def _bd_mobile(value: object) -> str | None:
@@ -893,6 +900,8 @@ def _clean_extracted_fields(result):
             if key == "walletNumber":
                 value = _bd_mobile(text)
                 if not value:
+                    if len(re.sub(r"\D", "", ascii_digits(text))) >= 8:
+                        _rejected_number.set(re.sub(r"\D", "", ascii_digits(text)))
                     continue
         payload[key] = value
     if payload == result.payload:
@@ -3388,11 +3397,29 @@ def _history(turns: list[ChatTurn] | None) -> list[tuple[str, str]]:
     return out
 
 
+_SUBMITTED_SECURELY = "(the customer submitted the secure verification form)"
+
+
 def _safe_for_model(message: str, payload: dict | None) -> str:
-    """The customer's text as the composer may see it: never a typed code/password."""
-    if _has_secret_fields(payload) or _looks_like_typed_secret(message):
-        return "(the customer submitted the secure verification form)"
-    return message
+    """The customer's text as the composer may see it: never a typed code/password. A bare code, or one token holding
+    digits, is replaced whole. A sentence that has digits in it (a spoken phone number, an amount of four digits) keeps
+    its words, so the reply can still be written in the customer's language, and only the digit-bearing words are hidden:
+    a number of eight digits or more shows its last four, anything shorter shows nothing."""
+    if _has_secret_fields(payload):
+        return _SUBMITTED_SECURELY
+    if not _looks_like_typed_secret(message):
+        return message
+    words = message.split()
+    if len(words) < 2 or not re.search(r"[^\W\d_]", message):
+        return _SUBMITTED_SECURELY
+    kept = []
+    for word in words:
+        core = re.sub(r"[^\w]", "", word)
+        if core and re.search(r"\d", core) and len(core) >= 4:
+            kept.append("•" * (len(core) - 4) + core[-4:] if core.isdigit() and len(core) >= 8 else "••••")
+        else:
+            kept.append(word)
+    return " ".join(kept)
 
 
 async def _emit_outcome(
