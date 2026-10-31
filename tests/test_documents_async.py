@@ -157,3 +157,37 @@ def test_a_document_deleted_after_its_chunks_were_stored_has_them_removed_and_re
     asyncio.run(go())
     assert stored["upserts"] == ["new"] and stored["deleted"] == ["new"]   # its chunks were taken out again
     assert {d["doc_id"] for d in catalog.list_documents()} == {"old"}
+
+
+def test_a_replacement_uploaded_with_keep_product_cards_keeps_the_old_cards_and_builds_none(stored, monkeypatch, tmp_path):
+    from app.config import settings
+    from app.knowledge import product_cards
+    monkeypatch.setattr(settings, "PRODUCT_CARDS_PATH", str(tmp_path / "cards.json"))
+    built = []
+    monkeypatch.setattr(documents_module, "_schedule_product_cards", lambda *a: built.append(a))
+    product_cards.save("old", "kb.md", [product_cards.ProductCard("Visa Infinite", "Cards", "credit card")])
+    catalog.add_document("old", "kb.md", 3)
+    chunks = chunk_document("kb.md", MD)
+    catalog.add_document("new", "kb.md", len(chunks), status="indexing")
+
+    async def go():
+        documents_module._index_in_background("new", "kb.md", chunks, keep_cards=True)
+        await asyncio.gather(*documents_module._background)
+
+    asyncio.run(go())
+    assert built == []                                                     # nothing was built again
+    assert [c.name for c in product_cards.all_cards()] == ["Visa Infinite"]
+    assert set(product_cards._load()) == {"new"}                            # the old copy's cards now belong to the new one
+    assert stored["deleted"] == ["old"]
+
+
+def test_without_the_option_a_replacement_still_builds_its_cards_and_drops_the_old_ones(stored, monkeypatch, tmp_path):
+    from app.config import settings
+    from app.knowledge import product_cards
+    monkeypatch.setattr(settings, "PRODUCT_CARDS_PATH", str(tmp_path / "cards.json"))
+    built = []
+    monkeypatch.setattr(documents_module, "_schedule_product_cards", lambda *a: built.append(a))
+    product_cards.save("old", "kb.md", [product_cards.ProductCard("Visa Infinite", "Cards", "credit card")])
+    catalog.add_document("old", "kb.md", 3)
+    run_background("new")
+    assert len(built) == 1 and product_cards._load() == {}

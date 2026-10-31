@@ -81,7 +81,8 @@ async def _index(doc_id: str, filename: str, chunks: list, progress=None, wanted
     return embedded_chunks
 
 
-def _publish(doc_id: str, filename: str, embedded_chunks: list[dict], already_listed: bool = False) -> None:
+def _publish(doc_id: str, filename: str, embedded_chunks: list[dict], already_listed: bool = False,
+             keep_cards: bool = False) -> None:
     """Make a stored document the current one. A re-upload of the same file replaces the old copy (only now that
     the new one is stored, so a failed upload never leaves the knowledge base without it); otherwise every chunk
     would be answered twice. A copy still being indexed is never replaced. A document deleted while it was
@@ -99,17 +100,19 @@ def _publish(doc_id: str, filename: str, embedded_chunks: list[dict], already_li
     else:
         add_document(doc_id, filename, len(embedded_chunks))
     catalogue.invalidate()
-    _schedule_product_cards(doc_id, filename, embedded_chunks)
+    if not keep_cards:
+        _schedule_product_cards(doc_id, filename, embedded_chunks)
     for old_id in replaced:
         remove_document(old_id)
-        product_cards.remove(old_id)
+        if not (keep_cards and product_cards.carry_over(old_id, doc_id, filename)):
+            product_cards.remove(old_id)
         try:
             delete_by_doc_id(old_id)
         except Exception:
             logger.warning("replaced document %s: its old chunks could not be deleted from the vector store", old_id)
 
 
-def _index_in_background(doc_id: str, filename: str, chunks: list) -> None:
+def _index_in_background(doc_id: str, filename: str, chunks: list, keep_cards: bool = False) -> None:
     """Index a registered ("indexing") document after the upload has answered; the outcome is its status."""
     async def run():
         try:
@@ -117,7 +120,7 @@ def _index_in_background(doc_id: str, filename: str, chunks: list) -> None:
                 update_document(doc_id, progress={"done": done, "total": total})
 
             embedded = await _index(doc_id, filename, chunks, progress, wanted=lambda: _listed(doc_id))
-            _publish(doc_id, filename, embedded, already_listed=True)
+            _publish(doc_id, filename, embedded, already_listed=True, keep_cards=keep_cards)
         except _Cancelled:
             logger.info("indexing %s stopped: the document was deleted", filename)
         except HTTPException as e:
@@ -133,10 +136,13 @@ def _index_in_background(doc_id: str, filename: str, chunks: list) -> None:
 
 
 @router.post("")
-async def upload_document(file: UploadFile, background: bool = Query(False, alias="async")):
+async def upload_document(file: UploadFile, background: bool = Query(False, alias="async"),
+                          keep_cards: bool = Query(False, alias="keep_product_cards")):
     """Store and index a document. Small ones answer 200 once indexed. `?async=true`, or a document with more than
     ASYNC_UPLOAD_CHUNKS chunks, answers 202 at once and indexes in the background: embedding a large file takes
-    longer than a gateway waits. Poll `GET /documents` for the document's `status` (indexing, ready or failed)."""
+    longer than a gateway waits. Poll `GET /documents` for the document's `status` (indexing, ready or failed).
+    `?keep_product_cards=true` replaces a same-named document without building its product cards again: the cards of
+    the copy it replaces stay, now belonging to the new copy (use it when only the text around the products changed)."""
     filename = file.filename or "untitled"
     if not filename.lower().endswith(ALLOWED_EXTENSIONS):
         raise HTTPException(status_code=400, detail=f"Unsupported file type. Allowed: {ALLOWED_EXTENSIONS}")
@@ -159,11 +165,11 @@ async def upload_document(file: UploadFile, background: bool = Query(False, alia
     if background or len(chunks) > settings.ASYNC_UPLOAD_CHUNKS:
         add_document(doc_id, filename, len(chunks), status="indexing")
         update_document(doc_id, progress={"done": 0, "total": len(chunks)})
-        _index_in_background(doc_id, filename, chunks)
+        _index_in_background(doc_id, filename, chunks, keep_cards)
         return JSONResponse(status_code=202, content={"doc_id": doc_id, "filename": filename,
                                                       "chunk_count": len(chunks), "status": "indexing"})
 
-    _publish(doc_id, filename, await _index(doc_id, filename, chunks))
+    _publish(doc_id, filename, await _index(doc_id, filename, chunks), keep_cards=keep_cards)
     return {"doc_id": doc_id, "filename": filename, "chunk_count": len(chunks)}
 
 

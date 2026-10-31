@@ -802,7 +802,17 @@ Any Bangladeshi individual with active conventional Current or Savings Account w
 
 #### Interest Earnings
 Please click here to find the interest rate
-For Premature Encashment details, see here
+#### Premature Encashment
+For accounts opened after July 2018:
+- For less than 36 months, the account holder gets the self-deposited amount and no interest is allowed.
+- For more than 36 months, the customer gets the DPS rate for the completed tenor. For any broken month or days, the customer gets the savings rate.
+
+For accounts opened before July 2018:
+- For less than 1 year, the account holder only gets the self-deposited amount.
+- For more than 1 year but less than 3 years, the account holder receives the self-deposited amount along with interest at the prevailing General Savings Account interest rate.
+- For more than 3 years but less than 5 years, the account holder receives the matured value of 3 years along with the self-deposited amount, plus interest at the prevailing General Savings Account interest rate for the fraction period.
+- For more than 5 years but less than 7 years, the account holder receives the matured value of 5 years along with the self-deposited amount, plus interest at the prevailing General Savings Account interest rate for the fraction period.
+- For more than 7 years but less than 10 years, the account holder receives the matured value of 7 years along with the self-deposited amount, plus interest at the prevailing General Savings Account interest rate for the fraction period.
 
 #### Maturity Value Calculator
 Please see the details here
@@ -921,11 +931,28 @@ Medical examination report (if applicable)
 *Only people with insurable interest (Parents, Spouse and Children) can be selected as nominee for insurance backed DPS
 
 #### Interest Earnings
-Please click here to find the interest rate
-For Premature Encashment details, see here
+Interest rate: 8.00% a year for individuals (effective 6 September 2026), for each tenor of 5, 10, 15 and 20 years.
+
+#### Premature Encashment
+- If the account is encashed before 1 year, the account holder receives the self-deposited amount only.
+- If the account is encashed after 1 year but before maturity, the account holder gets interest at the prevailing savings account interest rate on the deposited amount, after deduction of the insurance premium paid by the bank on behalf of the customer.
 
 #### Maturity Value Calculator
-Please see the details here
+Maturity value at 8.00% interest (effective 6 September 2026), by monthly instalment and tenor:
+
+| Monthly instalment (taka) | 5 years (60 instalments) | 10 years (120) | 15 years (180) | 20 years (240) |
+|---|---|---|---|---|
+| 500 | 36,931 | 91,809 | 173,354 | 294,525 |
+| 1,000 | 73,862 | 183,617 | 346,707 | 589,050 |
+| 2,000 | 147,724 | 367,234 | 693,414 | 1,178,100 |
+| 3,000 | 221,586 | 550,851 | 1,040,120 | 1,767,150 |
+| 4,000 | 295,448 | 734,467 | 1,386,827 | 2,356,199 |
+| 5,000 | 369,310 | 918,084 | 1,733,534 | 2,945,249 |
+| 6,000 | 443,172 | 1,101,701 | 2,080,240 | 3,534,299 |
+| 7,000 | 517,034 | 1,285,317 | 2,426,947 | 4,123,348 |
+| 8,000 | 590,895 | 1,468,934 | 2,773,654 | 4,712,398 |
+| 9,000 | 664,757 | 1,652,551 | 3,120,360 | 5,301,448 |
+| 10,000 | 738,619 | 1,836,168 | 3,467,067 | 5,890,497 |
 
 *Tax & Excise duty will be applicable
 
@@ -1461,8 +1488,18 @@ Easily opened and closed from Digital Banking …
 Any Bangladeshi individual and non-individual entity with active conventional Current or Savings Account with Polygon Bank.
 
 #### Interest Earnings
-Monthly interest payment
-Please click here to find the interest rate
+Monthly interest payment. Interest rates in percent a year (effective 18 October 2026). The same rates apply to individuals and non-individuals.
+
+| Deposit amount | 6 months | 7 months | 1 year | 13 months |
+|---|---|---|---|---|
+| Below 50 lakh | 6.90% | 6.90% | 6.80% | 6.80% |
+| 50 lakh to below 1 crore | 6.90% | 6.90% | 6.80% | 6.80% |
+| 1 crore to below 5 crore | 7.20% | 7.20% | 7.10% | 7.00% |
+| 5 crore to below 20 crore | 7.40% | 7.40% | 7.30% | 7.30% |
+| 20 crore to below 50 crore | 7.40% | 7.40% | 7.30% | 7.30% |
+| 50 crore and above | 7.40% | 7.40% | 7.30% | 7.30% |
+
+For longer tenors the rate is the same for any amount: 2 years 7.00%, 3 years 6.80% and 5 years 6.30%.
 
 #### Required Document
 Duly filled Term Deposit Opening Form
@@ -17054,3 +17091,638 @@ Improvement  Member  [Polygon Bank email]
 ```
 
 Source: https://www.citybankplc.com/uploads/files/footer-data/Customer-Notification-on-Customer-Service-Complaints-Management-Cells_02.07.26_56432423232.pdf
+
+### Savings account interest rates (effective 18 October 2026)
+
+Interest rates in percent a year. Lac = 100,000 and Crore = 10,000,000 taka.
+
+#### Accounts with one rate for any balance
+
+| Account | Interest rate |
+|---|---|
+| Basic Savings Account | 2.25% |
+| RMG Workers' Account | 2.25% |
+| Under Privileged Children's A/C | 2.25% |
+| New Born's Deposit A/C | 1.75% |
+
+#### General Savings Account
+
+| Balance | Interest rate |
+|---|---|
+| Below 50 thousand | 0.00% |
+| 50 Thousand - Below 1 Lac | 0.00% |
+| 1 Lac - Below 3 Lac | 0.25% |
+| 3 Lac - Below 5 Lac | 0.25% |
+| 5 Lac - Below 30 Lac | 0.25% |
+| 30 Lac & Above | 0.25% |
+
+#### Alo General Savings Account
+
+| Balance | Interest rate |
+|---|---|
+| Below 50 thousand | 0.00% |
+| 50 Thousand - Below 1 Lac | 0.00% |
+| 1 Lac - Below 3 Lac | 0.25% |
+| 3 Lac - Below 5 Lac | 0.25% |
+| 5 Lac - Below 30 Lac | 0.25% |
+| 30 Lac & Above | 0.25% |
+
+#### High Value Savings Account
+
+| Balance | Interest rate |
+|---|---|
+| Below 1 Lac | 0.00% |
+| 1 Lac to Below 5 Lac | 0.50% |
+| 5 Lac to Below 10 Lac | 0.50% |
+| 10 Lac to Below 20 Lac | 0.50% |
+| 20 Lac to Below 30 Lac | 0.50% |
+| 30 Lac to Below 1 Crore | 0.50% |
+| 1 Crore & Above | 0.50% |
+
+#### Alo High Value Savings Account
+
+| Balance | Interest rate |
+|---|---|
+| Below 1 Lac | 0.00% |
+| 1 Lac to Below 5 Lac | 0.50% |
+| 5 Lac to Below 10 Lac | 0.50% |
+| 10 Lac to Below 20 Lac | 0.50% |
+| 20 Lac to Below 30 Lac | 0.50% |
+| 30 Lac to Below 1 Crore | 0.50% |
+| 1 Crore & Above | 0.50% |
+
+#### Freelancer Savings Account
+
+| Balance | Interest rate |
+|---|---|
+| Below 10 thousand | 0.00% |
+| 10 thousand - 50 thousand | 0.50% |
+| 50 thousand - 5 Lac | 0.75% |
+| 5 Lac & Above | 1.00% |
+
+#### Student Savings Account
+
+| Balance | Interest rate |
+|---|---|
+| School Plan | 2.25% |
+| College Plan | 1.75% |
+
+#### Seniors’ Savings Account
+
+| Balance | Interest rate |
+|---|---|
+| Below 25 thousand | 0.00% |
+| 25 Thousand - Below 1 Lac | 0.50% |
+| 1 Lac - Below 5 Lac | 0.75% |
+| 5 Lac - Below 25 Lac | 1.00% |
+| 25 Lac and above | 1.50% |
+
+#### Savings Delight Account
+
+| Balance | Interest rate |
+|---|---|
+| Below 1 Lac | 0.00% |
+| 1 Lac - below 5 Lac | 0.00% |
+| 5 Lac - below 10 Lac | 0.50% |
+| 10 Lac - below 20 Lac | 0.75% |
+| 20 Lac - below 30 Lac | 1.00% |
+| 30 Lac - Below 1 Crore | 2.00% |
+| 1 Crore and above | 2.25% |
+
+#### Alo Savings Delight Account
+
+| Balance | Interest rate |
+|---|---|
+| Below 1 Lac | 0.00% |
+| 1 Lac - below 5 Lac | 0.00% |
+| 5 Lac - below 10 Lac | 0.50% |
+| 10 Lac - below 20 Lac | 0.75% |
+| 20 Lac - below 30 Lac | 1.00% |
+| 30 Lac - Below 1 Crore | 1.50% |
+| 1 Crore and above | 1.75% |
+
+#### Green Savings Account
+
+| Balance | Interest rate |
+|---|---|
+| Below 1 Lac | 0.00% |
+| 1 Lac - Below 5 Lac | 0.50% |
+| 5 Lac - Below 10 Lac | 0.50% |
+| 10 Lac - Below 20 Lac | 0.75% |
+| 20 Lac - Below 30 Lac | 1.00% |
+| 30 Lac - Below 1 Crore | 1.25% |
+| 1 Crore and above | 1.75% |
+
+#### Mariners’ Savings Account
+
+| Balance | Interest rate |
+|---|---|
+| Below 10 thousand | 0.00% |
+| 10 thousand - 50 thousand | 0.50% |
+| 50 thousand - 5 lac | 0.75% |
+| 5 lac & above | 1.00% |
+
+#### Optima Savings Account
+
+| Balance | Interest rate |
+|---|---|
+| Below 1 Lac | 0.00% |
+| 1 Lac - Below 5 Lac | 0.00% |
+| 5 Lac - Below 10 Lac | 0.50% |
+| 10 Lac - Below 20 Lac | 0.75% |
+| 20 Lac - Below 30 Lac | 1.00% |
+| 30 Lac - Below 1 Crore | 2.00% |
+| 1 Crore and above | 2.25% |
+
+### Current account interest rates (effective 18 October 2026)
+
+Interest rates in percent a year. Lac = 100,000 and Crore = 10,000,000 taka.
+
+#### Accounts with one rate for any balance
+
+| Account | Interest rate |
+|---|---|
+| Polygon Sky Business Account | 6.25% |
+| Easy Current Account | 1.00% |
+| Easy Plus Current Account | 1.50% |
+| Polygon Corporate Collection Account (CCCA) | 2.00% |
+| Polygon Cash Business Account | 5.00% |
+| Polygon Standard Corporate Account (CSCA) | 6.00% |
+| Polygon Capital Market Account (CCMA) | 3.00% |
+| Polygon Business Banking Account (CBBA) | 4.50% |
+| Polygon Elite Transactional Account (CETA) | 3.00% |
+| Polygon Escrow (PPP) Account (CEA) | 4.25% |
+| Polygon Premium Business Account (CPBA) | 5.50% |
+| Polygon Platinum Transactional Account (CPLTA) | 5.00% |
+| Polygon Pinnacle Account (CPA) | 7.00% |
+| High Yield Business Account (HYBA) | 7.00% |
+| Polygon Aspire Transactional Account (CATA) | 7.50% |
+| Polygon Vertex Business Account (CVBA) | 7.50% |
+| Polygon Smart Business Account (CSBAC) | 7.50% |
+| Polygon Zenith Transaction Account (CZTA) | 7.75% |
+| Polygon Maxima Business Account (CMXBA) | 6.50% |
+
+#### Polygon Premium Transactional Account
+
+| Balance | Interest rate |
+|---|---|
+| Below Tk. 50.00 Lac | 0.00% |
+| Tk. 50.00 Lac to Below Tk. 1.00 Crore | 2.25% |
+| Tk. 1.00 Crore to Below Tk. 100.00 Crore | 3.00% |
+| Tk. 100.00 Crore & Above | 3.00% |
+
+#### Polygon Corporate Transactional Account (CCTA)
+
+| Balance | Interest rate |
+|---|---|
+| BDT below 20 Crore | 2.50% |
+| BDT 20 Crore to below 50 crore | 4.50% |
+| BDT 50 Crore to below 100 crore | 5.00% |
+| BDT 100 crore and above | 6.00% |
+
+#### Polygon Alo Business Account
+
+| Balance | Interest rate |
+|---|---|
+| Below 1 Lac | 1.00% |
+| 1 Lac and above | 1.50% |
+
+#### Polygon Trust Cum Settlement Account (CTCSA)
+
+| Balance | Interest rate |
+|---|---|
+| Below Tk. 1.00 Crore | 0.00% |
+| Tk. 1.00 Crore to Below Tk. 10.00 Crore | 2.50% |
+| Tk. 10.00 Crore to Below Tk. 25.00 Crore | 2.50% |
+| Tk. 25.00 Crore to Below Tk. 50.00 Crore | 3.00% |
+| Tk. 50.00 Crore to Below Tk. 100.00 Crore | 3.00% |
+| Tk. 100.00 Crore & Above | 3.00% |
+
+#### Polygon Select Transactional Account (CSTA)
+
+| Balance | Interest rate |
+|---|---|
+| Below Tk. 1.00 Crore | 0.00% |
+| Tk. 1.00 Crore to Below Tk. 10.00 Crore | 2.50% |
+| Tk. 10.00 Crore to Below Tk. 25.00 Crore | 2.50% |
+| Tk. 25.00 Crore to Below Tk. 50.00 Crore | 3.00% |
+| Tk. 50.00 Crore to Below Tk. 100.00 Crore | 3.00% |
+| Tk. 100.00 Crore & Above | 3.50% |
+
+#### Polygon Basic Current Account (CBCA)
+
+| Balance | Interest rate |
+|---|---|
+| Below Tk. 50 Thousand | 0.00% |
+| Tk. 50 Thousand to below Tk. 5 Lac | 1.00% |
+| Tk. 5 Lac to below Tk. 25 Lac | 1.50% |
+| Tk. 25 Lac and above | 2.00% |
+
+#### Polygon Millennium Business Account (CMBA)
+
+| Balance | Interest rate |
+|---|---|
+| TK Below 50 crore | 6.25% |
+| TK 50 crore and above | 6.50% |
+
+#### Polygon Titanium Corporate Account (CTCA)
+
+| Balance | Interest rate |
+|---|---|
+| TK Below 50 crore | 8.00% |
+| TK 50 crore and Below 100 Cr. | 8.00% |
+| TK 100 crore and Below 200 Cr. | 8.00% |
+| TK  200 crore and Below 300 Cr. | 8.00% |
+| TK  300 crore & above | 8.00% |
+
+#### SND
+
+| Balance | Interest rate |
+|---|---|
+| Below Tk. 1.00 crore | 1.00% |
+| Tk. 1.00 crore to Below Tk. 25.00 crore | 2.00% |
+| Tk. 25.00 crore to Below Tk. 50.00 crore | 2.00% |
+| Tk. 50.00 crore to Below Tk. 100.00 Crore | 2.00% |
+| Tk. 100.00 crore & Above | 2.00% |
+
+#### Business Solution Account
+
+| Balance | Interest rate |
+|---|---|
+| Below Tk. 1 Lac | 0.00% |
+| Tk. 1 Lac to below Tk. 10 Lac | 1.00% |
+| Tk. 10 Lac to below Tk. 1 Crore | 1.50% |
+| Tk. 1 Crore to below Tk. 5 Crore | 2.00% |
+| Tk. 5 Crore to below Tk. 10 Crore | 5.00% |
+| Tk. 10 Crore & Above | 7.00% |
+
+#### High Value Transactional Account
+
+| Balance | Interest rate |
+|---|---|
+| Tk. 1.00 Crore to Tk. 10.00 Crore | 2.50% |
+| Above Tk. 10.00 Crore to Tk. 50.00 Crore | 3.00% |
+| Above Tk. 50.00 Crore | 3.00% |
+
+#### High Yield Plus Business Account (HYPBA)
+
+| Balance | Interest rate |
+|---|---|
+| Below Tk. 50.00 crore | 7.50% |
+| Tk. 50.00 crore & Above | 7.50% |
+
+#### Polygon Infinite Business Account (CIBA)
+
+| Balance | Interest rate |
+|---|---|
+| Below Tk. 20.00 crore | 6.25% |
+| Tk. 20.00 crore to Below Tk. 50.00 crore | 7.50% |
+| Tk. 50.00 crore to Below Tk. 100.00 crore | 7.50% |
+| Tk. 100.00 crore & Above | 7.50% |
+
+#### Polygon Horizon Business Account (CHBA)
+
+| Balance | Interest rate |
+|---|---|
+| Below Tk. 50.00 crore | 6.50% |
+| Tk. 50.00 crore & above | 7.50% |
+
+### Fixed deposit interest rates (effective 18 October 2026)
+
+Fixed deposit rates by tenure and deposit amount, for individuals and for non-individuals (companies and other entities).
+
+#### Other tenures
+
+| Tenure | Individuals | Non-individuals |
+|---|---|---|
+| 1 (one) month | 1.50% | 1.50% |
+| Government & Autonomous Entity - 6 (Six) months | - | 7.50% |
+| 335 Days | - | 3.50% |
+| Government & Autonomous Entity - 1 (One) Year | - | 7.50% |
+
+#### 90 Days
+
+| Deposit amount | Individuals | Non-individuals |
+|---|---|---|
+| Below 50 Lac | 7.00% | 7.00% |
+| 50 Lac to below 1 crore | 7.00% | 7.00% |
+| 1 crore to below 5 crore | 7.25% | 7.25% |
+| 5 crore to below 20 crore | 7.50% | 7.75% |
+| 20 crore to below  50 crore | 7.50% | 8.00% |
+| 50 crore and above | 7.50% | 8.00% |
+
+#### 91 Days
+
+| Deposit amount | Individuals | Non-individuals |
+|---|---|---|
+| Below 1 crore | 7.00% | 7.00% |
+| 1 crore to below 5 crore | 7.25% | 7.25% |
+| 5 crore to below 20 crore | 7.50% | 7.75% |
+| 20 crore to below  50 crore | 7.50% | 8.00% |
+| 50 crore and above | 7.50% | 8.00% |
+
+#### 92 Days
+
+| Deposit amount | Individuals | Non-individuals |
+|---|---|---|
+| Below 50 Lac | 7.00% | 7.00% |
+| 50 Lac to below 1 crore | 7.00% | 7.00% |
+| 1 crore to below 5 crore | 7.25% | 7.25% |
+| 5 crore to below 20 crore | 7.50% | 7.75% |
+| 20 crore to below  50 crore | 7.50% | 8.00% |
+| 50 crore and above | 7.50% | 8.00% |
+
+#### 93 Days
+
+| Deposit amount | Individuals | Non-individuals |
+|---|---|---|
+| Below 50 Lac | 7.00% | 7.00% |
+| 50 Lac to below 1 crore | 7.00% | 7.00% |
+| 1 crore to below 5 crore | 7.25% | 7.25% |
+| 5 crore to below 20 crore | 7.50% | 7.75% |
+| 20 crore to below  50 crore | 7.50% | 8.00% |
+| 50 crore to below  100 crore | 7.50% | 8.00% |
+| 100 crore & above | 7.50% | 8.00% |
+
+#### 94 Days
+
+| Deposit amount | Individuals | Non-individuals |
+|---|---|---|
+| Below 50 Lac | 7.00% | 7.00% |
+| 50 Lac to below 1 crore | 7.00% | 7.00% |
+| 1 crore to below 5 crore | 7.25% | 7.25% |
+| 5 crore to below 20 crore | 7.50% | 7.75% |
+| 20 crore to below  50 crore | 7.50% | 8.00% |
+| 50 crore and above | 7.50% | 8.00% |
+
+#### 95 Days
+
+| Deposit amount | Individuals | Non-individuals |
+|---|---|---|
+| Below 1 crore | 6.50% | 6.50% |
+| 1 crore to below 5 crore | 6.50% | 6.50% |
+| 5 crore to below 20 crore | 6.50% | 7.75% |
+| 20 crore to below  50 crore | 6.50% | 8.00% |
+| 50 crore and above | 6.50% | 8.00% |
+
+#### 96 Days
+
+| Deposit amount | Individuals | Non-individuals |
+|---|---|---|
+| Below 1 crore | 6.50% | 6.50% |
+| 1 crore to below 5 crore | 6.50% | 6.50% |
+| 5 crore to below 20 crore | 6.50% | 6.50% |
+| 20 crore to below  50 crore | 6.50% | 6.50% |
+| 50 crore and above | 6.50% | 6.50% |
+
+#### 3 (Three) months
+
+| Deposit amount | Individuals | Non-individuals |
+|---|---|---|
+| Below 1 crore | 6.15% | 2.50% |
+| 1 crore to below 5 crore | 6.35% | 2.50% |
+| 5 crore to below 20 crore | 6.35% | 2.50% |
+| 20 crore to below 300 crore | 6.35% | 2.50% |
+| 300 crore and above | 6.35% | 8.00% |
+
+#### 180 Days
+
+| Deposit amount | Individuals | Non-individuals |
+|---|---|---|
+| Below 1 crore | 6.15% | 7.00% |
+| 1 crore to below 5 crore | 6.35% | 7.25% |
+| 5 crore to below 20 crore | 7.50% | 7.50% |
+| 20 crore to below  50 crore | 7.50% | 7.50% |
+| 50 crore and above | 7.50% | 7.50% |
+
+#### 181 Days
+
+| Deposit amount | Individuals | Non-individuals |
+|---|---|---|
+| Below 50 Lac | 7.00% | 7.00% |
+| 50 Lac to below 1 crore | 7.00% | 7.00% |
+| 1 crore to below 5 crore | 7.25% | 7.25% |
+| 5 crore to below 20 crore | 7.50% | 7.50% |
+| 20 crore to below  50 crore | 7.50% | 7.50% |
+| 50 crore and above | 7.50% | 7.50% |
+
+#### 182 Days
+
+| Deposit amount | Individuals | Non-individuals |
+|---|---|---|
+| Below 50 Lac | 7.00% | 7.00% |
+| 50 Lac to below 1 crore | 7.00% | 7.00% |
+| 1 crore to below 5 crore | 7.25% | 7.25% |
+| 5 crore to below 20 crore | 7.50% | 7.50% |
+| 20 crore to below  50 crore | 7.50% | 7.50% |
+| 50 crore and above | 7.50% | 7.50% |
+
+#### 183 Days
+
+| Deposit amount | Individuals | Non-individuals |
+|---|---|---|
+| Below 50 Lac | 7.00% | 7.00% |
+| 50 Lac to below 1 crore | 7.00% | 7.00% |
+| 1 crore to below 5 crore | 7.25% | 7.25% |
+| 5 crore to below 20 crore | 7.50% | 7.50% |
+| 20 crore to below  50 crore | 7.50% | 7.50% |
+| Above 50 crore | 7.50% | 7.50% |
+
+#### 184 Days
+
+| Deposit amount | Individuals | Non-individuals |
+|---|---|---|
+| Below 50 Lac | - | 6.35% |
+| 50 Lac to below 1 crore | - | 6.35% |
+| 1 crore to below 5 crore | - | 6.35% |
+| 5 crore to below 20 crore | - | 6.35% |
+| 20 crore to below  50 crore | - | 6.35% |
+| Above 50 crore | - | 6.35% |
+
+#### 185 Days
+
+| Deposit amount | Individuals | Non-individuals |
+|---|---|---|
+| Below 50 Lac | 7.00% | 6.75% |
+| 50 Lac to below 1 crore | 7.00% | 6.75% |
+| 1 crore to below 5 crore | 7.25% | 6.75% |
+| 5 crore to below 20 crore | 7.50% | 6.75% |
+| 20 crore to below  50 crore | 7.50% | 6.75% |
+| 50 crore and above | 7.50% | 6.75% |
+
+#### 6 (Six) months
+
+| Deposit amount | Individuals | Non-individuals |
+|---|---|---|
+| Below 1 crore | 6.35% | 5.75% |
+| 1 crore to below 5 crore | 6.35% | 5.75% |
+| 5 crore to below 20 crore | 6.35% | 7.50% |
+| 20 crore to below  50 crore | 6.35% | 7.50% |
+| 50 crore and above | 6.35% | 7.50% |
+
+#### 7 (Seven) months
+
+| Deposit amount | Individuals | Non-individuals |
+|---|---|---|
+| Below 50 Lac | 6.75% | - |
+| 50 Lac to below 5 Crore | 7.00% | - |
+| 5 Crore to Below 20 Crore | 7.50% | - |
+| 20 Crore to Below 50 Crore | 7.50% | - |
+| 50 Crore & Above | 7.50% | - |
+
+#### 360 Days
+
+| Deposit amount | Individuals | Non-individuals |
+|---|---|---|
+| Below 1 crore | - | 5.75% |
+| 1 crore to below 5 crore | - | 6.00% |
+| 5 crore to below 20 crore | - | 6.50% |
+| 20 crore to below  50 crore | - | 7.50% |
+| 50 crore to below 100 crore | - | 7.50% |
+| 100 Crore & Above | - | 7.50% |
+
+#### 362 Days
+
+| Deposit amount | Individuals | Non-individuals |
+|---|---|---|
+| Below 1 crore | 6.35% | 7.00% |
+| 1 crore to below 5 crore | 6.35% | 7.25% |
+| 5 crore to below 20 crore | 6.35% | 7.50% |
+| 20 crore to below  50 crore | 6.35% | 7.50% |
+| 50 crore to below 100 crore | 6.35% | 7.50% |
+| 100 Crore & Above | 6.35% | 7.50% |
+
+#### 365 Days
+
+| Deposit amount | Individuals | Non-individuals |
+|---|---|---|
+| Below 50 Lac | 7.00% | 4.00% |
+| 50 Lac to below 1 crore | 7.00% | 4.00% |
+| 1 crore to below 5 crore | 7.25% | 7.25% |
+| 5 crore to below 20 crore | 7.50% | 7.50% |
+| 20 crore to below  50 crore | 7.50% | 7.50% |
+| 50 crore to below 100 crore | 7.50% | 7.50% |
+| 100 Crore & Above | 7.50% | 7.50% |
+
+#### 366 Days
+
+| Deposit amount | Individuals | Non-individuals |
+|---|---|---|
+| Below 50 Lac | 7.00% | 7.00% |
+| 50 Lac to below 1 crore | 7.00% | 7.00% |
+| 1 crore to below 5 crore | 7.25% | 7.25% |
+| 5 crore to below 20 crore | 7.50% | 7.50% |
+| 20 crore to below  50 crore | 7.50% | 7.50% |
+| 50 Crore & Above | 7.50% | 7.50% |
+
+#### 370 Days
+
+| Deposit amount | Individuals | Non-individuals |
+|---|---|---|
+| Below 1 crore | 7.00% | 7.00% |
+| 1 crore to below 5 crore | 7.00% | 7.00% |
+| 5 crore to below 20 crore | 7.00% | 7.00% |
+| 20 crore to below  50 crore | 7.50% | 7.50% |
+| 50 crore to below 100 crore | 7.50% | 7.50% |
+| 100 Crore & Above | 7.50% | 7.50% |
+
+#### 375 Days
+
+| Deposit amount | Individuals | Non-individuals |
+|---|---|---|
+| Below 50 Lac | 7.00% | 7.00% |
+| 50 Lac to below 1 crore | 7.00% | 7.00% |
+| 1 crore to below 5 crore | 7.25% | 7.25% |
+| 5 crore to below 20 crore | 7.50% | 7.50% |
+| 20 crore to below  50 crore | 7.50% | 7.50% |
+| 50 Crore & Above | 7.50% | 7.50% |
+
+#### 380 Days
+
+| Deposit amount | Individuals | Non-individuals |
+|---|---|---|
+| Below 50 Lac | 7.00% | 7.00% |
+| 50 Lac to below 1 crore | 7.00% | 7.00% |
+| 1 crore to below 5 crore | 7.25% | 7.25% |
+| 5 crore to below 20 crore | 7.50% | 7.50% |
+| 20 crore to below  50 crore | 7.50% | 7.50% |
+| 50 Crore & Above | 7.50% | 7.50% |
+
+#### 13 (Thirteen) months
+
+| Deposit amount | Individuals | Non-individuals |
+|---|---|---|
+| Below 50 Lac | 7.00% | - |
+| 50 Lac to below 5 Crore | 7.00% | - |
+| 5 Crore to Below 20 Crore | 7.50% | - |
+| 20 Crore to Below 50 Crore | 7.50% | - |
+| 50 Crore & Above | 7.50% | - |
+
+#### 15 (Fifteen) months
+
+| Deposit amount | Individuals | Non-individuals |
+|---|---|---|
+| Below 50 Lac | 7.00% | 7.00% |
+| 50 Lac to below 1 crore | 7.00% | 7.00% |
+| 1 crore to below 5 crore | 7.25% | 7.25% |
+| 5 crore to below 20 crore | 7.50% | 7.50% |
+| 20 crore to below  50 crore | 7.50% | 7.50% |
+| 50 Crore & Above | 7.50% | 7.50% |
+
+#### 1 (One) Year
+
+| Deposit amount | Individuals | Non-individuals |
+|---|---|---|
+| Below 1 crore | 7.00% | 3.50% |
+| 1 crore to below 5 crore | 7.25% | 3.50% |
+| 5 crore to below 20 crore | 7.50% | 3.50% |
+| 20 crore to below  50 crore | 7.50% | 7.50% |
+| 50 Crore & Above | 7.50% | 7.50% |
+
+#### 02 (Two) Years
+
+| Deposit amount | Individuals | Non-individuals |
+|---|---|---|
+| Below 1 crore | 7.00% | 4.00% |
+| 1 crore to below 5 crore | 7.25% | 4.00% |
+| 5 crore to below 20 crore | 7.50% | 7.50% |
+| 20 crore to below  50 crore | 7.50% | 7.50% |
+| 50 Crore & Above | 7.50% | 7.50% |
+
+#### 03 (Three) Years
+
+| Deposit amount | Individuals | Non-individuals |
+|---|---|---|
+| Below 1 crore | 7.00% | 4.00% |
+| 1 crore to below 5 crore | 7.25% | 4.00% |
+| 5 crore to below 20 crore | 7.50% | 7.50% |
+| 20 crore to below  50 crore | 7.50% | 7.50% |
+| 50 Crore & Above | 7.50% | 7.50% |
+
+### General DPS Account interest rates (effective 18 October 2026)
+
+| Tenure | Interest rate (individuals) |
+|---|---|
+| 3 years | 7.25% |
+| 5 years | 7.25% |
+| 7 years | 7.25% |
+| 10 years | 7.25% |
+
+DPS interest rates by tenure in months, as listed after the General DPS Account:
+
+| Tenure | Interest rate (individuals) |
+|---|---|
+| 6 months to 12 months | 8.00% |
+| 13 months to 24 months | 8.00% |
+| 25 months to 36 months | 8.00% |
+| 37 months to 48 months | 8.50% |
+| 49 months to 60 months | 8.50% |
+| 61 months to 72 months | 8.50% |
+| 73 months to 84 months | 8.50% |
+| 85 months to 96 months | 8.50% |
+| 97 months to 108 months | 8.50% |
+| 109 months to 120 months | 8.50% |
+
+The Double Money FD Account runs for 9 years.
+
+## Premature encashment

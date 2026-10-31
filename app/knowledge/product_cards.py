@@ -239,6 +239,19 @@ def remove(doc_id: str) -> None:
             _save(data)
 
 
+def carry_over(old_id: str, new_id: str, filename: str) -> bool:
+    """Keep a replaced document's cards for the document that replaces it, without building them again. False when the
+    old document had none."""
+    with _lock:
+        data = _load()
+        entry = data.pop(old_id, None)
+        if entry is None:
+            return False
+        data[new_id] = {**entry, "filename": filename}
+        _save(data)
+        return True
+
+
 def all_cards() -> list[ProductCard]:
     with _lock:
         data = _load()
