@@ -49,7 +49,7 @@ def advice(monkeypatch):
     async def verify_jwt(token):
         return CustomerIdentity(customer_id="cust-advice")
 
-    async def read_need(message, recent, cards):
+    async def read_need(message, recent, cards, previous=None):
         state["calls"].append("read_need")
         return state["need"]
 

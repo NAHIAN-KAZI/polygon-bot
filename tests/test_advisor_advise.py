@@ -372,3 +372,27 @@ def test_the_cache_keeps_one_entry_per_customer_and_stays_bounded(monkeypatch):
     run(advise.advise("which?", [], snap(), other, CARDS, customer_key="e"))
     assert len(advise._RANK_CACHE) <= 3                       # a changed situation replaces the entry, it does not add one
     advise.clear_rank_cache()
+
+
+def test_the_products_just_recommended_are_told_to_the_model_that_reads_the_need():
+    plain = advise.read_need_prompt("and which is second best?", ["which card is best?"], KINDS)
+    assert "just recommended" not in plain                                            # a first question reads as before
+    prompt = advise.read_need_prompt("and which is second best?", ["which card is best?"], KINDS,
+                                     ["Gold Credit", "Visa Platinum"])
+    assert "just recommended these products" in prompt and "1. Gold Credit" in prompt and "2. Visa Platinum" in prompt
+    assert '"product" is true' in prompt
+
+
+def test_read_need_takes_the_names_from_the_previous_recommendation(monkeypatch):
+    seen = []
+
+    async def fake_json(prompt, timeout=40.0):
+        seen.append(prompt)
+        return {"product": True, "kinds": [1], "focus": "second best card"}
+
+    monkeypatch.setattr(advise, "_json", fake_json)
+    previous = {"type": "ADVICE_ANSWER", "ranking": [{"name": "Gold Credit"}, {"name": "Visa Platinum"}, {"name": "X"}, {"name": "Y"}]}
+    need = run(advise.read_need("and which is second best?", ["which card is best?"], CARDS, previous))
+    assert need.product and "1. Gold Credit" in seen[0] and "3. X" in seen[0] and "4. Y" not in seen[0]
+    run(advise.read_need("how much do I spend?", [], CARDS, {"type": "KB_ANSWER"}))
+    assert "just recommended" not in seen[1]

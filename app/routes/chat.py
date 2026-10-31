@@ -3046,7 +3046,7 @@ async def _advice_stream(req: ChatRequest, request_id: str, customer_identity, t
     snapshot_task.add_done_callback(lambda t: t.cancelled() or t.exception())      # never "exception was never retrieved"
     try:
         if need is None:
-            need = await advisor_advise.read_need(req.message, _recent_customer_messages(recent_turns), cards)
+            need = await advisor_advise.read_need(req.message, _recent_customer_messages(recent_turns), cards, previous)
     except BaseException:
         snapshot_task.cancel()
         raise
