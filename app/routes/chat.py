@@ -2833,6 +2833,16 @@ def _recent_customer_messages(turns: list[ChatTurn] | None) -> list[str]:
     return [t.message for t in (turns or [])[-2:] if t.message and not t.message.startswith("[redacted")]
 
 
+def _with_pending_apply(classification: dict | None, last: dict | None) -> dict | None:
+    """An answer about the suggested products (what they give, their fees) leaves the offer to apply standing, so "apply
+    for the first one" after it still goes to the right screen."""
+    pending = (last or {}).get("pending_apply")
+    if not pending:
+        return classification
+    base = classification or {"type": "KB_ANSWER", "category": None, "service": None, "subservice": None}
+    return {**base, "pending_apply": pending}
+
+
 def _topic_classification(result_type: str, topics: list[str]) -> dict | None:
     """What a knowledge or advice answer was about, kept on its turn so the next message can refer back to it ("this
     card", "eta", "oita"): the classifier reads it as the subject of a follow-up. None when there was no subject."""
@@ -3091,15 +3101,23 @@ async def _advice_stream(req: ChatRequest, request_id: str, customer_identity, t
         payload["products"] = advice.products   # the back office lists these as leads
     if advice.insight:
         payload["insight"] = advice.insight
-    pending = {"pending_apply": {"action": applying_for.id, "choices": advice.choices}} \
+    pending = {"pending_apply": {"action": applying_for.id, "choices": advice.choices,
+                                 "screens": {c.name: c.apply_via for c in cards if c.name in advice.choices and c.apply_via}}} \
         if applying_for is not None and advice.choices else None
     if pending is None and advice.choices and not (req.disabled_use_cases and any(
             d.startswith(f"{ui_actions.CATEGORY}.") for d in req.disabled_use_cases)):
         # A recommendation ends by offering the application: remember which screen opens the suggested products, when
         # one screen opens them all and its use case is on, so "the first one" or "apply" next goes straight to it.
-        vias = {c.apply_via for c in cards if c.name in advice.choices}
-        if len(vias) == 1 and None not in vias and f"{ui_actions.CATEGORY}.{next(iter(vias))}" not in (req.disabled_use_cases or []):
-            pending = {"pending_apply": {"action": next(iter(vias)), "choices": advice.choices}}
+        # Each suggested product that has an application screen (and whose use case is on) keeps its own screen, so one
+        # product with none, or a mix of screens, no longer drops the offer for the rest.
+        screens = {c.name: c.apply_via for c in cards if c.name in advice.choices and c.apply_via
+                   and f"{ui_actions.CATEGORY}.{c.apply_via}" not in (req.disabled_use_cases or [])}
+        if screens:
+            names = [n for n in advice.choices if n in screens]
+            main = max(set(screens.values()), key=list(screens.values()).count)
+            pending = {"pending_apply": {"action": main, "choices": names, "screens": screens}}
+    if pending is None and not advice.choices and isinstance(previous, dict) and previous.get("pending_apply"):
+        pending = {"pending_apply": previous["pending_apply"]}      # an insight in between leaves the offer standing
     async for chunk in finish(_TurnOutcome(
             "ADVICE_ANSWER", _say("advice", advice.must, **advice.facts), "advisor", advice.used, None,
             result_payload=payload, stored={**(pending or {}), **({"topic": advice.choices[:3]} if advice.choices else {}),
@@ -3379,6 +3397,7 @@ async def _try_apply_selection(session_turns: list[ChatTurn], message: str):
     pending = last.get("pending_apply")        # an unclear reply asked again keeps it, so the next answer still counts
     action = ui_actions.get((pending or {}).get("action") or "")
     names = [n for n in (pending or {}).get("choices") or [] if isinstance(n, str)]
+    screens = (pending or {}).get("screens") or {}
     if action is None or not names:
         return None
     # Both questions look only at the reply, so they are asked together; the second is only used when the first picks none.
@@ -3387,6 +3406,7 @@ async def _try_apply_selection(session_turns: list[ChatTurn], message: str):
         return ("ask", action, names) if wants else None
     cards = live_cards_mod.merge(product_cards.all_cards(), await live_cards_mod.current(None))
     card = next((c for c in cards if c.name == names[index]), None)
+    action = ui_actions.get(screens.get(names[index]) or "") or action       # the product's own application screen
     return "pick", action, {"name": names[index], "group": card.group if card else None,
                             "type": _card_type(card) if card else None}
 
@@ -3988,7 +4008,8 @@ async def _chat_stream(req: ChatRequest, authorization: str | None, heard_readin
             record_turn(
                 customer_identity.customer_id,
                 ChatTurn(timestamp=datetime.now(timezone.utc), message=stored_message,
-                         classification=_topic_classification("KB_ANSWER", kb_topics)),
+                         classification=_with_pending_apply(_topic_classification("KB_ANSWER", kb_topics),
+                                                            last_session_classification)),
             )
         return
 
@@ -4097,7 +4118,8 @@ async def _chat_stream(req: ChatRequest, authorization: str | None, heard_readin
             if customer_identity is not None:
                 record_turn(customer_identity.customer_id,
                             ChatTurn(timestamp=datetime.now(timezone.utc), message=stored_message,
-                                     classification=_topic_classification("KB_ANSWER", kb_topics)))
+                                     classification=_with_pending_apply(_topic_classification("KB_ANSWER", kb_topics),
+                                                                        last_session_classification)))
             return
 
         if customer_identity is None:

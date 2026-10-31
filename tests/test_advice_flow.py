@@ -355,7 +355,7 @@ def test_a_recommendation_remembers_which_screen_opens_what_it_suggested_so_choo
     assert result["payload"]["products"] == [{"name": "Platinum Debit", "group": "Cards", "strength": "apply"}]
 
 
-def test_a_recommendation_of_products_no_one_screen_opens_remembers_nothing(client, apply_flow, advice, monkeypatch):
+def test_a_recommendation_of_products_that_open_different_screens_remembers_each_products_screen(client, apply_flow, advice, monkeypatch):
     async def classify(message, recent_turns=None, app_notes=None):
         return AdviceQuestion()
 
@@ -365,8 +365,9 @@ def test_a_recommendation_of_products_no_one_screen_opens_remembers_nothing(clie
     say(client, "which debit card is best for me")
     apply_flow["picked"] = 0
     asked = len(apply_flow.get("asked", []))
-    say(client, "the first one")
-    assert len(apply_flow.get("asked", [])) == asked          # nothing was offered, so no choice was looked for
+    _, result = say(client, "the first one")
+    assert len(apply_flow.get("asked", [])) == asked + 1                                # a choice was looked for
+    assert result["type"] == "APP_ACTION" and result["payload"]["ui"]["route"] == "/request_virtual_card/form"
 
 
 def test_the_chosen_card_and_its_type_go_to_the_form_as_its_prefill(client, apply_flow, advice):
@@ -474,3 +475,33 @@ def test_the_model_must_quote_the_words_that_name_a_product_picked_from_a_first_
     assert '"quote"' in asked[0] and "written in Bangla letters" in asked[0]
     quote["text"] = "words the customer never wrote"
     assert asyncio.run(chat_module._llm_pick_name(message, names, offered=False)) is None
+
+
+def test_one_suggested_product_without_a_screen_or_a_mix_of_screens_no_longer_drops_the_offer_to_apply(client, apply_flow, advice):
+    apply_flow["cards"] = [ProductCard("Platinum Debit", "Cards", "debit card", apply_via="card_apply"),
+                           ProductCard("Gold Credit", "Cards", "credit card", apply_via="credit_card_apply"),
+                           ProductCard("Corporate Card", "Cards", "corporate card")]            # no screen opens it
+    advice["advice"] = advise_module.Advice(
+        {"suggested products": [{"name": "Gold Credit"}]}, must={},
+        products=[{"name": n, "group": "Cards", "strength": "info"} for n in ("Gold Credit", "Platinum Debit", "Corporate Card")],
+        choices=["Gold Credit", "Platinum Debit", "Corporate Card"], used="recommend")
+    say(client, "I want to apply for a card")                                      # the suggestion turn
+    apply_flow["picked"] = 1                                                        # "the second one": Platinum Debit
+    _, result = say(client, "the second one")
+    assert result["type"] == "APP_ACTION" and result["payload"]["ui"]["route"] == "/request_virtual_card/form"
+    assert result["payload"]["products"][0]["name"] == "Platinum Debit"
+    apply_flow["picked"] = None
+    say(client, "I want to apply for a card")
+    apply_flow["picked"] = 0                                                        # "the first one": Gold Credit
+    _, result = say(client, "the first one")
+    assert result["payload"]["ui"]["route"] == "/apply_for_credit_card"             # that product's own screen
+
+
+def test_an_answer_about_the_suggested_products_leaves_the_offer_to_apply_standing():
+    pending = {"action": "card_apply", "choices": ["A", "B"], "screens": {"A": "card_apply", "B": "card_apply"}}
+    kept = chat_module._with_pending_apply(chat_module._topic_classification("KB_ANSWER", ["A"]), {"pending_apply": pending})
+    assert kept["pending_apply"] == pending and kept["type"] == "KB_ANSWER" and kept["topic"] == ["A"]
+    assert chat_module._with_pending_apply(chat_module._topic_classification("KB_ANSWER", ["A"]), {}) == \
+        chat_module._topic_classification("KB_ANSWER", ["A"])
+    only_offer = chat_module._with_pending_apply(None, {"pending_apply": pending})
+    assert only_offer["pending_apply"] == pending and only_offer["type"] == "KB_ANSWER"
