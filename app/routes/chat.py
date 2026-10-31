@@ -3161,7 +3161,8 @@ async def _llm_pick_name(message: str, names: list[str], offered: bool = True) -
              else "A bank customer wrote a message. These are products they might be asking about:\n")
     how = ("by name, by a position in any language or abbreviation (a digit or a number word with an ordinal ending, "
            "such as the second, 2nd or a Bangla or Banglish form of it), or by pointing at it. When only one product "
-           "was offered, an agreement such as yes, ok or a Bangla or Banglish form of it picks that one"
+           "was offered, an agreement such as yes, ok or a Bangla or Banglish form of it picks that one. A reply that asks "
+           "about the products (such as asking which is second best, or asking about the third) picks none"
            if offered else "by naming it clearly, not merely by asking for the kind of product it is")
     prompt = (
         f"{asked}{listing}\n\nTheir {'reply' if offered else 'message'}: "

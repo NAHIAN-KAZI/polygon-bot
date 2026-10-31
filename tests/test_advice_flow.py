@@ -505,3 +505,17 @@ def test_an_answer_about_the_suggested_products_leaves_the_offer_to_apply_standi
         chat_module._topic_classification("KB_ANSWER", ["A"])
     only_offer = chat_module._with_pending_apply(None, {"pending_apply": pending})
     assert only_offer["pending_apply"] == pending and only_offer["type"] == "KB_ANSWER"
+
+
+def test_a_question_about_the_offered_products_is_not_taken_for_a_pick(monkeypatch):
+    import asyncio
+
+    asked = []
+
+    async def post(path, body, **kw):
+        asked.append(body["prompt"])
+        return {"response": json.dumps({"choice": 0})}
+
+    monkeypatch.setattr(chat_module.llm_backend, "post", post)
+    assert asyncio.run(chat_module._llm_pick_name("and the third?", ["A", "B", "C"])) is None
+    assert "asks about the products" in asked[0] and "second best" in asked[0]
