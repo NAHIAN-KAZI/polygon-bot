@@ -567,7 +567,8 @@ async def advise(message: str, recent: list[str], snap: snap_mod.Snapshot, need:
         for i, p in enumerate(picks, start=1):
             c = p.card
             fit = _FIT[i - 1] if i <= len(_FIT) else f"number {i}"
-            advice.ranking.append({"name": c.name, "fit": fit, "score": p.score, "why": list(p.reasons)})
+            advice.ranking.append({"name": c.name, "fit": fit, "score": p.score, "why": list(p.reasons),
+                                   "keep_in_mind": p.keep_in_mind or None})
             suggested.append({"place": fit, "name": c.name, "kind": c.kind,
                               "why_it_fits": list(p.reasons[:2] if applying else p.reasons),
                               "requirements_against_their_figures": requirement_checks(

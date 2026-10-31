@@ -64,6 +64,7 @@ from app.embeddings import embed_text
 from app.banking import beneficiary_kinds
 from app.knowledge import live_cards as live_cards_mod
 from app.knowledge import live_rates as live_rates_mod
+from app.knowledge import showcase
 from app.llm import build_prompt, stream_generate
 from app.advisor import advise as advisor_advise
 from app.advisor import snapshot as advisor_snapshot
@@ -2918,6 +2919,12 @@ async def _kb_stream(req: ChatRequest, request_id: str, recent: list[str] | None
     product_tags = await interest_task
     if product_tags:
         kb_payload["products"] = product_tags   # the back office lists these as leads
+        if not live_cards:    # the whole card list is drawn from the live list; any other product question shows its products
+            live_now = await live_cards_mod.current(None)
+            stored = {pc.name: pc for pc in product_cards.all_cards()}
+            shown = [showcase.item(stored[t["name"]], live_now) for t in product_tags if t.get("name") in stored][:6]
+            if built := showcase.build(shown):
+                kb_payload["showcase"] = built
     if topics is not None:      # what this answer was about, so a follow-up ("this card", "eta") can be understood
         topics.extend(p["name"] for p in (product_tags or _hit_products(hits)) if p.get("name"))
     yield _result_event("KB_ANSWER", None, None, None, payload=kb_payload)
@@ -3039,11 +3046,13 @@ async def _advice_stream(req: ChatRequest, request_id: str, customer_identity, t
             yield chunk
         return
 
-    cards = live_cards_mod.merge(product_cards.all_cards(), await live_cards_mod.current(token, customer_identity))
+    live = await live_cards_mod.current(token, customer_identity)
+    cards = live_cards_mod.merge(product_cards.all_cards(), live)
     # The customer's figures do not depend on what they asked, so they are fetched while the model reads the question
     # (the fetch is cached per customer, so a repeat costs nothing either way).
     snapshot_task = asyncio.ensure_future(advisor_snapshot.get(customer_identity, token))
     snapshot_task.add_done_callback(lambda t: t.cancelled() or t.exception())      # never "exception was never retrieved"
+    asked_kind = need is None            # a need handed in (an application's products, a kind already chosen) is not asked about again
     try:
         if need is None:
             need = await advisor_advise.read_need(req.message, _recent_customer_messages(recent_turns), cards, previous)
@@ -3062,6 +3071,27 @@ async def _advice_stream(req: ChatRequest, request_id: str, customer_identity, t
                         ChatTurn(timestamp=datetime.now(timezone.utc), message=stored_message,
                                  classification=_with_pending_apply(_topic_classification("KB_ANSWER", kb_topics), previous)))
         return
+    if asked_kind and need.product and applying_for is None and not need.names:
+        # "which card is best for me?" with no word for debit or credit: ask which, and show both rows of cards
+        pool = advisor_advise.candidates(cards, need)
+        by_type: dict[str, list[str]] = {}
+        for pc in pool:
+            if (t := _card_family(pc)) is not None:
+                by_type.setdefault(t, []).append(pc.kind)
+        if len(by_type) > 1:
+            snapshot_task.cancel()
+            asking = _TurnOutcome(
+                "CLARIFICATION_REQUIRED",
+                _say("choose", question_about="which kind of card they mean",
+                     options=[f"{t} cards" for t in by_type]),
+                "advisor", "advice", None,
+                result_payload={"showcase": showcase.build([showcase.item(pc, live) for pc in pool
+                                                            if _card_family(pc) in by_type])},
+                stored={"question": "", "pending_advice": {"focus": need.focus, "goal": need.goal,
+                                                           "kinds": {t: sorted(set(k)) for t, k in by_type.items()}}})
+            async for chunk in finish(asking):
+                yield chunk
+            return
     wanted_product = need.product
     if use_cases.ADVISOR_INSIGHTS in disabled:
         need = dataclasses.replace(need, spending=False)
@@ -3113,6 +3143,12 @@ async def _advice_stream(req: ChatRequest, request_id: str, customer_identity, t
         payload["products"] = advice.products   # the back office lists these as leads
     if advice.insight:
         payload["insight"] = advice.insight
+    if advice.ranking:     # the picks as products to look at, best first, each with the reasons the bot gave
+        by_name = {pc.name: pc for pc in cards}
+        picks = [showcase.item(by_name[r["name"]], live, rank=i, why=r.get("why"), keep_in_mind=r.get("keep_in_mind"))
+                 for i, r in enumerate(advice.ranking, start=1) if r.get("name") in by_name]
+        if built := showcase.build(picks, ranked=True):
+            payload["showcase"] = built
     pending = {"pending_apply": {"action": applying_for.id, "choices": advice.choices,
                                  "screens": {c.name: c.apply_via for c in cards if c.name in advice.choices and c.apply_via}}} \
         if applying_for is not None and advice.choices else None
@@ -3374,10 +3410,32 @@ async def _read_apply_fields(action: "ui_actions.UiAction", said: list[str]) -> 
     return found if isinstance(found, dict) else None
 
 
+def _card_family(card) -> str | None:
+    """debit, credit or prepaid for a card product (the first word of its kind), else None."""
+    first = (getattr(card, "kind", "") or "").split(" ")[0].casefold()
+    return first if first in ("debit", "credit", "prepaid") else None
+
+
 def _card_type(card) -> str | None:
     """The kind of card a product is, as the apply form names its types, or None when it is not one of them."""
     first = (getattr(card, "kind", "") or "").split(" ")[0].casefold()
     return first if first in ("debit", "prepaid", "virtual") else None
+
+
+async def _chosen_card_kind(session_turns: list[ChatTurn], message: str):
+    """The need that follows "debit or credit?": the reply picks one of the kinds the bot offered. None when the last
+    turn asked nothing of the sort or the reply picks none (it then goes through the usual routing)."""
+    last = ((session_turns or [None])[-1].classification or {}) if session_turns else {}
+    pending = last.get("pending_advice")
+    kinds = (pending or {}).get("kinds") if isinstance(pending, dict) else None
+    if not isinstance(kinds, dict) or not kinds:
+        return None
+    types = list(kinds)
+    index = await _llm_pick_name(message, [f"{t} cards" for t in types])
+    if index is None:
+        return None
+    return advisor_advise.Need(spending=False, product=True, focus=str(pending.get("focus") or ""),
+                               goal=str(pending.get("goal") or ""), kinds=tuple(kinds[types[index]]))
 
 
 async def _wants_to_apply(message: str, names: list[str]) -> bool:
@@ -3897,6 +3955,13 @@ async def _chat_stream(req: ChatRequest, authorization: str | None, heard_readin
                         ChatTurn(timestamp=datetime.now(timezone.utc), message=stored_message,
                                  classification=save_outcome.classification()))
             yield _sse("done", {})
+            return
+        card_need = await _chosen_card_kind(session_turns, req.message) if customer_identity is not None else None
+        if card_need is not None:
+            async for chunk in _advice_stream(req, request_id, customer_identity, token, recent_turns, composer_message,
+                                              history, turn_started_at, stored_message, need=card_need,
+                                              previous=last_session_classification):
+                yield chunk
             return
         chosen = await _try_apply_selection(session_turns, req.message) if customer_identity is not None else None
         if chosen is not None and chosen[0] == "ask":

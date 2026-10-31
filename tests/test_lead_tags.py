@@ -142,3 +142,25 @@ def test_card_apply_is_a_lead_that_wants_the_product():
     assert outcome.result_payload["products"] == [{"name": "Card application", "group": "Cards", "strength": "apply"}]
     other = chat_module._ui_action_outcome(ui_actions.get("card_close"), None, "close my card")
     assert "products" not in other.result_payload
+
+
+def test_a_kb_answer_about_a_product_shows_the_product_as_a_tile_with_its_details(client, monkeypatch):
+    from app.knowledge.product_cards import ProductCard
+    loan = ProductCard("Home Loan", "Loans and finance", "home loan", summary="A loan to buy a home.", minimum="BDT 500,000",
+                       benefits=["Long repayment"])
+    monkeypatch.setattr(chat_module.product_cards, "all_cards", lambda: [loan])
+    hits = [{"score": 0.8, "filename": "kb.md", "text": "x", "product": "Home Loan", "group": "Loans and finance"}]
+    tag = {"name": "Home Loan", "group": "Loans and finance", "strength": "info"}
+    _kb(monkeypatch, hits, [tag])
+    built = _result(client, "tell me about the home loan")["payload"]["showcase"]
+    item = built["sections"][0]["items"][0]
+    assert built["sections"][0]["title"] == "Loans and finance" and item["visual"] == "tile" and item["family"] == "loan"
+    assert item["facts"] == [{"label": "Minimum", "value": "BDT 500,000"}]
+    assert item["details"]["summary"] == "A loan to buy a home." and item["details"]["benefits"] == ["Long repayment"]
+
+
+def test_a_tag_for_a_product_the_bot_does_not_hold_shows_nothing(client, monkeypatch):
+    monkeypatch.setattr(chat_module.product_cards, "all_cards", lambda: [])
+    hits = [{"score": 0.8, "filename": "kb.md", "text": "x", "product": "Home Loan", "group": "Loans and finance"}]
+    _kb(monkeypatch, hits, [{"name": "Home Loan", "group": "Loans and finance", "strength": "info"}])
+    assert "showcase" not in _result(client, "tell me about the home loan")["payload"]
