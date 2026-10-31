@@ -22,7 +22,7 @@ Embeddings are not covered here: they always go to Ollama (app/embeddings.py).
 import json
 import time
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import AsyncIterator
 
 import httpx
@@ -38,6 +38,10 @@ class TurnStats:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     llm_seconds: float = 0.0
+    began: float = field(default_factory=time.monotonic)
+    # One entry per model call: when it started (ms into the turn), how long it took, which prompt it was (the first
+    # words of the fixed instruction, never customer text) and its token counts. Shown with the opt-in stats.
+    timeline: list = field(default_factory=list)
 
 
 # Mutable object, so calls made in tasks spawned from the request (which copy the
@@ -51,10 +55,22 @@ def start_turn_stats() -> TurnStats:
     return stats
 
 
-def _record(prompt_tokens: int | None, completion_tokens: int | None, started: float) -> None:
+def _label(path: str, payload: dict) -> str:
+    """Which prompt this is, from its opening words: the instruction text comes first, the customer's words later."""
+    if path == "/api/generate":
+        return str(payload.get("prompt") or "")[:26]
+    messages = payload.get("messages") or []
+    first = next((m for m in messages if m.get("role") == "system"), messages[0] if messages else {})
+    return str(first.get("content") or "")[:26]
+
+
+def _record(prompt_tokens: int | None, completion_tokens: int | None, started: float, label: str = "") -> None:
     stats = _turn_stats.get()
     if stats is None:
         return
+    stats.timeline.append({"start_ms": round((started - stats.began) * 1000),
+                           "ms": round((time.monotonic() - started) * 1000), "prompt": label,
+                           "prompt_tokens": prompt_tokens or 0, "completion_tokens": completion_tokens or 0})
     stats.calls += 1
     stats.prompt_tokens += prompt_tokens or 0
     stats.completion_tokens += completion_tokens or 0
@@ -103,7 +119,7 @@ async def post(path: str, payload: dict, *, timeout: float | None) -> dict:
             resp = await client.post(f"{settings.OLLAMA_BASE_URL}{path}", json=payload)
             resp.raise_for_status()
             data = resp.json()
-        _record(data.get("prompt_eval_count"), data.get("eval_count"), started)
+        _record(data.get("prompt_eval_count"), data.get("eval_count"), started, _label(path, payload))
         return data
     body = _to_openai(path, {**payload, "stream": False})
     async with httpx.AsyncClient(timeout=timeout) as client:
@@ -113,7 +129,7 @@ async def post(path: str, payload: dict, *, timeout: float | None) -> dict:
         resp.raise_for_status()
         data = resp.json()
     usage = data.get("usage") or {}
-    _record(usage.get("prompt_tokens"), usage.get("completion_tokens"), started)
+    _record(usage.get("prompt_tokens"), usage.get("completion_tokens"), started, _label(path, payload))
     message = (data.get("choices") or [{}])[0].get("message") or {}
     content = message.get("content") or ""
     if path == "/api/generate":
@@ -142,7 +158,7 @@ async def stream(path: str, payload: dict, *, timeout: float | None) -> AsyncIte
                     if line:
                         chunk = json.loads(line)
                         if chunk.get("done"):
-                            _record(chunk.get("prompt_eval_count"), chunk.get("eval_count"), started)
+                            _record(chunk.get("prompt_eval_count"), chunk.get("eval_count"), started, _label(path, payload))
                         yield chunk
         return
     body = _to_openai(path, {**payload, "stream": True})
@@ -165,7 +181,7 @@ async def stream(path: str, payload: dict, *, timeout: float | None) -> AsyncIte
                 text = delta.get("content") or ""
                 if text:
                     yield _chunk(path, text, done=False)
-    _record(usage.get("prompt_tokens"), usage.get("completion_tokens"), started)
+    _record(usage.get("prompt_tokens"), usage.get("completion_tokens"), started, _label(path, payload))
     yield _chunk(path, "", done=True)
 
 

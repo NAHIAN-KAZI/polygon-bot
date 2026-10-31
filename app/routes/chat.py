@@ -4780,6 +4780,7 @@ async def _with_stats(events):
             "completion_tokens": stats.completion_tokens,
             "context_tokens": stats.peak_prompt_tokens,
             "context_window": window,
+            "calls": stats.timeline,
             "model": settings.LLM_MODEL if settings.LLM_PROVIDER == "openai" else settings.OLLAMA_MODEL,
         })
 
