@@ -2894,6 +2894,8 @@ async def _kb_stream(req: ChatRequest, request_id: str, recent: list[str] | None
             if filename and filename not in sources:
                 sources.append(filename)
     kb_payload: dict = {"grounded": grounded, "hitCount": len(hits), "sources": sources}
+    if live_cards:
+        kb_payload["cards"] = live_cards_mod.showcase(live_cards)    # the app draws them as rows of card artwork
     product_tags = await _read_product_interest(req.message, _hit_products(hits))
     if product_tags:
         kb_payload["products"] = product_tags   # the back office lists these as leads

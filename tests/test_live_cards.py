@@ -130,3 +130,17 @@ def test_merge_drops_a_card_product_the_app_cannot_request_and_keeps_other_produ
 
 def test_merge_without_a_live_list_changes_nothing():
     assert live_cards.merge(STORED, []) == STORED
+
+
+def test_the_showcase_gives_the_app_what_it_needs_to_draw_each_card_and_skips_types_it_cannot():
+    body = {"data": [
+        {"tierName": "Polygon Visa Gold Debit", "cardCategory": "DEBIT", "scheme": "visa", "capabilities": ["contactless"],
+         "routingProfile": "standard", "active": True},
+        {"tierName": "Polygon World Elite", "cardCategory": "CREDIT", "scheme": "MASTERCARD", "active": True},
+        {"tierName": "Gift", "cardCategory": "GIFT", "scheme": "VISA", "active": True},
+    ]}
+    shown = live_cards.showcase(live_cards.parse(body))
+    assert [c["name"] for c in shown] == ["Polygon Visa Gold Debit", "Polygon World Elite"]
+    assert shown[0] == {"name": "Polygon Visa Gold Debit", "type": "debit", "scheme": "VISA",
+                        "routingProfile": "STANDARD", "capabilities": ["CONTACTLESS"]}
+    assert shown[1]["routingProfile"] is None and shown[1]["capabilities"] == []

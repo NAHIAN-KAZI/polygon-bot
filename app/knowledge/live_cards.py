@@ -45,6 +45,10 @@ def _card(row: dict) -> dict | None:
         "network": str(row.get("scheme") or "").strip().title(),
         "networks": [str(n).title() for n in networks],
         "description": str(row.get("description") or "").strip(),
+        # what the app needs to draw the card's artwork (it paints it from the catalogue's own fields)
+        "scheme_code": str(row.get("scheme") or "").strip().upper(),
+        "routing_profile": str(row.get("routingProfile") or "").strip().upper() or None,
+        "capabilities": [str(c).strip().upper() for c in row.get("capabilities") or [] if str(c).strip()][:12],
     }
 
 
@@ -73,6 +77,17 @@ def prompt_block(cards: list[dict]) -> str:
             text = f": {c['description']}" if c["description"] else ""
             lines.append(f"- {c['name']}{detail}{text}")
     return "\n".join(lines)
+
+
+_SHOWCASE_TYPES = ("debit", "credit", "prepaid")
+
+
+def showcase(cards: list[dict]) -> list[dict]:
+    """The cards as the app draws them (scrollable rows by type): name, type, scheme and what the artwork needs. Types
+    the app has no artwork for are left out of the pictures; the text answer still names every card."""
+    return [{"name": c["name"], "type": c["type"], "scheme": c.get("scheme_code") or c["network"].upper(),
+             "routingProfile": c.get("routing_profile"), "capabilities": c.get("capabilities") or []}
+            for c in cards if c["type"] in _SHOWCASE_TYPES][:40]
 
 
 async def current(jwt: str | None, identity=None) -> list[dict]:
