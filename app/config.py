@@ -91,6 +91,7 @@ class Settings:
     RATES_MARKET_FALLBACK: str = os.environ.get("RATES_MARKET_FALLBACK", "https://{version}.currency-api.pages.dev/v1/currencies/{code}.json")
     RATES_TTL: int = int(os.environ.get("RATES_TTL", "3600"))               # seconds the official table is kept
     RATES_TREND_TTL: int = int(os.environ.get("RATES_TREND_TTL", "21600"))  # seconds a trend line is kept
+    RATES_WARM: bool = os.environ.get("RATES_WARM", "true").lower() not in ("0", "false", "no")   # keep the rates ready, so no customer waits for the fetch
     RATES_TIMEOUT: float = float(os.environ.get("RATES_TIMEOUT", "6"))
     PRODUCT_CARDS_PATH: str = os.environ.get("PRODUCT_CARDS_PATH", "/app/data/product_cards.json")
     PRODUCT_CARD_TEXT_CHARS: int = int(os.environ.get("PRODUCT_CARD_TEXT_CHARS", "6000"))   # product text the model reads

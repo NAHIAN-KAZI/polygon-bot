@@ -222,3 +222,25 @@ def test_the_reply_facts_give_dates_in_words_and_the_movement_only_as_a_percent(
     assert "28 October 2026" in out.say[1]["rate"] and "2026-10-28" not in out.say[1]["rate"]
     assert out.say[1]["movement"].startswith("the market rate of USD (separate from the published rate above) over the last 30 days: it rose")
     assert "Tk" not in out.say[1]["movement"]
+
+
+def test_keep_warm_fills_the_official_table_and_the_usd_trend_before_anyone_asks(monkeypatch):
+    today = dt.date.today()
+    market = {("USD", (today - dt.timedelta(days=d)).isoformat()): 120 + (30 - d) * 0.1 for d in range(1, 31)}
+    market[("USD", "latest")] = 123.2
+    calls = []
+    fake_sources(monkeypatch, market=market, calls=calls)
+    sleeps = []
+
+    async def stop_after_one_round(seconds):
+        sleeps.append(seconds)
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(live_rates.asyncio, "sleep", stop_after_one_round)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(live_rates.keep_warm())
+    assert live_rates._official_cache is not None and ("USD", 30) in live_rates._trend_cache
+    assert sleeps and 60 <= sleeps[0] < live_rates.settings.RATES_TTL        # woken again before the table goes stale
+    calls.clear()
+    asyncio.run(live_rates.lookup(None, None))                                # the first question now fetches nothing
+    assert calls == []

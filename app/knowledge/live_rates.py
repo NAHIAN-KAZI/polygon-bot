@@ -147,6 +147,26 @@ async def trend(code: str, days: int = 30, today: dt.date | None = None) -> dict
     return result
 
 
+async def keep_warm() -> None:
+    """Keep the rates ready: fetch the official table now and again shortly before it would go stale, and the USD
+    trend (what a bare "dollar rate" asks for) when its line is missing or nearly stale, so the customer who asks
+    first does not wait for the fetches. Only memory is filled; a failure is left for the next round."""
+    while True:
+        try:
+            global _official_cache
+            _official_cache = None
+            await official()
+            entry = _trend_cache.get(("USD", 30))
+            if entry is None or time.monotonic() - entry[0] > 0.8 * settings.RATES_TREND_TTL:
+                _trend_cache.pop(("USD", 30), None)
+                await trend("USD", 30)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            logger.warning("exchange rates warm-up failed", exc_info=True)
+        await asyncio.sleep(max(60, 0.8 * settings.RATES_TTL))
+
+
 def clear_cache() -> None:
     global _official_cache
     _official_cache = None

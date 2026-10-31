@@ -2870,14 +2870,22 @@ async def _kb_stream(req: ChatRequest, request_id: str, recent: list[str] | None
         "reranked": found.reranked,
     }))
 
+    if asyncio.isfuture(live_cards):
+        live_cards = await live_cards
     prompt = build_prompt(req.message, hits, found.nearest, live_cards_mod.prompt_block(live_cards) if live_cards else None,
                           reply_language(req.message))
     answer_parts: list[str] = []
+    # Which products the question shows interest in depends on the question and what was found, not on the answer, so it
+    # is read while the answer is written instead of after it (the result event, which carries the card pictures, waits
+    # for it).
+    interest_task = asyncio.ensure_future(_read_product_interest(req.message, _hit_products(hits)))
+    interest_task.add_done_callback(lambda t: t.cancelled() or t.exception())
     try:
         async for token in stream_generate(prompt):
             answer_parts.append(token)
             yield _sse("token", {"token": token})
     except httpx.HTTPError:
+        interest_task.cancel()
         detail = "Generation model (Ollama) failed or became unreachable mid-stream"
         logger.error(json.dumps({"request_id": request_id, "stage": "generation", "detail": detail}))
         yield _sse("error", {"detail": detail})
@@ -2897,7 +2905,7 @@ async def _kb_stream(req: ChatRequest, request_id: str, recent: list[str] | None
     if live_cards:
         # the app draws them as rows of card artwork, each with a details sheet from what the knowledge base says
         kb_payload["cards"] = live_cards_mod.showcase(live_cards, live_cards_mod.merge(product_cards.all_cards(), live_cards))
-    product_tags = await _read_product_interest(req.message, _hit_products(hits))
+    product_tags = await interest_task
     if product_tags:
         kb_payload["products"] = product_tags   # the back office lists these as leads
     if topics is not None:      # what this answer was about, so a follow-up ("this card", "eta") can be understood
@@ -3022,21 +3030,30 @@ async def _advice_stream(req: ChatRequest, request_id: str, customer_identity, t
         return
 
     cards = live_cards_mod.merge(product_cards.all_cards(), await live_cards_mod.current(token, customer_identity))
-    if need is None:
-        need = await advisor_advise.read_need(req.message, _recent_customer_messages(recent_turns), cards)
+    # The customer's figures do not depend on what they asked, so they are fetched while the model reads the question
+    # (the fetch is cached per customer, so a repeat costs nothing either way).
+    snapshot_task = asyncio.ensure_future(advisor_snapshot.get(customer_identity, token))
+    snapshot_task.add_done_callback(lambda t: t.cancelled() or t.exception())      # never "exception was never retrieved"
+    try:
+        if need is None:
+            need = await advisor_advise.read_need(req.message, _recent_customer_messages(recent_turns), cards)
+    except BaseException:
+        snapshot_task.cancel()
+        raise
     wanted_product = need.product
     if use_cases.ADVISOR_INSIGHTS in disabled:
         need = dataclasses.replace(need, spending=False)
     if use_cases.ADVISOR_RECOMMEND in disabled:
         need = dataclasses.replace(need, product=False, kinds=())
     if not need.spending and not need.product:
+        snapshot_task.cancel()
         off = use_cases.ADVISOR_RECOMMEND if wanted_product else use_cases.ADVISOR_INSIGHTS
         async for chunk in finish(_switched_off_outcome(off, "advisor", "advice", None)):
             yield chunk
         return
 
     try:
-        snap = await advisor_snapshot.get(customer_identity, token)
+        snap = await snapshot_task
     except AdapterAuthError:
         async for chunk in finish(_TurnOutcome(
                 "AUTH_REQUIRED", _say("login_needed", request="advice based on their own account"),
@@ -3949,8 +3966,13 @@ async def _chat_stream(req: ChatRequest, authorization: str | None, heard_readin
             result = await _ground_transfer_destination(result, req.message)
             result = await _ground_requested_action(result, req.message)
             result = await _fill_known_from_message(result, req.message)
-            result = await _second_look_apply(result, req.message, customer_identity, req.disabled_use_cases)
-            result = await _named_person_lookup(result, req.message, customer_identity, token)
+            # Two independent checks of a message the classifier could not place: both look only at the message, and a
+            # second look that finds an application leaves nothing for the saved-person lookup (it needs a transfer, a
+            # recharge or an unplaced message), so they run together and the first that changed the result wins.
+            looked, named = await asyncio.gather(
+                _second_look_apply(result, req.message, customer_identity, req.disabled_use_cases),
+                _named_person_lookup(result, req.message, customer_identity, token))
+            result = looked if looked is not result else named
 
     result = _clean_extracted_fields(result)
     result = _normalize_dates(result)
@@ -4066,7 +4088,7 @@ async def _chat_stream(req: ChatRequest, authorization: str | None, heard_readin
                     yield chunk
                 yield _sse("done", {})
                 return
-            live = await live_cards_mod.current(token, customer_identity)
+            live = asyncio.ensure_future(live_cards_mod.current(token, customer_identity))   # while the searches run
             kb_topics = []
             async for chunk in _kb_stream(req, request_id, _recent_customer_messages(recent_turns), live_cards=live,
                                           topics=kb_topics):

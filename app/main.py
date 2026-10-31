@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from fastapi import FastAPI
@@ -8,6 +9,7 @@ from app.banking.taxonomy import initialize_taxonomy
 from app.config import settings
 from app.llm import check_ollama
 from app import catalog
+from app.knowledge import live_rates
 from app.vectorstore import check_qdrant, ensure_collection
 from app.routes import documents, chat, demo_login, tts
 
@@ -29,6 +31,8 @@ async def on_startup() -> None:
     ensure_collection()
     catalog.fail_interrupted()   # a document still "indexing" lost its background task with the last process
     await initialize_taxonomy()
+    if settings.RATES_WARM:
+        app.state.rates_warm = asyncio.create_task(live_rates.keep_warm())
 
 
 @app.get("/health")
